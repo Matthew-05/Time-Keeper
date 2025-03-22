@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Time Summary</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <style>
+      .summary-container {
+        margin-top: 20px;
+        width: 80%;
+        height: 60vh;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      .date-range-picker {
+        margin-bottom: 10px;
+      }
+      .tab-content {
+        display: none;
+      }
+      .tab-content.active {
+        display: block;
+      }
+      .tab-buttons {
+        margin-bottom: 20px;
+      }
+      .tab-button {
+        padding: 10px 20px;
+        margin-right: 10px;
+        border: none;
+        background-color: #f0f0f0;
+        cursor: pointer;
+      }
+      .tab-button.active {
+        background-color: #007bff;
+        color: white;
+      }
+    </style>
+  </head>
+  <body>
+    {% include 'navbar.html' %}
+    <div class="row">
+      <div class="col offset-l1"><h4>Time Summary</h4></div>
+    </div>
+
+    <div class="date-range-picker">
+      <input type="text" id="date-range" placeholder="Select Date Range" />
+    </div>
+
+    <div class="tab-buttons">
+      <button class="tab-button active" data-tab="client">
+        Client Summary
+      </button>
+      <button class="tab-button" data-tab="daily">Daily Summary</button>
+    </div>
+
+    <div class="summary-container tab-content active" id="client-tab">
+      <canvas id="timeChart"></canvas>
+    </div>
+
+    <div class="summary-container tab-content" id="daily-tab">
+      <canvas id="dailyTimeChart"></canvas>
+    </div>
+
+    <script>
+      let clientColorMap = {};
+      let chart;
+      let dailyChart;
+
+      async function updateDailyChart() {
+        const dateRange = document.getElementById("date-range").value;
+        const [startDate, endDate] = dateRange.split(" to ");
+        const response = await fetch(
+          `/api/summary/daily/${startDate}/${endDate}`
+        );
+        const data = await response.json();
+        createDailyChart("dailyTimeChart", "Daily Billable Hours", data);
+      }
+
+      function createDailyChart(canvasId, title, data) {
+        if (dailyChart) {
+          dailyChart.destroy();
+        }
+
+        const hours = data.map((item) => item.total_hours);
+
+        // Calculate 5-day moving average
+        const movingAverage = hours.map((value, index, array) => {
+          const start = Math.max(0, index - 2);
+          const end = Math.min(array.length, index + 3);
+          const window = array.slice(start, end);
+          return window.reduce((a, b) => a + b, 0) / window.length;
+        });
+
+        const ctx = document.getElementById(canvasId).getContext("2d");
+        dailyChart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: data.map((item) => item.date),
+            datasets: [
+              {
+                label: "Total Hours",
+                data: data.map((item) => item.total_hours),
+                borderColor: "rgb(75, 192, 192)",
+                tension: 0.1,
+                fill: false,
+              },
+              {
+                label: "5-Day Moving Average",
+                data: movingAverage,
+                borderColor: "rgba(255, 99, 132, 0.8)",
+                borderDash: [5, 5],
+                fill: false,
+                tension: 0.1,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              title: {
+                display: true,
+                text: title,
+              },
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                title: {
+                  display: true,
+                  text: "Hours",
+                },
+              },
+            },
+          },
+        });
+      }
+
+      flatpickr("#date-range", {
+        mode: "range",
+        dateFormat: "Y-m-d",
+        onChange: function (selectedDates, dateStr, instance) {
+          if (selectedDates.length === 2) {
+            updateChart();
+            updateDailyChart();
+          }
+        },
+      });
+
+      function getClientColor(clientName) {
+        if (!clientColorMap[clientName]) {
+          clientColorMap[clientName] = `hsl(${
+            (Object.keys(clientColorMap).length * 137.5) % 360
+          }, 70%, 60%)`;
+        }
+        return clientColorMap[clientName];
+      }
+
+      async function updateChart() {
+        const dateRange = document.getElementById("date-range").value;
+        const [startDate, endDate] = dateRange.split(" to ");
+        const response = await fetch(
+          `/api/summary/custom/${startDate}/${endDate}`
+        );
+        const data = await response.json();
+        createBarChart("timeChart", "Time Summary", data);
+      }
+
+      function createBarChart(canvasId, title, data) {
+        if (chart) {
+          chart.destroy();
+        }
+
+        data.sort((a, b) => b.total_time - a.total_time);
+        const totalTime = data.reduce((sum, item) => sum + item.total_time, 0);
+        const totalHours = (totalTime / 3600).toFixed(2);
+
+        const ctx = document.getElementById(canvasId).getContext("2d");
+        chart = new Chart(ctx, {
+          type: "bar",
+          data: {
+            labels: data.map((item) => item.client_name),
+            datasets: [
+              {
+                label: "Time Spent (hours)",
+                data: data.map((item) => item.total_time / 3600),
+                backgroundColor: data.map((item) =>
+                  getClientColor(item.client_name)
+                ),
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              title: {
+                display: true,
+                text: `${title} (Total: ${totalHours} hours)`,
+              },
+              legend: {
+                display: false,
+              },
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                title: {
+                  display: true,
+                  text: "Hours",
+                },
+              },
+            },
+          },
+        });
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        const today = new Date();
+        const monday = new Date(today);
+        monday.setDate(today.getDate() - today.getDay() + 1);
+        const friday = new Date(today);
+        friday.setDate(today.getDate() - today.getDay() + 5);
+
+        document.querySelectorAll(".tab-button").forEach((button) => {
+          button.addEventListener("click", () => {
+            document
+              .querySelectorAll(".tab-button")
+              .forEach((b) => b.classList.remove("active"));
+            document
+              .querySelectorAll(".tab-content")
+              .forEach((c) => c.classList.remove("active"));
+
+            button.classList.add("active");
+            document
+              .getElementById(`${button.dataset.tab}-tab`)
+              .classList.add("active");
+          });
+        });
+
+        document
+          .getElementById("date-range")
+          ._flatpickr.setDate([monday, friday]);
+        updateChart();
+        updateDailyChart();
+      });
+    </script>
+  </body>
+</html>

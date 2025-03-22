@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Time Summary</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <style>
+      .summary-container {
+        margin-top: 20px;
+        width: 80%;
+        height: 60vh;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      .date-range-picker {
+        margin-bottom: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    {% include 'navbar.html' %}
+    <div class="row">
+      <div class="col offset-l1"><h4>Time Summary</h4></div>
+    </div>
+
+    <div class="summary-container">
+      <div class="date-range-picker">
+        <input type="text" id="date-range" placeholder="Select Date Range" />
+      </div>
+      <canvas id="timeChart"></canvas>
+    </div>
+
+    <script>
+      let clientColorMap = {};
+      let chart;
+
+      flatpickr("#date-range", {
+        mode: "range",
+        dateFormat: "Y-m-d",
+        onChange: function (selectedDates, dateStr, instance) {
+          if (selectedDates.length === 2) {
+            updateChart();
+          }
+        },
+      });
+
+      function getClientColor(clientName) {
+        if (!clientColorMap[clientName]) {
+          clientColorMap[clientName] = `hsl(${
+            (Object.keys(clientColorMap).length * 137.5) % 360
+          }, 70%, 60%)`;
+        }
+        return clientColorMap[clientName];
+      }
+
+      async function updateChart() {
+        const dateRange = document.getElementById("date-range").value;
+        const [startDate, endDate] = dateRange.split(" to ");
+        const response = await fetch(
+          `/api/summary/custom/${startDate}/${endDate}`
+        );
+        const data = await response.json();
+        createBarChart("timeChart", "Time Summary", data);
+      }
+
+      function createBarChart(canvasId, title, data) {
+        if (chart) {
+          chart.destroy();
+        }
+
+        data.sort((a, b) => b.total_time - a.total_time);
+        const totalTime = data.reduce((sum, item) => sum + item.total_time, 0);
+        const totalHours = (totalTime / 3600).toFixed(2);
+
+        const ctx = document.getElementById(canvasId).getContext("2d");
+        chart = new Chart(ctx, {
+          type: "bar",
+          data: {
+            labels: data.map((item) => item.client_name),
+            datasets: [
+              {
+                label: "Time Spent (hours)",
+                data: data.map((item) => item.total_time / 3600),
+                backgroundColor: data.map((item) =>
+                  getClientColor(item.client_name)
+                ),
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              title: {
+                display: true,
+                text: `${title} (Total: ${totalHours} hours)`,
+              },
+              legend: {
+                display: false,
+              },
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                title: {
+                  display: true,
+                  text: "Hours",
+                },
+              },
+            },
+          },
+        });
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        const today = new Date();
+        const monday = new Date(today);
+        monday.setDate(today.getDate() - today.getDay() + 1);
+        const friday = new Date(today);
+        friday.setDate(today.getDate() - today.getDay() + 5);
+
+        document
+          .getElementById("date-range")
+          ._flatpickr.setDate([monday, friday]);
+        updateChart();
+      });
+    </script>
+  </body>
+</html>

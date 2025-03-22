@@ -1,0 +1,108 @@
+<!-- navbar.html -->
+ <head>
+  <style>
+          body {
+        font-family: Arial, sans-serif;
+      }
+  </style>
+ </head>
+<link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css"
+    />
+     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+
+<nav class="navbar">
+  <div class="navbar-container container">
+    <ul class="navbar-nav" style="margin-right: auto">
+      <li class="nav-item">
+        <a class="nav-link" href="/">Home</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="/task_browser">Tasks</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="/summary">Summary</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="/client_manager">Client Manager</a>
+      </li>
+
+    </ul>
+    <ul class="navbar-nav right" style="padding-right: 20px;">
+      <li class="nav-item" style="margin-right: 20px;">
+        <span class="nav-link">Loaded at: <span id="load-time">Test</span></span>
+      </li>
+      <li class="nav-item">
+        <span class="nav-link"
+          ><span id="timer">Loading...</span>
+      </li>
+    </ul>
+  </div>
+</nav>
+
+<div class="row"></div>
+<div class="row"></div>
+<script>
+  let clientTimer;
+
+  document.addEventListener("DOMContentLoaded", function () {
+    checkForUnfinishedTask();
+    const loadTime = new Date();
+const loadTimeString = loadTime.toLocaleString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true });
+document.getElementById("load-time").textContent = loadTimeString;
+  });
+
+  function startTimer(startingTime) {
+    clientTimer = setInterval(function () {
+      startingTime++;
+      updateTimerDisplay(startingTime);
+    }, 1000);
+  }
+
+  function stopTimer() {
+    clearInterval(clientTimer);
+  }
+
+  function secondsSinceMidnight(timeString) {
+    const [hours, minutes, seconds] = timeString.split(':').map(Number);
+    return hours * 3600 + minutes * 60 + seconds;
+}
+
+  async function checkForUnfinishedTask() {
+    const response = await fetch("/unfinished_tasks");
+        const tasks = await response.json();
+        if (tasks.length > 0) {
+          const taskStartTime = secondsSinceMidnight(tasks[0].start_time);
+          const now1 = new Date();
+          const startOfDay = new Date(now1.getFullYear(), now1.getMonth(), now1.getDate());
+          const currentSeconds1 = (now1 - startOfDay) / 1000; // Convert milliseconds to seconds
+
+          const startingTime = currentSeconds1 - taskStartTime;
+          console.log(currentSeconds1)
+          console.log(taskStartTime)
+          startTimer(startingTime);
+        } else {
+          updateTimerDisplay("No timer running")
+      }}
+  
+
+  function updateTimerDisplay(seconds) {
+    if (seconds === "No timer running") {
+      document.getElementById("timer").innerText = "No timer running";
+    } else {
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const remainingSeconds = parseInt(seconds % 60);
+
+      const formattedTime = `Task Running: ${hours.toString().padStart(2, "0")}:${minutes
+        .toString()
+        .padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
+
+      console.log(typeof(formattedTime))
+
+      document.getElementById("timer").innerText = formattedTime;
+    }
+  }
+</script>
