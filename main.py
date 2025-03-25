@@ -561,6 +561,38 @@ def get_time_summary(period, client_id):
         'total_time': summary.total_time if summary.total_time else 0
     })
 
+@app.route('/update_task/<int:task_id>', methods=['PUT'])
+def update_task(task_id):
+    data = request.json
+    task = Task_Item.query.get_or_404(task_id)
+    
+    # Check for time overlaps
+    new_start = datetime.strptime(data['start_time'], '%I:%M %p').time()
+    new_end = datetime.strptime(data['end_time'], '%I:%M %p').time()
+    
+    overlapping_tasks = Task_Item.query.filter(
+        Task_Item.date == task.date,
+        Task_Item.id != task_id,
+        Task_Item.start_time < new_end,
+        Task_Item.end_time > new_start
+    ).all()
+    
+    if overlapping_tasks:
+        return jsonify({'error': 'Task times overlap with existing tasks'}), 400
+    
+    task.start_time = new_start
+    task.end_time = new_end
+    task.client_id = data['client_id']
+    
+    db.session.commit()
+    return jsonify({'success': True})
+
+@app.route('/task/<int:task_id>', methods=['DELETE'])
+def delete_task(task_id):
+    task = Task_Item.query.get_or_404(task_id)
+    db.session.delete(task)
+    db.session.commit()
+    return jsonify({'success': True})
 
 # Define the global stop event
 stop_event = threading.Event()

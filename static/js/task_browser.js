@@ -3,9 +3,11 @@ import { TimeKeeper } from './base.js';
 export class TaskBrowser extends TimeKeeper {
     constructor() {
         super();
+        this.isLoading = false;
         this.initializeElements();
         this.initializeTimePicker();
         this.fetchInitialData();
+        this.initializeTaskEditing();
     }
 
     initializeElements() {
@@ -16,6 +18,101 @@ export class TaskBrowser extends TimeKeeper {
             onChange: () => this.fetchTasks()
         });
     }
+
+    initializeTaskEditing() {
+        document.addEventListener('click', e => {
+            // Handle delete button clicks separately
+            if (e.target.classList.contains('delete-task-btn')) {
+                if (confirm('Are you sure you want to delete this task?')) {
+                    this.handleTaskDelete(e.target.closest('tr'));
+                }
+                return; // Prevent event bubbling
+            }
+
+            // Handle other button clicks
+            if (e.target.classList.contains('edit-task-btn')) {
+                const row = e.target.closest('tr');
+                this.enableEditMode(row);
+            }
+            if (e.target.classList.contains('save-task-btn')) {
+                this.handleTaskUpdate(e.target.closest('tr'));
+            }
+            if (e.target.classList.contains('cancel-task-btn')) {
+                this.disableEditMode(e.target.closest('tr'));
+            }
+        });
+    }
+
+
+
+    async handleTaskDelete(row) {
+        const taskId = row.dataset.taskId;
+        try {
+            await this.fetchFromAPI(`/task/${taskId}`, {
+                method: 'DELETE'
+            });
+            this.showToast('Task deleted successfully');
+            await this.fetchTasks();
+        } catch (error) {
+            this.showToast('Failed to delete task', 'error');
+        }
+    }
+
+
+
+    enableEditMode(row) {
+        row.querySelectorAll('.time-display').forEach(span => span.classList.add('hidden'));
+        row.querySelectorAll('.task-time-picker').forEach(input => input.classList.remove('hidden'));
+        row.querySelector('.edit-task-btn').classList.add('hidden');
+        row.querySelector('.edit-controls').classList.remove('hidden');
+    }
+
+    disableEditMode(row) {
+        row.querySelectorAll('.time-display').forEach(span => span.classList.remove('hidden'));
+        row.querySelectorAll('.task-time-picker').forEach(input => input.classList.add('hidden'));
+        row.querySelector('.edit-task-btn').classList.remove('hidden');
+        row.querySelector('.edit-controls').classList.add('hidden');
+    }
+
+
+
+
+    async handleTaskUpdate(row) {
+        const taskId = row.dataset.taskId;
+        const startTime = row.querySelector('.start-time').value;
+        const endTime = row.querySelector('.end-time').value;
+        const clientId = parseInt(row.querySelector('.client-select').value);
+
+        try {
+            await this.fetchFromAPI(`/update_task/${taskId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    start_time: startTime,
+                    end_time: endTime,
+                    client_id: clientId
+                })
+            });
+
+            this.showToast('Task updated successfully');
+            await this.fetchTasks();
+            this.disableEditMode(row);
+        } catch (error) {
+            this.showToast('Failed to update task: ' + error.message, 'error');
+        }
+    }
+
+
+    getClientOptions(selectedClientId) {
+        return this.clients.map(client => `
+            <option value="${client.id}" ${client.id === selectedClientId ? 'selected' : ''}>
+                ${client.name}
+            </option>
+        `).join('');
+    }
+
+
+
 
     async fetchInitialData() {
         await this.fetchTasks();
@@ -52,14 +149,34 @@ export class TaskBrowser extends TimeKeeper {
     }
 
     async fetchTasks() {
+        if (this.isLoading) return;
+
+        this.isLoading = true;
+        const timelineContainer = document.getElementById('timeline');
+        const tbody = document.getElementById('tasks-tbody');
+
+        tbody.innerHTML = `
+        <tr>
+            <td colspan="4">
+                <div class="flex items-center justify-center py-4">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                </div>
+            </td>
+        </tr>
+    `;
         try {
             const response = await this.fetchFromAPI(`/tasks/${this.selectedDate.value}`);
             this.renderTasks(response);
             this.renderTimeline(response, this.selectedDate.value);
         } catch (error) {
             this.showToast('Error fetching tasks', 'red');
+        } finally {
+            this.isLoading = false;
         }
     }
+
+
+
 
 
 
@@ -119,35 +236,43 @@ export class TaskBrowser extends TimeKeeper {
         const tbody = document.getElementById('tasks-tbody');
         tbody.innerHTML = '';
 
-        const clients = this.aggregateByClient(tasks);
-        let totalMinutesForAll = 0;
-        let totalFractionalHours = 0;
+        // First fetch all clients for the dropdown
+        this.fetchFromAPI('/clients')
+            .then(clients => {
+                this.clients = clients;
 
-        clients.forEach((client) => {
-            const totalMinutes = this.totalNumberofMinutesPerClient(client.tasks);
-            totalMinutesForAll += totalMinutes;
-            const fractionalHours = this.totalTimeSpentToFractionalHours(totalMinutes);
-            totalFractionalHours += fractionalHours;
-            const difference = fractionalHours * 60 - totalMinutes;
+                const clientGroups = this.aggregateByClient(tasks);
+                let totalMinutesForAll = 0;
+                let totalFractionalHours = 0;
 
-            const aggregateRow = document.createElement('tr');
-            aggregateRow.className = 'hover:bg-gray-50 cursor-pointer';
-            aggregateRow.innerHTML = `
-                <td class="p-3 border">${client.name}</td>
-                <td class="p-3 border">${totalMinutes} minutes</td>
-                <td class="p-3 border">${fractionalHours} hrs.</td>
-                <td class="p-3 border ${difference < 0 ? 'text-red-600' : 'text-green-600'}">${difference} minutes</td>
-            `;
+                clientGroups.forEach(client => {
+                    const totalMinutes = this.totalNumberofMinutesPerClient(client.tasks);
+                    totalMinutesForAll += totalMinutes;
+                    const fractionalHours = this.totalTimeSpentToFractionalHours(totalMinutes);
+                    totalFractionalHours += fractionalHours;
 
-            aggregateRow.addEventListener('click', () => this.toggleDetailTable(client.id));
-            tbody.appendChild(aggregateRow);
+                    // Add the summary row
+                    const summaryRow = document.createElement('tr');
+                    summaryRow.className = 'hover:bg-gray-50 cursor-pointer';
+                    summaryRow.innerHTML = `
+                        <td class="p-3 border">${client.name}</td>
+                        <td class="p-3 border">${totalMinutes} minutes</td>
+                        <td class="p-3 border">${fractionalHours} hrs.</td>
+                        <td class="p-3 border">${fractionalHours * 60 - totalMinutes} minutes</td>
+                    `;
+                    summaryRow.addEventListener('click', () => this.toggleDetailTable(client.id));
+                    tbody.appendChild(summaryRow);
 
-            const detailRow = this.createDetailRow(client);
-            tbody.appendChild(detailRow);
-        });
+                    // Add the detail row
+                    const detailRow = this.createDetailRow(client);
+                    tbody.appendChild(detailRow);
+                });
 
-        this.updateSummaryValues(totalMinutesForAll, totalFractionalHours);
+                this.updateSummaryValues(totalMinutesForAll, totalFractionalHours);
+            });
     }
+
+
 
     aggregateByClient(tasks) {
         const clientMap = {};
@@ -184,15 +309,33 @@ export class TaskBrowser extends TimeKeeper {
                     <th class="p-2 text-left border">End Time</th>
                     <th class="p-2 text-left border">Description</th>
                     <th class="p-2 text-left border">Time Spent</th>
+                    <th class="p-2 text-left border">Actions</th>
                 </tr>
             </thead>
             <tbody>
                 ${client.tasks.map(task => `
-                    <tr>
-                        <td class="p-2 border">${this.convertTo12HourFormat(task.start_time)}</td>
-                        <td class="p-2 border">${task.end_time ? this.convertTo12HourFormat(task.end_time) : ''}</td>
+                    <tr data-task-id="${task.id}">
+                        <td class="p-2 border">
+                            <span class="time-display">${this.convertTo12HourFormat(task.start_time)}</span>
+                            <input type="text" class="task-time-picker start-time hidden" value="${task.start_time}">
+                        </td>
+                        <td class="p-2 border">
+                            <span class="time-display">${task.end_time ? this.convertTo12HourFormat(task.end_time) : ''}</span>
+                            <input type="text" class="task-time-picker end-time hidden" value="${task.end_time || ''}">
+                        </td>
                         <td class="p-2 border">${task.description || ''}</td>
                         <td class="p-2 border">${this.getMinuteDifference(task.end_time, task.start_time)} minutes</td>
+<td class="p-2 border">
+    <button class="edit-task-btn bg-blue-500 text-white px-2 py-1 rounded">Edit</button>
+    <button class="delete-task-btn bg-red-500 text-white px-2 py-1 rounded">Delete</button>
+    <div class="edit-controls hidden">
+        <select class="client-select">
+            ${this.getClientOptions(task.client_id)}
+        </select>
+        <button class="save-task-btn bg-green-500 text-white px-2 py-1 rounded">Save</button>
+        <button class="cancel-task-btn bg-gray-500 text-white px-2 py-1 rounded">Cancel</button>
+    </div>
+</td>
                     </tr>
                 `).join('')}
             </tbody>
@@ -200,8 +343,25 @@ export class TaskBrowser extends TimeKeeper {
 
         detailCell.appendChild(detailTable);
         detailRow.appendChild(detailCell);
+
+        // Initialize time pickers after adding to DOM
+        setTimeout(() => {
+            detailRow.querySelectorAll('.task-time-picker').forEach(input => {
+                flatpickr(input, {
+                    enableTime: true,
+                    noCalendar: true,
+                    dateFormat: "h:i K",
+                    time_24hr: false,
+                    minuteIncrement: 1
+                });
+
+
+            });
+        }, 0);
+
         return detailRow;
     }
+
 
     toggleDetailTable(clientId) {
         const detailRow = document.getElementById(`detail-row-${clientId}`);
@@ -273,7 +433,13 @@ export class TaskBrowser extends TimeKeeper {
 
     renderTimeline(tasks, selectedDate) {
         const container = document.getElementById('timeline');
-        container.innerHTML = '';
+        container.innerHTML = `
+        <div class="flex items-center justify-center h-[200px]">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+            <span class="ml-2 text-gray-600">Loading timeline...</span>
+        </div>
+    `;
+
 
         // Create a color map for clients
         const clientColors = {};
@@ -317,6 +483,8 @@ export class TaskBrowser extends TimeKeeper {
             min: `${selectedDate}T00:00:00`,
             max: `${selectedDate}T23:59:59`
         };
+
+        container.innerHTML = '';
 
         const timeline = new vis.Timeline(
             container,
