@@ -1,0 +1,22 @@
+.vis-timeline {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin: 20px 0;
+}
+
+.completed-task {
+    background-color: #4CAF50;
+    color: white;
+    border-color: #388E3C;
+}
+
+.ongoing-task {
+    background-color: #2196F3;
+    color: white;
+    border-color: #1976D2;
+}
+
+.vis-timeline .vis-item {
+    border-radius: 3px;
+    padding: 5px;
+}

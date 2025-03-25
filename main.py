@@ -172,13 +172,19 @@ def get_day_data():
     submitted_date = data.get('date')
     if submitted_date:
         try:
-            print(submitted_date)
             date_obj = datetime.strptime(submitted_date, '%Y-%m-%d').date()
             day_data = TimeTracking.query.filter(TimeTracking.date == date_obj).first()
-            print(day_data)
+            
+            # Handle case where no TimeTracking entry exists
+            if not day_data:
+                return jsonify({
+                    "start_time": None,
+                    "end_time": None
+                })
+            
             day_data = {
-                "start_time" : day_data.start_time.strftime('%H:%M:%S') if day_data.start_time else None,
-                "end_time" : day_data.end_time.strftime('%H:%M:%S') if day_data.end_time else None,
+                "start_time": day_data.start_time.strftime('%H:%M:%S') if day_data.start_time else None,
+                "end_time": day_data.end_time.strftime('%H:%M:%S') if day_data.end_time else None,
             }
             return jsonify(day_data)
         except ValueError:
@@ -187,6 +193,17 @@ def get_day_data():
         return jsonify({'error': 'Date is required.'}), 400
 
 
+@app.route('/task_browser_initial_data/<date>')
+def get_initial_data(date):
+    tasks = Task_Item.query.filter_by(date=date).all()
+    breaks = BreakTracking.query.filter_by(date=date).all()
+    day_status = check_day_status()
+    
+    return jsonify({
+        'tasks': tasks,
+        'breaks': breaks, 
+        'dayStatus': day_status
+    })
 
 @app.route('/task_browser')
 def task_browser():

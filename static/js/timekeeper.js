@@ -317,50 +317,14 @@ export class TimeKeeperIndex extends TimeKeeper {
         }
     }
 
-
-
-
-
-
-
-
-
-
     showStartTaskForm() {
         this.clientInput.style.display = 'block';
-        this.initializeMaterializeInputs();
     }
 
     hideInputFields() {
         this.clientInput.style.display = 'none';
         this.typeInput.style.display = 'none';
         this.descriptionInput.style.display = 'none';
-    }
-
-
-
-    initializeMaterializeInputs() {
-        // Initialize all Materialize form inputs
-        M.updateTextFields();
-
-        // Handle input labels and styling
-        const inputs = document.querySelectorAll('.input-field input');
-        inputs.forEach(input => {
-            const label = input.nextElementSibling;
-            if (input.value) {
-                label?.classList.add('active');
-            }
-
-            input.addEventListener('focus', () => {
-                label?.classList.add('active');
-            });
-
-            input.addEventListener('blur', () => {
-                if (!input.value) {
-                    label?.classList.remove('active');
-                }
-            });
-        });
     }
 
     updateButtonVisibility(state) {
