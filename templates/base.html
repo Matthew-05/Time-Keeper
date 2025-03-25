@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>
+      {% block title %}
+        Time Keeper
+      {% endblock %}
+    </title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Heroicons (replacement for Material Icons) -->
+    <link href="https://unpkg.com/@heroicons/react@2.0.18/outline/esm/index.js" rel="stylesheet" />
+
+    {% block additional_styles %}
+
+    {% endblock %}
+  </head>
+  <body class="bg-gray-50">
+    {% include 'navbar.html' %}
+
+    <main class="container mx-auto px-4">
+      {% block content %}
+
+      {% endblock %}
+    </main>
+
+    <!-- Time Picker Replacement -->
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" />
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css" />
+    <script src="https://cdn.jsdelivr.net/npm/choices.js/public/assets/scripts/choices.min.js"></script>
+    <!-- Base Scripts -->
+    <script src="{{ url_for('static', filename='js/base.js') }}" type="module"></script>
+
+    {% block page_scripts %}
+
+    {% endblock %}
+  </body>
+</html>

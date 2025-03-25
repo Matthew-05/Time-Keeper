@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Time Keeper</title>
+    <style>
+      #action-button,
+      #complete-button,
+      #start-button,
+      #start-day-button,
+      #end-day-button,
+      #start-break-button,
+      #end-break-button,
+      #reopen-day-button {
+        display: none;
+      }
+      #start-break-button,
+      #end-break-button {
+        display: none;
+      }
+      .btn {
+        max-width: fit-content;
+      }
+      #end-break-button,
+      #reopen-day-button,
+      #start-day-button {
+        max-width: none;
+      }
+      .inverse-row {
+        margin-top: -60px !important;
+      }
+    </style>
+  </head>
+  <body>
+    {% include 'navbar.html' %}
+    <div class="row">
+      <div class="col offset-l1"><h4>Time Manager</h4></div>
+    </div>
+
+    <div class="row">
+      <div class="col s6 offset-s3">
+        <div class="input-field" style="margin-left: 25%; margin-right: 25%">
+          <input
+            type="text"
+            id="autocomplete-input"
+            class="autocomplete"
+            placeholder="Start typing client"
+          />
+          <label style="display: none" for="autocomplete-input">Client</label>
+        </div>
+        <div class="input-field" style="margin-left: 25%; margin-right: 25%">
+          <input
+            type="text"
+            id="type-input"
+            placeholder="Type (i.e. audit, review, etc.)"
+            style="display: none"
+          />
+          <label for="type-input" style="display: none">Type</label>
+        </div>
+        <div class="input-field" style="margin-left: 25%; margin-right: 25%">
+          <input
+            type="text"
+            id="description-input"
+            placeholder="Description"
+            style="display: none"
+          />
+        </div>
+
+        <label for="description-input" style="display: none">Description</label>
+
+        <div
+          id="timepicker-container"
+          class="center-align"
+          style="margin-left: 40%; margin-right: 40%"
+        >
+          <input
+            type="text"
+            class="timepicker center-align"
+            style="font-size: 28px; cursor: pointer"
+            id="timepicker"
+          />
+          <div id="lowestTimeAllowed"></div>
+        </div>
+
+        <div
+          style="
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 30px;
+          "
+        >
+          <a
+            class="waves-effect waves-light btn"
+            id="action-button"
+            onclick="handleAction()"
+            >Add Task</a
+          >
+          <div class="row"></div>
+          <a class="waves-effect waves-light btn" id="complete-button"
+            >Complete Task</a
+          >
+          <a
+            class="waves-effect waves-light btn"
+            id="start-button"
+            onclick="startTask()"
+            ><i class="material-icons left" style="font-size: 30px"
+              >play_arrow</i
+            >Start Task</a
+          >
+        </div>
+
+        <div class="row"></div>
+        <div class="row"></div>
+        <div class="row"></div>
+        <div style="display: flex; justify-content: space-between">
+          <div>
+            <a
+              class="waves-effect waves-light btn yellow darken-2"
+              id="start-break-button"
+              onclick="startBreak()"
+            >
+              <i class="material-icons left" style="font-size: 30px"
+                >timer_off</i
+              >
+              Start Break
+            </a>
+          </div>
+          <div>
+            <a
+              class="waves-effect waves-light btn deep-orange accent-4"
+              id="end-day-button"
+            >
+              <i class="material-icons left" style="font-size: 30px">publish</i>
+              End Day
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="row container">
+      <div class="col s4 offset-s4 inverse-row">
+        <a
+          class="waves-effect waves-light btn"
+          id="end-break-button"
+          onclick="endBreak()"
+          >End Break</a
+        >
+
+        <a class="waves-effect waves-light btn" id="start-day-button"
+          >Start Day</a
+        >
+        <a
+          class="waves-effect waves-light btn"
+          id="reopen-day-button"
+          onclick="reopenDay()"
+          >Re-open Day</a
+        >
+      </div>
+    </div>
+
+    <div id="dropdown" class="dropdown-content"></div>
+    <script>
+      const input = document.getElementById("client-input");
+      const typeInput = document.getElementById("type-input");
+      const descriptionInput = document.getElementById("description-input");
+      const actionButton = document.getElementById("action-button");
+      const completeButton = document.getElementById("complete-button");
+      const startButton = document.getElementById("start-button");
+      const startBreakButton = document.getElementById("start-break-button");
+      const endBreakButton = document.getElementById("end-break-button");
+      const dropdown = document.getElementById("dropdown");
+      let clients = [];
+
+      var autocompleteInput = document.getElementById("autocomplete-input");
+
+      function timeStringToMinutes(time) {
+        console.log("passed string:", time);
+        // Split the time string into hours and minutes
+        const [hoursStr, minutesStr] = time.split(":");
+
+        // Convert hours and minutes to numbers
+        const hours = parseInt(hoursStr, 10);
+        const minutes = parseInt(minutesStr, 10);
+
+        // Calculate total minutes
+        const totalMinutes = hours * 60 + minutes;
+
+        console.log(totalMinutes);
+
+        return totalMinutes;
+      }
+
+      document.addEventListener("DOMContentLoaded", function () {
+        getMostRecentEndTimeFromBackend();
+
+        var elems = document.querySelectorAll(".timepicker");
+        var instances = M.Timepicker.init(elems, {
+          twelveHour: true, // Use 12-hour format
+          onCloseStart: function () {
+            var selectedTime = document.getElementById("timepicker").value;
+            var currentTime = getCurrentTimeIn12HourFormat();
+            var mostRecentEndTime = getMostRecentEndTimeFromBackend();
+
+            if (selectedTime.startsWith("0")) {
+              selectedTime = selectedTime.substring(1);
+              document.getElementById("timepicker").value = selectedTime;
+            } else {
+              document.getElementById("timepicker").value = selectedTime;
+            }
+          },
+          onCloseEnd: function () {
+            var selectedTime = document.getElementById("timepicker").value;
+            var currentTime = getCurrentTimeIn12HourFormat();
+            var mostRecentEndTime = getMostRecentEndTimeFromBackend();
+
+            if (selectedTime.startsWith("0")) {
+              selectedTime = selectedTime.substring(1);
+              document.getElementById("timepicker").value = selectedTime;
+            } else {
+              document.getElementById("timepicker").value = selectedTime;
+            }
+
+            var dateObj = new Date("2000-01-01 " + selectedTime);
+
+            // Extract hours and minutes
+            var hours24 = dateObj.getHours();
+            var minutes = dateObj.getMinutes();
+
+            // Format hours and minutes to ensure leading zeros if necessary
+            var hours24Str = hours24.toString().padStart(2, "0");
+            var minutesStr = minutes.toString().padStart(2, "0");
+
+            // Construct the 24-hour time string
+            var selectedTime24h = hours24Str + ":" + minutesStr;
+
+            let correctDate = new Date();
+            const hoursb = correctDate.getHours().toString().padStart(2, "0");
+            const minutesb = correctDate
+              .getMinutes()
+              .toString()
+              .padStart(2, "0");
+            const timeString = `${hoursb}:${minutesb}`;
+            console.log("selected time", selectedTime24h);
+            console.log("most recent end time", mostRecentEndTime);
+            console.log("now", timeString);
+
+            if (
+              mostRecentEndTime &&
+              timeStringToMinutes(selectedTime24h) <
+                timeStringToMinutes(mostRecentEndTime)
+            ) {
+              M.toast({
+                html: "Selected time cannot be earlier than the most recent action.",
+                classes: "red",
+              });
+              document.getElementById("timepicker").value = currentTime;
+            }
+            console.log("selected time: ", timeStringToMinutes(selectedTime));
+            console.log("current time: ", timeStringToMinutes(timeString));
+            console.log("now, again: ", timeString);
+            if (
+              timeStringToMinutes(selectedTime24h) >
+              timeStringToMinutes(timeString)
+            ) {
+              M.toast({
+                html: "Selected time cannot be later than the current time.",
+                classes: "red",
+              });
+              document.getElementById("timepicker").value = currentTime;
+            }
+          },
+        });
+
+        document.getElementById("timepicker").value =
+          getCurrentTimeIn12HourFormat();
+      });
+
+      function getMostRecentEndTimeFromBackend() {
+        // Make an AJAX call to your Flask endpoint to get the most recent end time
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "/most_recent_end_time", false); // Synchronous for simplicity
+        xhr.send(null);
+
+        if (xhr.status === 200) {
+          var response = JSON.parse(xhr.responseText);
+          var dateObj = new Date("2000-01-01 " + response.mostRecentEndTime);
+          var hours = dateObj.getHours();
+          var minutes = dateObj.getMinutes();
+          var ampm = hours >= 12 ? "PM" : "AM";
+          hours = hours % 12;
+          hours = hours ? hours : 12; // Handle 0 as 12 AM
+          minutes = minutes < 10 ? "0" + minutes : minutes; // Add leading zero for minutes
+          var mostRecentEndTime12h = hours + ":" + minutes + " " + ampm;
+
+          document.getElementById(
+            "lowestTimeAllowed"
+          ).innerHTML = `Min. time: ${mostRecentEndTime12h}`;
+          return response.mostRecentEndTime;
+        } else {
+          return null;
+        }
+      }
+
+      function getCurrentTimeIn12HourFormat() {
+        const now = new Date();
+        let hours = now.getHours();
+        let minutes = now.getMinutes();
+        let ampm = hours >= 12 ? "PM" : "AM";
+
+        // Convert hours to 12-hour format
+        hours = hours % 12;
+        hours = hours ? hours : 12; // Handle 0 as 12 PM
+
+        // Format hours and minutes to ensure two digits (e.g., "09:05" instead of "9:5")
+        hours = hours < 10 ? "" + hours : hours;
+        minutes = minutes < 10 ? "0" + minutes : minutes;
+
+        return `${hours}:${minutes} ${ampm}`;
+      }
+      document.addEventListener("DOMContentLoaded", function () {
+        const inputField = document.getElementById("autocomplete-input");
+        const autocompleteInstance = M.Autocomplete.init(inputField, {
+          data: {},
+          onAutocomplete: function (val) {
+            // Callback function when value is autocompleted
+          },
+          minLength: 0,
+        });
+
+        inputField.addEventListener("input", function () {
+          const query = inputField.value;
+          if (query.length >= 1) {
+            fetch(`/autocomplete?query=${query}`)
+              .then((response) => response.json())
+              .then((data) => {
+                let autocompleteData = {};
+                data.forEach(function (item) {
+                  autocompleteData[item] = null; // You can add an image URL here instead of null if you want
+                });
+                autocompleteInstance.updateData(autocompleteData);
+              });
+          }
+        });
+      });
+
+      async function startTask() {
+        const clientName = autocompleteInput.value;
+        const selectedTime = document.getElementById("timepicker").value;
+
+        if (!clientName) {
+          M.toast({
+            html: `Please select a client.`,
+            classes: "yellow",
+          });
+          return;
+        }
+
+        // Get current time in 24h format
+        let now = new Date();
+        const currentHours = now.getHours().toString().padStart(2, "0");
+        const currentMinutes = now.getMinutes().toString().padStart(2, "0");
+        const currentTime = `${currentHours}:${currentMinutes}`;
+
+        // Convert selected time to 24h for comparison
+        var dateObj = new Date("2000-01-01 " + selectedTime);
+        var hours24 = dateObj.getHours().toString().padStart(2, "0");
+        var minutes = dateObj.getMinutes().toString().padStart(2, "0");
+        var selectedTime24h = `${hours24}:${minutes}`;
+
+        if (selectedTime24h !== currentTime) {
+          if (
+            !confirm(
+              `Selected time (${selectedTime}) differs from current time (${currentTime}). Continue with selected time?`
+            )
+          ) {
+            return;
+          }
+        }
+
+        // Rest of your existing startTask code
+        const startDateUTC = now.toISOString().split("T")[0];
+        const startTimeUTC = now.toISOString().split("T")[1].split(".")[0];
+
+        const response = await fetch("/add_unfinished_task", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            client: clientName,
+            start_date: startDateUTC,
+            startTime: selectedTime,
+          }),
+        });
+
+        if (response.ok) {
+          autocompleteInput.value = "";
+          typeInput.value = "";
+          descriptionInput.value = "";
+          location.reload();
+        } else {
+          M.toast({
+            html: `Failed to start the task.`,
+            classes: "red",
+          });
+        }
+      }
+
+      async function completeTask(taskId) {
+        const clientName = autocompleteInput.value;
+        const selectedTime = document.getElementById("timepicker").value;
+
+        if (!clientName) {
+          M.toast({
+            html: `Please select a client.`,
+            classes: "yellow",
+          });
+          return;
+        }
+
+        // Get current time in 24h format
+        let now = new Date();
+        const currentHours = now.getHours().toString().padStart(2, "0");
+        const currentMinutes = now.getMinutes().toString().padStart(2, "0");
+        const currentTime = `${currentHours}:${currentMinutes}`;
+
+        // Convert selected time to 24h for comparison
+        var dateObj = new Date("2000-01-01 " + selectedTime);
+        var hours24 = dateObj.getHours().toString().padStart(2, "0");
+        var minutes = dateObj.getMinutes().toString().padStart(2, "0");
+        var selectedTime24h = `${hours24}:${minutes}`;
+
+        if (selectedTime24h !== currentTime) {
+          if (
+            !confirm(
+              `Selected time (${selectedTime}) differs from current time (${currentTime}). Continue with selected time?`
+            )
+          ) {
+            return;
+          }
+        }
+
+        const response = await fetch(`/complete_task`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            client: autocompleteInput.value,
+            type: typeInput.value,
+            description: descriptionInput.value,
+            endTime: selectedTime,
+            taskID: taskId,
+          }),
+        });
+
+        if (response.ok) {
+          M.toast({
+            html: `Task completed successfully for client: ${clientName}`,
+            classes: "green",
+          });
+          autocompleteInput.value = "";
+          typeInput.value = "";
+          descriptionInput.value = "";
+          location.reload();
+        } else {
+          M.toast({
+            html: `Failed to complete the task.`,
+            classes: "red",
+          });
+        }
+      }
+
+      async function checkUnfinishedTasks() {
+        const response = await fetch("/unfinished_tasks");
+        const tasks = await response.json();
+        if (tasks.length > 0) {
+          console.log("Unfinished task found.");
+
+          // Show the form fields and the complete task button
+          typeInput.style.display = "block";
+          descriptionInput.style.display = "block";
+          actionButton.style.display = "none";
+          const taskId = tasks[0].id;
+          document.getElementById("complete-button").dataset.taskId = taskId;
+
+          completeButton.style.display = "block";
+
+          // Pre-fill client input with the client of the unfinished task
+          autocompleteInput.value = tasks[0].client; // Assuming only one unfinished task at a time
+        } else {
+          console.log("No unfinished tasks found.");
+
+          // Hide the form fields and the complete task button
+          typeInput.style.display = "none";
+          descriptionInput.style.display = "none";
+          actionButton.style.display = "none";
+          completeButton.style.display = "none";
+
+          // Show the start task button
+          startButton.style.display = "block";
+        }
+      }
+      document
+        .getElementById("complete-button")
+        .addEventListener("click", function () {
+          const taskId = this.dataset.taskId;
+          completeTask(taskId);
+        });
+
+      // Call checkUnfinishedTasks on page load
+      document.addEventListener("DOMContentLoaded", checkUnfinishedTasks);
+      async function checkDayStatus() {
+        console.log("Checking");
+        const response = await fetch("/check_day_status");
+        const { dayStarted, unfinishedTasksExist, dayEnded, breakTimeStarted } =
+          await response.json();
+
+        console.log(
+          "day started:",
+          dayStarted,
+          "unfinished tasks exist",
+          unfinishedTasksExist,
+          "day ended",
+          dayEnded,
+          "break time started",
+          breakTimeStarted
+        );
+
+        if (dayStarted && !dayEnded && !breakTimeStarted) {
+          if (unfinishedTasksExist) {
+            console.log("Running task detected");
+            // Show the complete button for unfinished tasks
+            document.getElementById("complete-button").style.display = "block";
+            if (autocompleteInput.value.length > 0) {
+              console.log(autocompleteInput.value);
+              document
+                .querySelector('label[for="autocomplete-input"]')
+                .classList.add("active");
+            }
+          } else {
+            console.log("Day open, no running tasks");
+            // Show the end day button if there are no unfinished tasks
+            document
+              .querySelector('label[for="autocomplete-input"]')
+              .removeAttribute("style");
+
+            document.getElementById("end-day-button").style.display = "block";
+          }
+          if (!breakTimeStarted && !unfinishedTasksExist) {
+            startBreakButton.style.display = "block";
+          } else if (breakTimeStarted) {
+            autocompleteInput.style.display = "block";
+            document
+              .querySelector('label[for="autocomplete-input"]')
+              .removeAttribute("style");
+            typeInput.style.display = "block";
+            document
+              .querySelector('label[for="type-input"]')
+              .removeAttribute("style");
+
+            descriptionInput.style.display = "block";
+            document
+              .querySelector('label[for="description-input"]')
+              .removeAttribute("style");
+
+            actionButton.style.display = "block";
+            completeButton.style.display = "block";
+            startButton.style.display = "block";
+            startBreakButton.style.display = "block";
+            dropdown.style.display = "block";
+          }
+        } else if (!dayStarted && !dayEnded) {
+          console.log("day is not started");
+          // Show the start day button if the day has not been started yet
+          autocompleteInput.style.display = "none";
+          startButton.style.display = "none";
+          document.getElementById("start-day-button").style.display = "block";
+        } else if (dayEnded) {
+          console.log("day has already been closed");
+          document.getElementById("autocomplete-input").style.display = "none";
+          document.getElementById("start-button").style.display = "none";
+          document.getElementById("reopen-day-button").style.display = "block";
+          document.getElementById("timepicker-container").style.display =
+            "none";
+        } else if (breakTimeStarted) {
+          document.getElementById("autocomplete-input").style.display = "none";
+          document.getElementById("start-button").style.display = "none";
+          startBreakButton.style.display = "none";
+          endBreakButton.style.display = "block";
+        }
+      }
+      function reopenDay() {
+        fetch("/reopen_day", { method: "PUT" })
+          .then((response) => response.json())
+          .then((data) => {
+            console.log(data.message); // Log the response message
+            // After reopening the day, hide the "Re-open Day" button
+            document.getElementById("reopen-day-button").style.display = "none";
+            location.reload();
+          })
+          .catch((error) => console.error("Error:", error));
+      }
+
+      document
+        .getElementById("start-day-button")
+        .addEventListener("click", async () => {
+          const response = await fetch("/start_day", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              time: document.getElementById("timepicker").value,
+            }),
+          });
+          if (response.ok) {
+            // Reload the page to update UI
+            location.reload();
+          } else {
+            M.toast({
+              html: `Failed to start the day.`,
+              classes: "red",
+            });
+          }
+        });
+
+      document
+        .getElementById("end-day-button")
+        .addEventListener("click", async () => {
+          const response = await fetch("/end_day", { method: "PUT" });
+          if (response.ok) {
+            // Reload the page to update UI
+            location.reload();
+          } else {
+            M.toast({
+              html: `Failed to end the day.`,
+              classes: "red",
+            });
+          }
+        });
+      document
+        .getElementById("end-day-button")
+        .addEventListener("click", async () => {
+          const response = await fetch("/end_day", { method: "PUT" });
+          if (response.ok) {
+            // Reload the page to update UI
+            location.reload();
+          } else {
+            M.toast({
+              html: "Failed to end the day.",
+              classes: "red",
+            });
+          }
+        });
+
+      // Call checkDayStatus on page load
+      document.addEventListener("DOMContentLoaded", checkDayStatus);
+
+      async function startBreak() {
+        const response = await fetch("/start_break", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            time: document.getElementById("timepicker").value,
+          }),
+        });
+        if (response.ok) {
+          // Reload the page to update UI
+          location.reload();
+        } else {
+          M.toast({
+            html: "Failed to start break.",
+            classes: "red",
+          });
+        }
+      }
+      async function endBreak() {
+        const response = await fetch("/end_break", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            time: document.getElementById("timepicker").value,
+          }),
+        });
+        if (response.ok) {
+          // Reload the page to update UI
+          location.reload();
+        } else {
+          M.toast({
+            html: "Failed to end break.",
+            classes: "red",
+          });
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", function () {
+        const timePicker = document.getElementById("timePicker");
+
+        // Get the most recent end time from the server
+        async function fetchMostRecentEndTime() {
+          const response = await fetch("/most_recent_end_time");
+          if (response.ok) {
+            const { mostRecentEndTime } = await response.json();
+            return mostRecentEndTime;
+          }
+          return null;
+        }
+        var buttons = document.querySelectorAll(".btn");
+
+        // Iterate through each button and set width to 'auto'
+      });
+    </script>
+  </body>
+</html>

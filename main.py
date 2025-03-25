@@ -69,13 +69,32 @@ def get_clients():
 
 @app.route('/autocomplete', methods=['GET'])
 def autocomplete():
-    search_query = request.args.get('query', '')
-    if search_query:
-        clients = Client.query.filter(Client.name.ilike(f'%{search_query}%')).all()
-    else:
-        clients = Client.query.all()
+    clients = Client.query.all()
     results = [client.name for client in clients]
     return jsonify(results)
+
+@app.route('/update_task_client', methods=['POST'])
+def update_task_client():
+    data = request.json
+    client_name = data.get('client')
+    today = date.today()
+    
+    if not client_name:
+        return jsonify({'error': 'Client name is required'}), 400
+
+    client = Client.query.filter_by(name=client_name).first()
+    if not client:
+        client = Client(name=client_name)
+        db.session.add(client)
+        db.session.commit()
+
+    task = Task_Item.query.filter_by(date=today, end_time=None).first()
+    if task:
+        task.client_id = client.id
+        db.session.commit()
+        return jsonify({'success': True}), 200
+    
+    return jsonify({'error': 'No active task found'}), 404
 
 @app.route('/clients', methods=['POST'])
 def create_client():
@@ -410,25 +429,43 @@ def get_time_tracking(date_str):
 @app.route('/most_recent_end_time', methods=['GET'])
 def most_recent_end_time():
     today = date.today()
-    most_recent_task = Task_Item.query.filter_by(date=today)\
-        .filter(Task_Item.end_time.isnot(None))\
-        .order_by(Task_Item.end_time.desc()).first()
-    most_recent_break = BreakTracking.query.filter_by(date=today)\
-        .filter(BreakTracking.end_time.isnot(None))\
-        .order_by(BreakTracking.end_time.desc()).first()
-    today_start_time = TimeTracking.query.filter_by(date=today).first()
+    most_recent_end_time = None
 
-    if most_recent_task and most_recent_task.end_time:
-        most_recent_end_time = most_recent_task.end_time
-    if most_recent_break and most_recent_break.end_time > most_recent_end_time:
-        most_recent_end_time = most_recent_break.end_time
-    if today_start_time and today_start_time.start_time > most_recent_end_time:
-        most_recent_end_time = today_start_time.start_time
+    try:
+        # Get most recent task end time
+        most_recent_task = Task_Item.query.filter_by(date=today)\
+            .filter(Task_Item.end_time.isnot(None))\
+            .order_by(Task_Item.end_time.desc()).first()
 
-    if most_recent_end_time:
-        return jsonify({'mostRecentEndTime': most_recent_end_time.strftime('%H:%M')})
-    else:
-        return jsonify({'mostRecentEndTime': None})
+        # Get most recent break end time
+        most_recent_break = BreakTracking.query.filter_by(date=today)\
+            .filter(BreakTracking.end_time.isnot(None))\
+            .order_by(BreakTracking.end_time.desc()).first()
+
+        # Get today's start time
+        today_start_time = TimeTracking.query.filter_by(date=today).first()
+
+        # Initialize with task end time if exists
+        if most_recent_task and most_recent_task.end_time:
+            most_recent_end_time = most_recent_task.end_time
+
+        # Update if break end time is more recent
+        if most_recent_break and most_recent_break.end_time:
+            if not most_recent_end_time or most_recent_break.end_time > most_recent_end_time:
+                most_recent_end_time = most_recent_break.end_time
+
+        # Update if day start time is more recent
+        if today_start_time and today_start_time.start_time:
+            if not most_recent_end_time or today_start_time.start_time > most_recent_end_time:
+                most_recent_end_time = today_start_time.start_time
+
+        return jsonify({
+            'mostRecentEndTime': most_recent_end_time.strftime('%H:%M') if most_recent_end_time else None
+        })
+
+    except Exception as e:
+        print(f"Error in most_recent_end_time: {str(e)}")
+        return jsonify({'mostRecentEndTime': None}), 200
     
 @app.route('/get_min_time', methods=['GET'])
 def get_min_time():
