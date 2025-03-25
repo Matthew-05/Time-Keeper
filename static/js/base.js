@@ -1,13 +1,5 @@
 export class TimeKeeper {
     constructor() {
-        this.initializeElements();
-    }
-
-    initializeElements() {
-        // Initialize any common elements or event listeners
-        document.addEventListener('DOMContentLoaded', () => {
-            this.init?.();
-        });
     }
 
     getCurrentTimeIn12HourFormat() {

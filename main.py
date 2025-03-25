@@ -13,10 +13,12 @@ from werkzeug.serving import run_simple
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 import os
 from sqlalchemy import func
+from flask_cors import CORS
 
 DEV_MODE = os.environ.get('DEV_MODE', 'False').lower() == 'true'
 
 app = Flask(__name__)
+CORS(app)
 app.config['SECRET_KEY'] = 'your_secret_key_here'  
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///clients.db'
 db.init_app(app)
@@ -191,19 +193,6 @@ def get_day_data():
             return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD.'}), 400
     else:
         return jsonify({'error': 'Date is required.'}), 400
-
-
-@app.route('/task_browser_initial_data/<date>')
-def get_initial_data(date):
-    tasks = Task_Item.query.filter_by(date=date).all()
-    breaks = BreakTracking.query.filter_by(date=date).all()
-    day_status = check_day_status()
-    
-    return jsonify({
-        'tasks': tasks,
-        'breaks': breaks, 
-        'dayStatus': day_status
-    })
 
 @app.route('/task_browser')
 def task_browser():
@@ -578,7 +567,8 @@ stop_event = threading.Event()
 server_thread = None
 
 def start_server():
-    app.run(port=5000, threaded=True)
+    # Change to use multiple workers and threads
+    run_simple('127.0.0.1', 5000, app, use_reloader=False, threaded=True)
 
 def create_window():
     window = webview.create_window(
@@ -590,6 +580,12 @@ def create_window():
         min_size=(800, 600)
     )
     return window
+
+
+
+class WebviewAPI:
+    def navigate(self, url):
+        webview.windows[0].evaluate_js(f'window.location.href = "{url}"')
 
 
 admin = Admin(app, name='Admin Panel', template_mode='bootstrap3')

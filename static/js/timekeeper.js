@@ -9,11 +9,16 @@ export class TimeKeeperIndex extends TimeKeeper {
     }
 
     async init() {
-        await this.initializeAutocomplete();
-        await this.checkDayStatus();
-        await this.checkUnfinishedTasks();
+        // Run these in parallel instead of sequentially
+        await Promise.all([
+            this.initializeAutocomplete(),
+            this.checkDayStatus(),
+            this.checkUnfinishedTasks()
+        ]);
         console.log("Timekeeper.js loaded");
     }
+
+
 
 
     initializeElements() {

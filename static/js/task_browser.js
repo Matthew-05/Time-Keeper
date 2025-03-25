@@ -8,15 +8,6 @@ export class TaskBrowser extends TimeKeeper {
         this.fetchInitialData();
     }
 
-    showLoading() {
-        document.getElementById('loading-spinner').classList.remove('hidden');
-    }
-
-    hideLoading() {
-        document.getElementById('loading-spinner').classList.add('hidden');
-    }
-
-
     initializeElements() {
         this.selectedDate = document.getElementById('selected-date');
         this.datePicker = flatpickr(this.selectedDate, {
@@ -27,16 +18,10 @@ export class TaskBrowser extends TimeKeeper {
     }
 
     async fetchInitialData() {
-        this.showLoading();
-        try {
-            await this.fetchTasks();
-            await this.fetchBreaks();
-            await this.checkDayStatus();
-        } finally {
-            this.hideLoading();
-        }
+        await this.fetchTasks();
+        await this.fetchBreaks();
+        await this.checkDayStatus();
     }
-
 
     async fetchBreaks() {
         try {
@@ -67,19 +52,14 @@ export class TaskBrowser extends TimeKeeper {
     }
 
     async fetchTasks() {
-        this.showLoading();
         try {
             const response = await this.fetchFromAPI(`/tasks/${this.selectedDate.value}`);
             this.renderTasks(response);
             this.renderTimeline(response, this.selectedDate.value);
         } catch (error) {
             this.showToast('Error fetching tasks', 'red');
-        } finally {
-            this.hideLoading();
         }
     }
-
-
 
 
 

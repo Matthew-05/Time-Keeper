@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "2df134d7020810ab16b971d9b665c8c13d5969d56355c2a095b2aaa630455864"
+            "sha256": "d5594a1636091a78fa2e01fef80a92bd7caa46d89d054fad41ad0847d3c19869"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -154,6 +154,15 @@
             "markers": "python_version >= '3.6'",
             "version": "==1.6.1"
         },
+        "flask-cors": {
+            "hashes": [
+                "sha256:6ccb38d16d6b72bbc156c1c3f192bc435bfcc3c2bc864b2df1eb9b2d97b2403c",
+                "sha256:fa5cb364ead54bbf401a26dbf03030c6b18fb2fcaf70408096a572b409586b0c"
+            ],
+            "index": "pypi",
+            "markers": "python_version >= '3.9' and python_version < '4.0'",
+            "version": "==5.0.1"
+        },
         "flask-migrate": {
             "hashes": [
                 "sha256:1a336b06eb2c3ace005f5f2ded8641d534c18798d64061f6ff11f79e1434126d",
@@ -265,6 +274,13 @@
             ],
             "markers": "python_version >= '3.7'",
             "version": "==3.1.6"
+        },
+        "jsmin": {
+            "hashes": [
+                "sha256:c0959a121ef94542e807a674142606f7e90214a2b3d1eb17300244bbb5cc2bfc"
+            ],
+            "index": "pypi",
+            "version": "==3.0.1"
         },
         "mako": {
             "hashes": [
