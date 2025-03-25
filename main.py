@@ -7,18 +7,14 @@ from sqlalchemy import text, inspect, desc, and_
 from flask_migrate import Migrate
 from flask_admin import Admin
 from flask_admin.contrib.sqla import ModelView
+import webview
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
-from PyQt5.QtWebEngineWidgets import QWebEngineView
-from PyQt5.QtCore import QUrl
-from PyQt5.QtCore import *
-from PyQt5.QtGui import *
-from PyQt5.QtWidgets import *
 from werkzeug.serving import run_simple
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 import os
 from sqlalchemy import func
 
+DEV_MODE = os.environ.get('DEV_MODE', 'False').lower() == 'true'
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_secret_key_here'  
@@ -527,24 +523,20 @@ def get_time_summary(period, client_id):
 stop_event = threading.Event()
 server_thread = None
 
-def run_server():
-    # Create a DispatcherMiddleware instance to handle shutdown
-    app.wsgi_app = DispatcherMiddleware(app.wsgi_app)
-    run_simple('127.0.0.1', 5000, app, use_reloader=False, threaded=True)
+def start_server():
+    app.run(port=5000, threaded=True)
 
-def server_thread_func():
-    while not stop_event.is_set():
-        try:
-            run_server()
-        except Exception as e:
-            print(f"Server encountered an error: {e}")
-            time.sleep(1)  # Small delay to avoid rapid restart
+def create_window():
+    window = webview.create_window(
+        'Time Tracker', 
+        'http://127.0.0.1:5000',
+        width=1200,
+        height=800,
+        resizable=True,
+        min_size=(800, 600)
+    )
+    return window
 
-def stop_server():
-    # Function to stop the server
-    stop_event.set()
-    if server_thread is not None:
-        server_thread.join()  # Ensure the server thread exits
 
 admin = Admin(app, name='Admin Panel', template_mode='bootstrap3')
 
@@ -555,34 +547,11 @@ admin.add_view(ModelView(Client, db.session))
 admin.add_view(ModelView(BreakTracking, db.session))
 
 if __name__ == '__main__':
-    qt_app = QApplication(sys.argv)
-    
-    # Start the Flask server in a separate thread
-    server_thread = threading.Thread(target=server_thread_func)
-    server_thread.start()
+    # Start Flask server in a separate thread
+    t = threading.Thread(target=start_server)
+    t.daemon = True
+    t.start()
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    # Construct the full path to the icon file
-    icon_path = os.path.join(script_dir, "logo.png")
-
-    main_window = QMainWindow()
-    main_window.setWindowTitle("Time Tracker")
-    app_icon = QIcon("logo.ico")
-    qt_app.setWindowIcon(app_icon)
-    main_window.setWindowIcon(app_icon)
-    main_window.setGeometry(100, 100, 1200, 800)
-
-    web_view = QWebEngineView()
-    web_view.setUrl(QUrl("http://127.0.0.1:5000"))
-
-    central_widget = QWidget()
-    layout = QVBoxLayout()
-    layout.addWidget(web_view)
-    central_widget.setLayout(layout)
-    main_window.setCentralWidget(central_widget)
-
-    # Connect the Qt application's quit signal to stop the Flask server
-    qt_app.aboutToQuit.connect(stop_server)
-    main_window.show()
-
-    sys.exit(qt_app.exec_())
+    # Create and start webview window
+    window = create_window()
+    webview.start(debug=DEV_MODE)
