@@ -566,27 +566,49 @@ def update_task(task_id):
     data = request.json
     task = Task_Item.query.get_or_404(task_id)
     
-    # Check for time overlaps
     new_start = datetime.strptime(data['start_time'], '%I:%M %p').time()
     new_end = datetime.strptime(data['end_time'], '%I:%M %p').time()
     
-    overlapping_tasks = Task_Item.query.filter(
+    print(f"Looking for tasks around - Start: {new_start}, End: {new_end}")
+    
+    # Get all tasks for the day sorted by start time
+    all_tasks = Task_Item.query.filter(
         Task_Item.date == task.date,
         Task_Item.id != task_id,
-        Task_Item.start_time < new_end,
-        Task_Item.end_time > new_start
-    ).all()
+        Task_Item.end_time.isnot(None)
+    ).order_by(Task_Item.start_time).all()
     
-    if overlapping_tasks:
-        return jsonify({'error': 'Task times overlap with existing tasks'}), 400
+    print("All tasks for the day:", [(t.id, t.start_time, t.end_time) for t in all_tasks])
     
+    # Find surrounding tasks
+    prev_task = None
+    next_task = None
+    
+    for t in all_tasks:
+        if t.end_time <= new_start:
+            prev_task = t
+        if t.start_time >= new_end and next_task is None:
+            next_task = t
+            break
+    
+    # Check for overlaps
+    overlapping = any(
+        t.start_time < new_end and t.end_time > new_start 
+        for t in all_tasks
+    )
+
+    if overlapping:
+        overlapping_task = next(t for t in all_tasks if t.start_time < new_end and t.end_time > new_start)
+        return jsonify({
+            'error': f'Task times overlap with existing task ({overlapping_task.start_time.strftime("%I:%M %p")} - {overlapping_task.end_time.strftime("%I:%M %p")}). Please choose a different time.'
+        }), 400
+
     task.start_time = new_start
     task.end_time = new_end
     task.client_id = data['client_id']
     
     db.session.commit()
     return jsonify({'success': True})
-
 @app.route('/task/<int:task_id>', methods=['DELETE'])
 def delete_task(task_id):
     task = Task_Item.query.get_or_404(task_id)

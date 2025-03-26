@@ -84,7 +84,7 @@ export class TaskBrowser extends TimeKeeper {
         const clientId = parseInt(row.querySelector('.client-select').value);
 
         try {
-            await this.fetchFromAPI(`/update_task/${taskId}`, {
+            const response = await fetch(`/update_task/${taskId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -94,13 +94,22 @@ export class TaskBrowser extends TimeKeeper {
                 })
             });
 
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Task times overlap with existing tasks');
+            }
+
             this.showToast('Task updated successfully');
             await this.fetchTasks();
             this.disableEditMode(row);
         } catch (error) {
-            this.showToast('Failed to update task: ' + error.message, 'error');
+            this.showToast(error.message, 'error');
+            // Keep edit mode active so user can fix the error
+            row.querySelector('.edit-controls').classList.remove('hidden');
         }
     }
+
 
 
     getClientOptions(selectedClientId) {
