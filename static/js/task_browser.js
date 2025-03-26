@@ -8,6 +8,13 @@ export class TaskBrowser extends TimeKeeper {
         this.initializeTimePicker();
         this.fetchInitialData();
         this.initializeTaskEditing();
+
+        setInterval(() => {
+            if (this.selectedDate.value === new Date().toISOString().split('T')[0]) {
+                this.fetchTasks();
+            }
+        }, 60000);
+
     }
 
     initializeElements() {
@@ -323,28 +330,32 @@ export class TaskBrowser extends TimeKeeper {
             </thead>
             <tbody>
                 ${client.tasks.map(task => `
-                    <tr data-task-id="${task.id}">
+                    <tr data-task-id="${task.id}" ${task.is_ongoing ? 'class="bg-yellow-100"' : ''}>
                         <td class="p-2 border">
                             <span class="time-display">${this.convertTo12HourFormat(task.start_time)}</span>
                             <input type="text" class="task-time-picker start-time hidden" value="${task.start_time}">
                         </td>
                         <td class="p-2 border">
-                            <span class="time-display">${task.end_time ? this.convertTo12HourFormat(task.end_time) : ''}</span>
+                            <span class="time-display">
+                                ${task.is_ongoing ?
+                `${this.convertTo12HourFormat(task.end_time)} (Ongoing)` :
+                this.convertTo12HourFormat(task.end_time)}
+                            </span>
                             <input type="text" class="task-time-picker end-time hidden" value="${task.end_time || ''}">
                         </td>
                         <td class="p-2 border">${task.description || ''}</td>
                         <td class="p-2 border">${this.getMinuteDifference(task.end_time, task.start_time)} minutes</td>
-<td class="p-2 border">
-    <button class="edit-task-btn bg-blue-500 text-white px-2 py-1 rounded">Edit</button>
-    <button class="delete-task-btn bg-red-500 text-white px-2 py-1 rounded">Delete</button>
-    <div class="edit-controls hidden">
-        <select class="client-select">
-            ${this.getClientOptions(task.client_id)}
-        </select>
-        <button class="save-task-btn bg-green-500 text-white px-2 py-1 rounded">Save</button>
-        <button class="cancel-task-btn bg-gray-500 text-white px-2 py-1 rounded">Cancel</button>
-    </div>
-</td>
+                        <td class="p-2 border">
+                            <button class="edit-task-btn bg-blue-500 text-white px-2 py-1 rounded">Edit</button>
+                            <button class="delete-task-btn bg-red-500 text-white px-2 py-1 rounded">Delete</button>
+                            <div class="edit-controls hidden">
+                                <select class="client-select">
+                                    ${this.getClientOptions(task.client_id)}
+                                </select>
+                                <button class="save-task-btn bg-green-500 text-white px-2 py-1 rounded">Save</button>
+                                <button class="cancel-task-btn bg-gray-500 text-white px-2 py-1 rounded">Cancel</button>
+                            </div>
+                        </td>
                     </tr>
                 `).join('')}
             </tbody>
@@ -353,7 +364,6 @@ export class TaskBrowser extends TimeKeeper {
         detailCell.appendChild(detailTable);
         detailRow.appendChild(detailCell);
 
-        // Initialize time pickers after adding to DOM
         setTimeout(() => {
             detailRow.querySelectorAll('.task-time-picker').forEach(input => {
                 flatpickr(input, {
@@ -363,13 +373,12 @@ export class TaskBrowser extends TimeKeeper {
                     time_24hr: false,
                     minuteIncrement: 1
                 });
-
-
             });
         }, 0);
 
         return detailRow;
     }
+
 
 
     toggleDetailTable(clientId) {

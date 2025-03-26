@@ -201,22 +201,22 @@ def task_browser():
 @app.route('/tasks/<date>')
 def get_tasks(date):
     date_obj = datetime.strptime(date, '%Y-%m-%d').date()
-    print(date)
-    print(Task_Item.query.all()[0].date)
     tasks = Task_Item.query.filter_by(date=date_obj).all()
+    current_time = datetime.now().time()
+    
     tasks_data = [{
         'id': task.id,
         'date': task.date.strftime('%Y-%m-%d'),
         'start_time': task.start_time.strftime('%H:%M:%S'),
-        'end_time': task.end_time.strftime('%H:%M:%S') if task.end_time else '',
+        'end_time': current_time.strftime('%H:%M:%S') if task.end_time is None else task.end_time.strftime('%H:%M:%S'),
         'client_id': task.client_id,
         'client_name': task.client.name,
         'type': task.type,
         'description': task.description,
         'time_spent': task.time_spent,
-        'adjust_entry': task.adjust_entry
+        'adjust_entry': task.adjust_entry,
+        'is_ongoing': task.end_time is None
     } for task in tasks]
-    print(tasks_data)
     return jsonify(tasks_data)
 
 @app.route('/unfinished_tasks', methods=['GET'])
