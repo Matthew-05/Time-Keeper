@@ -1,58 +1,74 @@
 {% extends 'base.html' %}
 
 {% block content %}
-  <div class="min-h-screen bg-gray-50 pt-20 pb-12">
-    <div class="max-w-3xl mx-auto px-4">
-      <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+  <div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 pt-24 pb-12">
+    <div class="max-w-4xl mx-auto px-4">
+      <!-- Main Card -->
+      <div class="bg-white rounded-3xl shadow-xl border border-gray-100 backdrop-blur-lg backdrop-filter">
         <!-- Header -->
-        <div class="px-6 py-4 bg-gray-50 border-b border-gray-100">
-          <h1 class="text-xl font-semibold text-gray-900">Time Tracking</h1>
+        <div class="px-8 py-6 bg-gradient-to-r from-blue-600 to-indigo-600">
+          <h1 class="text-2xl font-bold text-white flex items-center">
+            <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>Time Tracking Dashboard
+          </h1>
         </div>
 
         <!-- Main Content -->
-        <div class="p-6 space-y-6">
+        <div class="p-8 space-y-8">
           <!-- Client Selection -->
-          <div class="space-y-2">
-            <label class="text-sm font-medium text-gray-700">Client</label>
-            <select id="autocomplete-input" class="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+          <div class="space-y-3 z-50">
+            <label class="text-sm font-semibold text-gray-700 uppercase tracking-wider">Client</label>
+            <select id="autocomplete-input" class="w-full px-4 py-3 bg-white border-2 border-blue-100 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-md hover:border-blue-200">
               <option value="">Select a client</option>
             </select>
           </div>
 
-          <!-- Task Details -->
-          <div class="grid grid-cols-1 gap-4">
-            <div id="type-input-container" class="hidden space-y-2">
-              <label class="text-sm font-medium text-gray-700">Task Type</label>
-              <input type="text" id="type-input" class="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+          <!-- Task Details Grid -->
+          <div class="grid grid-cols-2 gap-6">
+            <div id="type-input-container" class="hidden space-y-3">
+              <label class="text-sm font-semibold text-gray-700 uppercase tracking-wider">Task Type</label>
+              <input type="text" id="type-input" class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 transition-all" />
             </div>
 
-            <div id="description-input-container" class="hidden space-y-2">
-              <label class="text-sm font-medium text-gray-700">Description</label>
-              <input type="text" id="description-input" class="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+            <div id="description-input-container" class="hidden space-y-3">
+              <label class="text-sm font-semibold text-gray-700 uppercase tracking-wider">Description</label>
+              <input type="text" id="description-input" class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 transition-all" />
             </div>
           </div>
 
           <!-- Time Selection -->
-          <div class="text-center py-4" id="timepicker-container">
-            <input type="text" id="timepicker" class="text-3xl font-semibold text-center bg-gray-50 px-6 py-3 rounded-lg border border-gray-200 focus:ring-2 focus:ring-blue-500" />
-            <div id="lowestTimeAllowed" class="text-sm text-gray-500 mt-2"></div>
+          <div class="text-center py-6" id="timepicker-container">
+            <input type="text" id="timepicker" class="text-4xl font-bold text-center bg-gray-50 px-8 py-4 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-blue-500 transition-all" />
+            <div id="lowestTimeAllowed" class="text-sm text-gray-500 mt-3 font-medium"></div>
           </div>
         </div>
 
         <!-- Action Buttons -->
-        <div class="px-6 py-4 bg-gray-50 border-t border-gray-100">
+        <div class="px-8 py-6 bg-gray-50 border-t border-gray-100">
           <div class="flex justify-between items-center">
-            <div class="space-x-3">
-              <button id="start-break-button" class="hidden px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors">Start Break</button>
-              <button id="end-break-button" class="hidden px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">End Break</button>
+            <!-- Break Controls -->
+            <div class="space-x-4">
+              <button id="start-break-button" class="hidden px-6 py-3 bg-amber-500 text-white rounded-xl hover:bg-amber-600 transition-all transform hover:scale-105 font-medium">
+                <span class="flex items-center">
+                  <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                  </svg>Start Break
+                </span>
+              </button>
+              <button id="end-break-button" class="hidden px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all transform hover:scale-105 font-medium">End Break</button>
             </div>
-            <div class="space-x-3">
-              <button id="action-button" class="hidden px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Add Task</button>
-              <button id="complete-button" class="hidden px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">Complete Task</button>
-              <button id="start-button" class="hidden px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                </svg>Start Task
+
+            <!-- Task Controls -->
+            <div class="space-x-4">
+              <button id="action-button" class="hidden px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all transform hover:scale-105 font-medium">Add Task</button>
+              <button id="complete-button" class="hidden px-6 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all transform hover:scale-105 font-medium">Complete Task</button>
+              <button id="start-button" class="hidden px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all transform hover:scale-105 font-medium">
+                <span class="flex items-center">
+                  <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                  </svg>Start Task
+                </span>
               </button>
             </div>
           </div>
@@ -60,14 +76,15 @@
       </div>
 
       <!-- Day Control Buttons -->
-      <div class="mt-6 flex justify-center space-x-4">
-        <button id="start-day-button" class="hidden px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">Start Day</button>
-        <button id="end-day-button" class="hidden px-6 py-2.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors">End Day</button>
-        <button id="reopen-day-button" class="hidden px-6 py-2.5 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors">Re-open Day</button>
+      <div class="mt-8 flex justify-center space-x-6">
+        <button id="start-day-button" class="hidden px-8 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all transform hover:scale-105 font-medium shadow-lg">Start Day</button>
+        <button id="end-day-button" class="hidden px-8 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all transform hover:scale-105 font-medium shadow-lg">End Day</button>
+        <button id="reopen-day-button" class="hidden px-8 py-3 bg-amber-500 text-white rounded-xl hover:bg-amber-600 transition-all transform hover:scale-105 font-medium shadow-lg">Re-open Day</button>
       </div>
     </div>
   </div>
 {% endblock %}
+
 {% block page_scripts %}
   <script type="module">
     import { TimeKeeperIndex } from "{{ url_for('static', filename='js/timekeeper.js') }}"

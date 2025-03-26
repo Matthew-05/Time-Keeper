@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="h-full">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -12,26 +12,73 @@
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
 
+    <!-- Time Picker -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css" />
+
+    <!-- Custom Styles -->
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+      
+      body {
+        font-family: 'Inter', sans-serif;
+      }
+      
+      .choices__inner {
+        background-color: rgb(249 250 251);
+        border-radius: 0.75rem !important;
+        min-height: 48px !important;
+        padding: 0.75rem 1rem !important;
+      }
+      
+      .choices__input {
+        background-color: transparent !important;
+      }
+      
+      .flatpickr-input {
+        background-color: rgb(249 250 251) !important;
+      }
+      .choices__list--dropdown {
+        border: 2px solid #e5e7eb !important;
+        border-radius: 0.75rem !important;
+        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1) !important;
+        margin-top: 4px !important;
+      }
+      
+      .choices__inner {
+        background-color: white !important;
+        border: 2px solid #dbeafe !important;
+        box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1) !important;
+      }
+      
+      .choices__inner:hover {
+        border-color: #bfdbfe !important;
+      }
+      .choices__list--dropdown {
+        z-index: 999 !important;
+      }
+      
+      .choices.is-open {
+        z-index: 999 !important;
+      }
+    </style>
+
     {% block additional_styles %}
 
     {% endblock %}
   </head>
-  <body class="bg-gray-50">
+  <body class="h-full bg-gradient-to-br from-blue-50 to-indigo-50">
     {% include 'navbar.html' %}
 
-    <main class="container mx-auto px-4">
+    <main class="h-full">
       {% block content %}
 
       {% endblock %}
     </main>
 
-    <!-- Time Picker Replacement -->
+    <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" />
-
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/choices.js/public/assets/scripts/choices.min.js"></script>
-    <!-- Base Scripts -->
     <script src="{{ url_for('static', filename='js/base.js') }}" type="module"></script>
 
     {% block page_scripts %}

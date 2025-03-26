@@ -207,16 +207,27 @@ export class TimeKeeperIndex extends TimeKeeper {
         };
 
         this.autocomplete = new Choices(this.clientInput, {
-            removeItemButton: true,
             searchPlaceholderValue: 'Start typing client name...',
             placeholder: true,
             placeholderValue: 'Select a client',
             searchResultLimit: 10,
             classNames: {
                 containerOuter: 'choices',
-                containerInner: 'w-full'
+                containerInner: 'choices__inner',
+                input: 'choices__input',
+                inputCloned: 'choices__input--cloned',
+                list: 'choices__list',
+                listItems: 'choices__list--items',
+                listSingle: 'choices__list--single',
+                listDropdown: 'choices__list--dropdown'
             }
         });
+
+
+
+
+
+
 
         // Add the single event listener
         this.autocomplete.passedElement.element.addEventListener('addItem', this.handleClientChange);
