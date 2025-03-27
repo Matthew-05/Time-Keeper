@@ -31,9 +31,80 @@
     const loadTime = new Date()
     const loadTimeString = loadTime.toLocaleString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true })
     document.getElementById('load-time').textContent = loadTimeString
+    
+    // Add event listener for custom event when a task is completed
+    document.addEventListener('taskCompleted', function() {
+      stopAndResetTimer()
+    })
   })
+
+  document.addEventListener('taskStarted', function(event) {
+    if (event.detail && event.detail.startTime) {
+      startTimerWithTime(event.detail.startTime);
+    } else {
+      checkForUnfinishedTask();
+    }
+  });
+
+
+  function startTimerWithTime(timeString) {
+    console.log("Starting timer with time:", timeString);
+    
+    // Handle different time formats
+    let taskStartTime;
+    
+    // Check if the time is in HH:MM:SS format
+    if (/^\d{1,2}:\d{2}:\d{2}$/.test(timeString)) {
+        taskStartTime = secondsSinceMidnight(timeString);
+    } 
+    // Check if the time is in HH:MM format
+    else if (/^\d{1,2}:\d{2}$/.test(timeString)) {
+        taskStartTime = secondsSinceMidnight(timeString + ":00");
+    }
+    // Check if the time is in 12-hour format (e.g., "3:30 PM")
+    else if (/^\d{1,2}:\d{2}\s*[AP]M$/i.test(timeString)) {
+        // Convert to 24-hour format
+        const match = timeString.match(/(\d+):(\d+)\s*([AP]M)/i);
+        if (match) {
+            let [_, hours, minutes, ampm] = match;
+            hours = parseInt(hours);
+            
+            // Convert to 24-hour format
+            if (ampm.toUpperCase() === 'PM' && hours < 12) {
+                hours += 12;
+            } else if (ampm.toUpperCase() === 'AM' && hours === 12) {
+                hours = 0;
+            }
+            
+            // Format as HH:MM:00
+            const formattedTime = `${hours.toString().padStart(2, '0')}:${minutes}:00`;
+            taskStartTime = secondsSinceMidnight(formattedTime);
+        }
+    } else {
+        console.error("Unrecognized time format:", timeString);
+        // Fall back to checking for unfinished tasks
+        checkForUnfinishedTask();
+        return;
+    }
+    
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const currentSeconds = (now - startOfDay) / 1000;
+    const startingTime = currentSeconds - taskStartTime;
+    
+    console.log("Task start seconds:", taskStartTime);
+    console.log("Current seconds:", currentSeconds);
+    console.log("Elapsed time:", startingTime);
+    
+    startTimer(startingTime);
+}
+
+
   
   function startTimer(startingTime) {
+    // Stop any existing timer first
+    stopTimer()
+    
     clientTimer = setInterval(function () {
       startingTime++
       updateTimerDisplay(startingTime)
@@ -42,6 +113,11 @@
   
   function stopTimer() {
     clearInterval(clientTimer)
+  }
+  
+  function stopAndResetTimer() {
+    stopTimer()
+    updateTimerDisplay('No timer running')
   }
   
   function secondsSinceMidnight(timeString) {
@@ -75,4 +151,7 @@
       document.getElementById('timer').innerText = formattedTime
     }
   }
+  
+  // Make the function available globally so it can be called from other scripts
+  window.stopAndResetTimer = stopAndResetTimer
 </script>

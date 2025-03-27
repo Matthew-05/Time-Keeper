@@ -30,8 +30,8 @@ export class TimeKeeperIndex extends TimeKeeper {
 
     initializeElements() {
         this.clientInput = document.getElementById('autocomplete-input');
-        this.typeInput = document.getElementById('type-input');
         this.descriptionInput = document.getElementById('description-input');
+        this.descriptionContainer = document.getElementById('description-input-container');
         this.actionButton = document.getElementById('action-button');
         this.completeButton = document.getElementById('complete-button');
         this.startButton = document.getElementById('start-button');
@@ -102,15 +102,33 @@ export class TimeKeeperIndex extends TimeKeeper {
     async checkUnfinishedTasks() {
         const tasks = await this.fetchFromAPI('/unfinished_tasks');
         if (tasks.length > 0) {
-            // First set up the initial value in Choices.js
-            this.autocomplete.setChoiceByValue(tasks[0].client);
+            const currentTask = tasks[0];
 
-            this.showTaskCompletionForm(tasks[0]);
-            this.completeButton.dataset.taskId = tasks[0].id;
+            // Make sure we have the client name before setting it
+            if (currentTask && currentTask.client) {
+                // Set the client in the autocomplete dropdown
+                this.autocomplete.setChoiceByValue(currentTask.client);
+
+                // Also set the value directly in the input field as a backup
+                this.clientInput.value = currentTask.client;
+            }
+
+            // Show the description input container for task completion
+            document.getElementById('description-input-container').style.display = 'block';
+
+            this.showTaskCompletionForm(currentTask);
+            this.completeButton.dataset.taskId = currentTask.id;
         } else {
+            // Hide the description input container for starting a new task
+            document.getElementById('description-input-container').style.display = 'none';
+
             this.showStartTaskForm();
         }
     }
+
+
+
+
 
 
     async handleStartDay() {
@@ -222,7 +240,7 @@ export class TimeKeeperIndex extends TimeKeeper {
             return;
         }
 
-        // Validate time selection - only check once
+        // Validate time selection
         if (!selectedTime) {
             this.showToast('Please select a time.', 'error');
             return;
@@ -236,7 +254,6 @@ export class TimeKeeperIndex extends TimeKeeper {
             }
         }
 
-        // No need for additional time validation here
         const response = await this.fetchFromAPI('/add_unfinished_task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -248,8 +265,19 @@ export class TimeKeeperIndex extends TimeKeeper {
 
         if (response.success) {
             this.clearInputs();
-            // Clear the time picker
             this.timePickerInstance.clear();
+
+            // Directly call the global startTimerWithTime function with the selected time
+            if (window.startTimerWithTime) {
+                window.startTimerWithTime(selectedTime);
+            } else {
+                console.error('startTimerWithTime function not found in global scope');
+                // Fallback to the event-based approach
+                document.dispatchEvent(new CustomEvent('taskStarted', {
+                    detail: { startTime: selectedTime }
+                }));
+            }
+
             await this.checkDayStatus();
             await this.checkUnfinishedTasks();
         }
@@ -257,10 +285,8 @@ export class TimeKeeperIndex extends TimeKeeper {
 
 
 
-
     clearInputs() {
         this.clientInput.value = '';
-        this.typeInput.value = '';
         this.descriptionInput.value = '';
         // Clear the time picker
         this.timePickerInstance.clear();
@@ -288,7 +314,6 @@ export class TimeKeeperIndex extends TimeKeeper {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 client: this.clientInput.value,
-                type: this.typeInput.value,
                 description: this.descriptionInput.value,
                 endTime: this.timePicker.value
             })
@@ -302,11 +327,19 @@ export class TimeKeeperIndex extends TimeKeeper {
             this.autocomplete.setChoiceByValue('');
             this.completeButton.style.display = 'none';
             this.startButton.style.display = 'block';
+
+            // Stop and reset the timer in the navbar
+            if (window.stopAndResetTimer) {
+                window.stopAndResetTimer();
+            } else {
+                // Dispatch a custom event as fallback
+                document.dispatchEvent(new CustomEvent('taskCompleted'));
+            }
+
             await this.checkDayStatus();
             await this.checkUnfinishedTasks();
         }
     }
-
 
 
 
@@ -430,7 +463,6 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.hideInputFields();
 
         // Make sure task-related elements are hidden
-        document.getElementById('type-input-container').style.display = 'none';
         document.getElementById('description-input-container').style.display = 'none';
 
         // Show the time picker for selecting start time
@@ -459,28 +491,41 @@ export class TimeKeeperIndex extends TimeKeeper {
 
     showTaskCompletionForm(task) {
         // Display the form fields
-        this.typeInput.style.display = 'block';
         this.descriptionInput.style.display = 'block';
         this.clientInput.style.display = 'block';
 
+        // Make sure type and description containers are visible
+        document.getElementById('description-input-container').style.display = 'block';
+
+        // Always ensure client is set if available
         if (task && task.client) {
+            // Set in autocomplete
             this.autocomplete.setChoiceByValue(task.client);
+
+            // Also set directly in input as fallback
+            this.clientInput.value = task.client;
+
+            console.log("Setting client to:", task.client);
         }
     }
+
+
 
     showStartTaskForm() {
         // Show the client input container
         const clientContainer = this.clientInput.closest('.space-y-3');
         if (clientContainer) clientContainer.style.display = 'block';
         this.clientInput.style.display = 'block';
+
+        // Hide the description input container since we're starting a new task
+        document.getElementById('description-input-container').style.display = 'none';
     }
     hideInputFields() {
         // Hide the client input container entirely, not just the input
         const clientContainer = this.clientInput.closest('.space-y-3');
         if (clientContainer) clientContainer.style.display = 'none';
 
-        // Hide other inputs
-        document.getElementById('type-input-container').style.display = 'none';
+        // Hide other input
         document.getElementById('description-input-container').style.display = 'none';
     }
 
