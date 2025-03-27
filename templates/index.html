@@ -25,17 +25,16 @@
           </div>
 
           <!-- Task Details Grid -->
-          <div class="grid grid-cols-2 gap-6">
-            <div id="description-input-container" class="hidden space-y-3">
-              <label class="text-sm font-semibold text-gray-700 uppercase tracking-wider">Description</label>
-              <input type="text" id="description-input" class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 transition-all" />
-            </div>
+          <div id="description-input-container" class="hidden space-y-3">
+            <label class="text-sm font-semibold text-gray-700 uppercase tracking-wider">Description</label>
+            <input type="text" id="description-input" class="w-full px-4 py-3 bg-gray-50 border-2 border-blue-100 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-md hover:border-blue-200" />
           </div>
 
           <!-- Time Selection -->
           <div class="text-center py-6" id="timepicker-container">
             <div class="flex items-center justify-center space-x-3">
-              <input type="text" id="timepicker" class="text-4xl font-bold text-center bg-gray-50 px-8 py-4 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-blue-500 transition-all" />
+              <div id="task-start-time" class="text-xl font-medium text-gray-700 hidden"></div>
+              <input type="text" id="timepicker" class="text-2xl font-semibold text-center bg-gray-50 px-3 py-2 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-blue-500 transition-all w-36" />
               <button id="current-time-button" class="px-4 py-3 bg-gray-200 text-gray-800 rounded-xl hover:bg-gray-300 transition-all font-medium">
                 <span class="flex items-center">
                   <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">

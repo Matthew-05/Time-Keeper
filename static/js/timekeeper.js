@@ -40,6 +40,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.reopenDayButton = document.getElementById('reopen-day-button');
         this.timePicker = document.getElementById('timepicker');
         this.currentTimeButton = document.getElementById('current-time-button');
+        this.taskStartTimeDisplay = document.getElementById('task-start-time');
     }
 
 
@@ -125,10 +126,6 @@ export class TimeKeeperIndex extends TimeKeeper {
             this.showStartTaskForm();
         }
     }
-
-
-
-
 
 
     async handleStartDay() {
@@ -328,6 +325,10 @@ export class TimeKeeperIndex extends TimeKeeper {
             this.completeButton.style.display = 'none';
             this.startButton.style.display = 'block';
 
+            // Hide the task start time display
+            this.taskStartTimeDisplay.classList.add('hidden');
+            this.taskStartTimeDisplay.textContent = '';
+
             // Stop and reset the timer in the navbar
             if (window.stopAndResetTimer) {
                 window.stopAndResetTimer();
@@ -341,7 +342,40 @@ export class TimeKeeperIndex extends TimeKeeper {
         }
     }
 
+    formatTimeDisplay(timeString) {
+        if (!timeString) return '';
 
+        // Parse the time string (assuming format like "HH:MM:SS" or "HH:MM:SS AM/PM")
+        let timeParts = timeString.split(' ');
+        let timeValue = timeParts[0];
+        let ampm = timeParts.length > 1 ? timeParts[1] : '';
+
+        // Split hours, minutes, seconds
+        let [hours, minutes, seconds] = timeValue.split(':');
+
+        // Remove leading zero from hours if present
+        if (hours.startsWith('0')) {
+            hours = hours.substring(1);
+        }
+
+        // If no AM/PM is provided in the string but hours > 12, convert to 12-hour format
+        if (!ampm) {
+            if (parseInt(hours) > 12) {
+                hours = (parseInt(hours) - 12).toString();
+                ampm = 'PM';
+            } else if (parseInt(hours) === 12) {
+                ampm = 'PM';
+            } else if (parseInt(hours) === 0) {
+                hours = '12';
+                ampm = 'AM';
+            } else {
+                ampm = 'AM';
+            }
+        }
+
+        // Return formatted time without seconds
+        return `${hours}:${minutes} ${ampm}`;
+    }
 
 
     initializeAutocomplete() {
@@ -507,7 +541,15 @@ export class TimeKeeperIndex extends TimeKeeper {
 
             console.log("Setting client to:", task.client);
         }
+
+        // Display the task start time if available
+        if (task && task.start_time) {
+            const formattedTime = this.formatTimeDisplay(task.start_time);
+            this.taskStartTimeDisplay.textContent = `${formattedTime} -`;
+            this.taskStartTimeDisplay.classList.remove('hidden');
+        }
     }
+
 
 
 
@@ -519,7 +561,12 @@ export class TimeKeeperIndex extends TimeKeeper {
 
         // Hide the description input container since we're starting a new task
         document.getElementById('description-input-container').style.display = 'none';
+
+        // Hide the task start time display
+        this.taskStartTimeDisplay.classList.add('hidden');
+        this.taskStartTimeDisplay.textContent = '';
     }
+
     hideInputFields() {
         // Hide the client input container entirely, not just the input
         const clientContainer = this.clientInput.closest('.space-y-3');
