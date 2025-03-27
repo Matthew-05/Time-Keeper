@@ -14,6 +14,7 @@ from werkzeug.middleware.dispatcher import DispatcherMiddleware
 import os
 from sqlalchemy import func
 from flask_cors import CORS
+import socket
 
 DEV_MODE = os.environ.get('DEV_MODE', 'False').lower() == 'true'
 
@@ -620,14 +621,22 @@ def delete_task(task_id):
 stop_event = threading.Event()
 server_thread = None
 
+def find_free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', 0))
+        return s.getsockname()[1]
+
+# Global variable to store the port
+app_port = find_free_port()
+
 def start_server():
-    # Change to use multiple workers and threads
-    run_simple('127.0.0.1', 5000, app, use_reloader=False, threaded=True)
+    # Use the dynamically assigned port
+    run_simple('127.0.0.1', app_port, app, use_reloader=False, threaded=True)
 
 def create_window():
     window = webview.create_window(
         'Time Tracker', 
-        'http://127.0.0.1:5000',
+        f'http://127.0.0.1:{app_port}',
         width=1200,
         height=800,
         resizable=True,

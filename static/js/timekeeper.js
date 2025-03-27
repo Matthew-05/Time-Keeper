@@ -9,12 +9,19 @@ export class TimeKeeperIndex extends TimeKeeper {
     }
 
     async init() {
-        // Run these in parallel instead of sequentially
-        await Promise.all([
-            this.initializeAutocomplete(),
-            this.checkDayStatus(),
-            this.checkUnfinishedTasks()
-        ]);
+        // First check day status
+        await this.checkDayStatus();
+
+        // Only check for unfinished tasks if day has started
+        const { dayStarted } = await this.fetchFromAPI('/check_day_status');
+        if (dayStarted) {
+            await this.initializeAutocomplete();
+            await this.checkUnfinishedTasks();
+        } else {
+            // Still initialize autocomplete for when day starts
+            await this.initializeAutocomplete();
+        }
+
         console.log("Timekeeper.js loaded");
     }
 
@@ -107,17 +114,36 @@ export class TimeKeeperIndex extends TimeKeeper {
 
 
     async handleStartDay() {
-        const response = await this.fetchFromAPI('/start_day', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ time: this.timePicker.value })
-        });
+        try {
+            const response = await this.fetchFromAPI('/start_day', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ time: this.timePicker.value })
+            });
 
-        if (response.ok) {
+            // If we get here, the request was successful (fetchFromAPI would throw on error)
+            this.showToast('Day started successfully', 'success');
+
+            // Update the UI
             await this.checkDayStatus();
-            await this.checkUnfinishedTasks();
+
+            // Show client selection after day started
+            this.showStartTaskForm();
+
+            // Initialize client selection if not already done
+            if (!this.autocomplete) {
+                await this.initializeAutocomplete();
+            }
+
+            // Update buttons to show start task option
+            this.updateButtonVisibility('dayStarted');
+        } catch (error) {
+            console.error('Failed to start day:', error);
+            // Error is already handled by fetchFromAPI with a toast
         }
     }
+
+
 
 
 
@@ -309,6 +335,13 @@ export class TimeKeeperIndex extends TimeKeeper {
     handleNotStartedState() {
         this.updateButtonVisibility('dayNotStarted');
         this.hideInputFields();
+
+        // Make sure task-related elements are hidden
+        document.getElementById('type-input-container').style.display = 'none';
+        document.getElementById('description-input-container').style.display = 'none';
+
+        // Show the time picker for selecting start time
+        document.getElementById('timepicker-container').style.display = 'block';
     }
 
     handleEndedDayState() {
@@ -334,13 +367,19 @@ export class TimeKeeperIndex extends TimeKeeper {
     }
 
     showStartTaskForm() {
+        // Show the client input container
+        const clientContainer = this.clientInput.closest('.space-y-3');
+        if (clientContainer) clientContainer.style.display = 'block';
         this.clientInput.style.display = 'block';
     }
-
     hideInputFields() {
-        this.clientInput.style.display = 'none';
-        this.typeInput.style.display = 'none';
-        this.descriptionInput.style.display = 'none';
+        // Hide the client input container entirely, not just the input
+        const clientContainer = this.clientInput.closest('.space-y-3');
+        if (clientContainer) clientContainer.style.display = 'none';
+
+        // Hide other inputs
+        document.getElementById('type-input-container').style.display = 'none';
+        document.getElementById('description-input-container').style.display = 'none';
     }
 
     updateButtonVisibility(state) {

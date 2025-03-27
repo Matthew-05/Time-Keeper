@@ -158,11 +158,38 @@ export class TaskBrowser extends TimeKeeper {
                 body: JSON.stringify({ date: this.selectedDate.value })
             });
             const { start_time, end_time } = response;
-            return this.timeStringToMinutes(end_time) - this.timeStringToMinutes(start_time);
+
+            // If no start time, we can't calculate day duration
+            if (!start_time) {
+                return 0;
+            }
+
+            // If end time is missing, use current time for today, or end of day for past dates
+            let effectiveEndTime;
+            if (!end_time) {
+                const today = new Date().toISOString().split('T')[0];
+                if (this.selectedDate.value === today) {
+                    // For today, use current time
+                    const now = new Date();
+                    effectiveEndTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+                } else {
+                    // For past dates without end time, assume end of day
+                    effectiveEndTime = "23:59:59";
+                }
+            } else {
+                effectiveEndTime = end_time;
+            }
+
+            return this.timeStringToMinutes(effectiveEndTime) - this.timeStringToMinutes(start_time);
         } catch (error) {
             this.showToast('Error fetching day data', 'red');
+            return 0;
         }
     }
+
+
+
+
 
     async fetchTasks() {
         if (this.isLoading) return;
@@ -204,19 +231,21 @@ export class TaskBrowser extends TimeKeeper {
     }
 
     async updateSummaryValues(totalMinutesForAll, totalFractionalHours) {
-        const overallDayTime = await this.fetchDayData();
+        const overallDayTime = await this.fetchDayData() || 0;
         const totalBreakTime = parseInt(document.getElementById('break-value').getAttribute('totalBreakMins')) || 0;
 
-        const nonBillableTimeMins = overallDayTime - totalBreakTime - totalMinutesForAll;
+        // Ensure we don't get negative non-billable time
+        let nonBillableTimeMins = Math.max(0, overallDayTime - totalBreakTime - totalMinutesForAll);
+
         const nonBillableHours = this.totalTimeSpentToFractionalHours(nonBillableTimeMins);
 
         const totalTimeFractionalHours = totalFractionalHours + nonBillableHours;
-        const totalTimeLoggedDayMins = overallDayTime - totalBreakTime;
+        const totalTimeLoggedDayMins = Math.max(0, overallDayTime - totalBreakTime);
 
         // Calculate differences and arrows
-        const billDifference = totalFractionalHours * 60 - totalMinutesForAll;
-        const nonDifference = nonBillableHours * 60 - nonBillableTimeMins;
-        const allDayDifference = totalTimeFractionalHours * 60 - totalTimeLoggedDayMins;
+        const billDifference = Math.round(totalFractionalHours * 60 - totalMinutesForAll);
+        const nonDifference = Math.round(nonBillableHours * 60 - nonBillableTimeMins);
+        const allDayDifference = Math.round(totalTimeFractionalHours * 60 - totalTimeLoggedDayMins);
 
         // Update display values with differences
         document.getElementById('billable-value').innerHTML = this.formatTimeWithDifference(
@@ -237,6 +266,10 @@ export class TaskBrowser extends TimeKeeper {
             allDayDifference
         );
     }
+
+
+
+
 
     formatTimeWithDifference(fractionalHours, totalMinutes, difference) {
         const arrow = difference > 0 ? '▲' : '▼';
