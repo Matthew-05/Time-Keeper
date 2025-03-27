@@ -6,6 +6,8 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.initializeElements();
         this.initializeTimePicker();
         this.bindEvents();
+        this.descriptionDebounceTimer = null;
+
     }
 
     async init() {
@@ -41,6 +43,21 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.timePicker = document.getElementById('timepicker');
         this.currentTimeButton = document.getElementById('current-time-button');
         this.taskStartTimeDisplay = document.getElementById('task-start-time');
+
+        this.saveIndicator = document.createElement('span');
+        this.saveIndicator.innerHTML = '<svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
+        this.saveIndicator.className = 'absolute right-3 top-1/2 transform -translate-y-1/2 hidden transition-opacity duration-300';
+        this.saveIndicator.id = 'description-save-indicator';
+
+        // Make the description container relative for absolute positioning of the indicator
+        if (this.descriptionContainer) {
+            this.descriptionContainer.style.position = 'relative';
+
+            // Find the input wrapper div and append the save indicator
+            const inputWrapper = this.descriptionContainer.querySelector('input').parentElement;
+            inputWrapper.appendChild(this.saveIndicator);
+        }
+
     }
 
 
@@ -61,7 +78,58 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.completeButton.addEventListener('click', () => this.completeTask());
         this.reopenDayButton.addEventListener('click', () => this.handleReopenDay());
         this.currentTimeButton.addEventListener('click', () => this.setCurrentTime());
+        this.descriptionInput.addEventListener('input', () => this.handleDescriptionChange());
+
     }
+
+    handleDescriptionChange() {
+        // Hide the checkmark when user starts typing
+        this.saveIndicator.classList.add('hidden');
+
+        // Clear any existing timer
+        if (this.descriptionDebounceTimer) {
+            clearTimeout(this.descriptionDebounceTimer);
+        }
+
+        // Set a new timer for 1 second
+        this.descriptionDebounceTimer = setTimeout(() => {
+            this.updateTaskDescription(this.descriptionInput.value);
+        }, 300);
+    }
+
+
+    async updateTaskDescription(description) {
+        // First check if there's an active task
+        const tasks = await this.fetchFromAPI('/unfinished_tasks');
+        if (tasks.length === 0) {
+            return; // Exit early if no task is running
+        }
+
+        try {
+            const response = await this.fetchFromAPI('/update_task_description', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    description: description
+                })
+            });
+
+            if (response.success) {
+                // Show the checkmark
+                this.saveIndicator.classList.remove('hidden');
+
+                // Hide the checkmark after 3 seconds
+                setTimeout(() => {
+                    this.saveIndicator.classList.add('hidden');
+                }, 3000);
+            }
+        } catch (error) {
+            console.error('Failed to update description:', error);
+        }
+    }
+
+
+
 
     setCurrentTime() {
         const now = new Date();
@@ -579,6 +647,11 @@ export class TimeKeeperIndex extends TimeKeeper {
             console.log("Setting client to:", task.client);
         }
 
+        // Pre-populate the description if available
+        if (task && task.description) {
+            this.descriptionInput.value = task.description;
+        }
+
         // Display the task start time if available
         if (task && task.start_time) {
             const formattedTime = this.formatTimeDisplay(task.start_time);
@@ -586,6 +659,7 @@ export class TimeKeeperIndex extends TimeKeeper {
             this.taskStartTimeDisplay.classList.remove('hidden');
         }
     }
+
 
 
 

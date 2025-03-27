@@ -16,6 +16,8 @@ from sqlalchemy import func
 from flask_cors import CORS
 import socket
 
+APP_VERSION = "1.0.0"
+
 DEV_MODE = os.environ.get('DEV_MODE', 'False').lower() == 'true'
 
 app = Flask(__name__)
@@ -56,13 +58,15 @@ def timer_status():
     global timer_running, timer_value
     return jsonify({'running': timer_running, 'value': timer_value})
 
-
+@app.context_processor
+def inject_version():
+    return dict(app_version=APP_VERSION)
 with app.app_context():
     db.create_all()
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html', version=APP_VERSION)
 
 @app.route('/clients', methods=['GET'])
 def get_clients():
@@ -134,7 +138,7 @@ def delete_client(id):
 @app.route('/client_manager')
 def client_manager():
     clients = Client.query.all()
-    return render_template('client_manager.html', clients=clients)
+    return render_template('client_manager.html', clients=clients, version=APP_VERSION)
 
 @app.route('/new_client', methods=['GET', 'POST'])
 def new_client():
@@ -146,7 +150,7 @@ def new_client():
             db.session.commit()
             return redirect(url_for('client_manager'))
         return jsonify({'error': 'Client already exists'}), 400
-    return render_template('new_client.html')
+    return render_template('new_client.html', version=APP_VERSION)
 
 @app.route('/get_breaks', methods=['POST'])
 def get_breaks():
@@ -197,7 +201,7 @@ def get_day_data():
 
 @app.route('/task_browser')
 def task_browser():
-    return render_template('task_browser.html')
+    return render_template('task_browser.html', version=APP_VERSION)
 
 @app.route('/tasks/<date>')
 def get_tasks(date):
@@ -563,7 +567,7 @@ def create_client():
 @app.route('/summary')
 def summary_page():
     clients = Client.query.all()
-    return render_template('time_summary.html', clients=clients)
+    return render_template('time_summary.html', clients=clients, version=APP_VERSION)
     
 @app.route('/api/summary/<string:period>/<int:client_id>', methods=['GET'])
 def get_time_summary(period, client_id):
@@ -637,6 +641,23 @@ def update_task(task_id):
     
     db.session.commit()
     return jsonify({'success': True})
+
+@app.route('/update_task_description', methods=['POST'])
+def update_task_description():
+    data = request.json
+    description = data.get('description')
+    
+    # Find the most recent unfinished task
+    unfinished_task = Task_Item.query.filter_by(end_time=None).order_by(Task_Item.id.desc()).first()
+    
+    if unfinished_task:
+        unfinished_task.description = description
+        db.session.commit()
+        return jsonify({'success': True}), 200
+    else:
+        return jsonify({'success': False, 'error': 'No unfinished task found'}), 404
+    
+
 @app.route('/task/<int:task_id>', methods=['DELETE'])
 def delete_task(task_id):
     task = Task_Item.query.get_or_404(task_id)
@@ -667,7 +688,7 @@ def create_window():
         width=1200,
         height=800,
         resizable=True,
-        min_size=(800, 600)
+        min_size=(800, 650)
     )
     return window
 
