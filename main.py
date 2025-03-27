@@ -232,6 +232,33 @@ def get_unfinished_tasks():
     } for task in unfinished_tasks]
     return jsonify(tasks_data)
 
+@app.route('/most_recent_task_end_time', methods=['GET'])
+def get_most_recent_task_end_time():
+    today = date.today()
+    
+    # Find the most recent completed task for today
+    most_recent_task = Task_Item.query.filter(
+        Task_Item.date == today,
+        Task_Item.end_time.isnot(None)
+    ).order_by(Task_Item.end_time.desc()).first()
+    
+    if most_recent_task and most_recent_task.end_time:
+        return jsonify({
+            'mostRecentTaskEndTime': most_recent_task.end_time.strftime('%I:%M %p')
+        })
+    else:
+        # If no completed tasks today, return the day's start time
+        day_start = TimeTracking.query.filter_by(date=today).first()
+        if day_start and day_start.start_time:
+            return jsonify({
+                'mostRecentTaskEndTime': day_start.start_time.strftime('%I:%M %p')
+            })
+    
+    # If no day start or completed tasks, return null
+    return jsonify({
+        'mostRecentTaskEndTime': None
+    })
+
 @app.route('/complete_task', methods=['POST'])
 def complete_task():
     print("Completing task")

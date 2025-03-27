@@ -243,14 +243,20 @@ export class TimeKeeperIndex extends TimeKeeper {
             return;
         }
 
-        // Compare with current time if needed
-        const currentTime = this.getCurrentTimeIn12HourFormat();
-        if (selectedTime !== currentTime) {
-            if (!confirm(`Selected time (${selectedTime}) differs from current time (${currentTime}). Continue with selected time?`)) {
-                return;
-            }
+        // Check if time is in the future
+        const isNotFuture = await this.validateTimeNotInFuture(selectedTime);
+        if (!isNotFuture) {
+            return;
         }
 
+        // Check if the selected time is valid (not before the most recent task end time)
+        const isValidStartTime = await this.validateStartTime(selectedTime);
+        if (!isValidStartTime) {
+            return;
+        }
+
+        // Compare with current time if needed
+        const currentTime = this.getCurrentTimeIn12HourFormat();
         const response = await this.fetchFromAPI('/add_unfinished_task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -279,6 +285,36 @@ export class TimeKeeperIndex extends TimeKeeper {
             await this.checkUnfinishedTasks();
         }
     }
+
+    async validateStartTime(selectedTime) {
+        try {
+            // Get the most recent task end time for today
+            const response = await this.fetchFromAPI('/most_recent_task_end_time');
+            const mostRecentTaskEndTime = response.mostRecentTaskEndTime;
+
+            if (mostRecentTaskEndTime) {
+                // Convert both times to comparable format (24-hour)
+                const selectedDateTime = new Date(`2000-01-01 ${selectedTime}`);
+                const recentEndDateTime = new Date(`2000-01-01 ${mostRecentTaskEndTime}`);
+
+                // Check if selected time is earlier than the most recent task end time
+                if (selectedDateTime < recentEndDateTime) {
+                    this.showToast(`Task start time cannot be earlier than the previous task's end time (${this.formatTimeDisplay(mostRecentTaskEndTime)})`, 'error');
+
+                    // Reset the time picker to the most recent task end time
+                    this.timePickerInstance.setDate(recentEndDateTime);
+                    return false;
+                }
+            }
+
+            return true;
+        } catch (error) {
+            console.error('Error validating start time:', error);
+            this.showToast('Error validating start time', 'error');
+            return false;
+        }
+    }
+
 
 
 
@@ -492,6 +528,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         }
     }
 
+
     handleNotStartedState() {
         this.updateButtonVisibility('dayNotStarted');
         this.hideInputFields();
@@ -594,20 +631,49 @@ export class TimeKeeperIndex extends TimeKeeper {
         // Show relevant buttons based on state
         switch (state) {
             case 'dayNotStarted':
-                buttons.startDay.style.display = 'flex'; // Changed from 'block' to 'flex'
+                buttons.startDay.style.display = 'flex';
                 break;
             case 'dayStarted':
-                buttons.start.style.display = 'flex'; // Changed from 'block' to 'flex'
-                buttons.endDay.style.display = 'flex'; // Changed from 'block' to 'flex'
+                buttons.start.style.display = 'flex';
+                buttons.endDay.style.display = 'flex';
                 break;
             case 'taskInProgress':
-                buttons.complete.style.display = 'flex'; // Changed from 'block' to 'flex'
-                buttons.endDay.style.display = 'flex'; // Show end day button even during task
+                buttons.complete.style.display = 'flex';
                 break;
             case 'dayEnded':
-                buttons.reopenDay.style.display = 'flex'; // Changed from 'block' to 'flex'
+                buttons.reopenDay.style.display = 'flex';
                 break;
         }
+    }
+
+
+
+
+    async validateTimeNotInFuture(selectedTime) {
+        // Parse the selected time (in 12-hour format like "1:30 PM")
+        const [timePart, ampmPart] = selectedTime.split(' ');
+        const [hours, minutes] = timePart.split(':').map(Number);
+
+        // Convert to 24-hour format
+        let hours24 = hours;
+        if (ampmPart.toUpperCase() === 'PM' && hours < 12) {
+            hours24 += 12;
+        } else if (ampmPart.toUpperCase() === 'AM' && hours === 12) {
+            hours24 = 0;
+        }
+
+        // Create Date objects for comparison
+        const now = new Date();
+        const selectedDateTime = new Date();
+        selectedDateTime.setHours(hours24, minutes, 0, 0);
+
+        // Check if selected time is in the future
+        if (selectedDateTime > now) {
+            this.showToast('Cannot select a time in the future', 'error');
+            return false;
+        }
+
+        return true;
     }
 
 
@@ -618,6 +684,12 @@ export class TimeKeeperIndex extends TimeKeeper {
 
         if (!selectedTime) {
             this.showToast('Please select a time', 'error');
+            return false;
+        }
+
+        // First check if the time is in the future
+        const isNotFuture = await this.validateTimeNotInFuture(selectedTime);
+        if (!isNotFuture) {
             return false;
         }
 
@@ -655,7 +727,6 @@ export class TimeKeeperIndex extends TimeKeeper {
             return false;
         }
     }
-
 
 
     async handleReopenDay() {

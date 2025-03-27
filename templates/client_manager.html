@@ -1,250 +1,58 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Client Manager</title>
-    <style>
-      table {
-        margin: 0 auto; /* Center the table */
-        border-collapse: collapse;
-        width: 80%; /* Set the table width */
-        max-width: 800px;
-        background-color: #fff;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      }
+{% extends 'base.html' %}
 
-      th,
-      td {
-        padding: 10px;
-        border-bottom: 1px solid #ddd;
-        text-align: left;
-      }
+{% block title %}
+  Client Manager | Time Keeper
+{% endblock %}
 
-      th:first-child,
-      td:first-child {
-        display: none; /* Hide the first column (ID column) */
-      }
-
-      th:nth-child(2),
-      td:nth-child(2) {
-        width: 70%; /* Set the width of the second column (client name) */
-      }
-
-      th:last-child,
-      td:last-child {
-        width: 30%; /* Set the width of the last column */
-      }
-
-      button:hover {
-        background-color: #0056b3;
-      }
-
-      /* Hide the save and cancel buttons initially */
-      button[name="save"],
-      button[name="cancel"] {
-        display: none;
-      }
-
-      /* Style for editable client name cell */
-      td.editable {
-        background-color: #f9f9f9;
-        border: 1px solid #ccc;
-      }
-    </style>
-  </head>
-  <body>
-    {% include 'navbar.html' %}
-    <div class="row">
-      <div class="col offset-l1"><h4>Client Manager</h4></div>
-    </div>
-    <form
-      id="create-form"
-      onsubmit="createClient(event)"
-      style="margin-bottom: 20px"
-      class="container"
-    >
-      <label for="new-client-name">New Client Name:</label>
-      <input type="text" id="new-client-name" name="name" required placeholder="Enter new client name" />
-      <button class="btn waves-effect waves-light" type="submit">Add</button>
-    </form>
-
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Name</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for client in clients %}
-        <tr id="row_{{ client.id }}">
-          <td>{{ client.id }}</td>
-          <td id="name_{{ client.id }}" contenteditable="false">
-            {{ client.name }}
-          </td>
-          <td>
-            <button class="btn waves-effect waves-light" onclick="editClient({{ client.id }})" name="edit">
-              Edit
-            </button>
-            <button class="btn waves-effect waves-light red" onclick="deleteClient({{ client.id }})" name="delete">
-              Delete
-            </button>
-            <button
-              onclick="saveEdit({{ client.id }})"
-              style="display: none"
-              name="save"
-            >
-              Save
-            </button>
-            <button
-              onclick="cancelEdit({{ client.id }})"
-              style="display: none"
-              name="cancel"
-            >
-              Cancel
-            </button>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-
-    <div id="edit-form" style="display: none">
-      <h2>Edit Client</h2>
-      <input type="text" id="edit-name" />
-      <button onclick="saveEdit()">Save</button>
-      <button onclick="cancelEdit()">Cancel</button>
+{% block content %}
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-10">
+    <div class="mb-8">
+      <h1 class="text-3xl font-bold text-gray-800">Client Manager</h1>
     </div>
 
-    <script>
-      const originalText = {};
+    <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+      <form id="create-form" class="flex flex-col md:flex-row gap-4 items-end">
+        <div class="flex-grow">
+          <label for="new-client-name" class="block text-sm font-medium text-gray-700 mb-1">New Client Name</label>
+          <input type="text" id="new-client-name" name="name" required placeholder="Enter new client name" class="w-full px-4 py-2 border border-blue-200 rounded-xl bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-200 focus:outline-none" />
+        </div>
+        <button type="submit" class="px-6 py-2 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition-colors">Add Client</button>
+      </form>
+    </div>
 
-      // Function to initialize original text
-      function initOriginalText() {
-        const nameCells = document.querySelectorAll('[id^="name_"]');
-        nameCells.forEach((cell) => {
-          originalText[cell.id] = cell.innerText;
-        });
-      }
+    <div class="bg-white rounded-lg shadow-md overflow-hidden">
+      <table class="w-full">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="hidden">ID</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for client in clients %}
+            <tr id="row_{{ client.id }}">
+              <td class="hidden">{{ client.id }}</td>
+              <td id="name_{{ client.id }}" contenteditable="false" class="px-6 py-4 text-sm text-gray-900 transition-all duration-200">{{ client.name }}</td>
+              <td class="px-6 py-4 text-right text-sm font-medium space-x-2">
+                <button name="edit" class="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md transition-colors">Edit</button>
+                <button name="delete" class="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-3 py-1 rounded-md transition-colors">Delete</button>
+                <button name="save" style="display: none" class="text-green-600 hover:text-green-900 bg-green-50 hover:bg-green-100 px-3 py-1 rounded-md transition-colors">Save</button>
+                <button name="cancel" style="display: none" class="text-gray-600 hover:text-gray-900 bg-gray-50 hover:bg-gray-100 px-3 py-1 rounded-md transition-colors">Cancel</button>
+              </td>
+            </tr>
+          {% endfor %}
+          {% if not clients %}
+            <tr>
+              <td colspan="2" class="px-6 py-8 text-center text-gray-500">No clients found. Add your first client using the form above.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}
 
-      window.onload = function () {
-        initOriginalText();
-      };
-
-      function editClient(id) {
-        // Hide edit and delete buttons, show save and cancel buttons for this row only
-        const row = document.getElementById(`row_${id}`);
-        row
-          .querySelectorAll('[name="edit"], [name="delete"]')
-          .forEach((btn) => (btn.style.display = "none"));
-        row.querySelector('[name="save"]').style.display = "inline-block";
-        row.querySelector('[name="cancel"]').style.display = "inline-block";
-        // Enable content editing for the name field
-        const nameCell = document.getElementById(`name_${id}`);
-        nameCell.contentEditable = "true";
-        nameCell.style.backgroundColor = "#f9f9f9"; // Change background color
-        nameCell.style.border = "1px solid #ccc"; // Add border
-      }
-
-      function saveEdit(id) {
-        const newName = document.getElementById(`name_${id}`).innerText;
-        fetch(`/clients/${id}`, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ name: newName }),
-        })
-          .then((response) => {
-            if (response.ok) {
-              return response.json();
-            } else {
-              throw new Error("Failed to update client");
-            }
-          })
-          .then(() => {
-            // Optionally provide feedback to the user that the client was updated
-            location.reload();
-          })
-          .catch((error) => {
-            console.error("Error:", error);
-          });
-      }
-
-      function cancelEdit(id) {
-        // Reset the row to original state
-        const nameCell = document.getElementById(`name_${id}`);
-        nameCell.innerText = originalText[nameCell.id];
-        resetRow(id);
-      }
-
-      function resetRow(id) {
-        const row = document.getElementById(`row_${id}`);
-        const nameCell = document.getElementById(`name_${id}`);
-        // Remove editable styling from the name cell
-        nameCell.classList.remove("editable");
-        // Reset background color
-        nameCell.style.backgroundColor = ""; // Reset to default
-        // Disable content editing for the name field
-        nameCell.contentEditable = "false";
-        nameCell.style.borderRight = "none";
-        nameCell.style.borderLeft = "none";
-        // Reset button visibility
-        row
-          .querySelectorAll('[name="edit"], [name="delete"]')
-          .forEach((btn) => (btn.style.display = "inline-block"));
-        row.querySelector('[name="save"]').style.display = "none";
-        row.querySelector('[name="cancel"]').style.display = "none";
-      }
-
-      function deleteClient(id) {
-        fetch(`/clients/${id}`, {
-          method: "DELETE",
-        })
-          .then((response) => {
-            if (response.ok) {
-              return response.json();
-            } else {
-              throw new Error("Failed to delete client");
-            }
-          })
-          .then(() => {
-            // Optionally provide feedback to the user that the client was deleted
-            location.reload();
-          })
-          .catch((error) => {
-            console.error("Error:", error);
-          });
-      }
-      function createClient(event) {
-        event.preventDefault(); // Prevent the form from submitting the traditional way
-
-        const clientName = document.getElementById("new-client-name").value;
-
-        fetch("/clients", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ name: clientName }),
-        })
-          .then((response) => {
-            if (response.ok) {
-              return response.json();
-            } else {
-              throw new Error("Failed to create client");
-            }
-          })
-          .then((newClient) => {
-            location.reload();
-          })
-          .catch((error) => {
-            console.error("Error:", error);
-          });
-      }
-    </script>
-  </body>
-</html>
+{% block page_scripts %}
+  <script src="{{ url_for('static', filename='js/client_manager.js') }}" type="module"></script>
+{% endblock %}
