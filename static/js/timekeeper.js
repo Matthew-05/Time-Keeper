@@ -594,20 +594,23 @@ export class TimeKeeperIndex extends TimeKeeper {
         // Show relevant buttons based on state
         switch (state) {
             case 'dayNotStarted':
-                buttons.startDay.style.display = 'block';
+                buttons.startDay.style.display = 'flex'; // Changed from 'block' to 'flex'
                 break;
             case 'dayStarted':
-                buttons.start.style.display = 'block';
-                buttons.startBreak.style.display = 'block';
+                buttons.start.style.display = 'flex'; // Changed from 'block' to 'flex'
+                buttons.endDay.style.display = 'flex'; // Changed from 'block' to 'flex'
                 break;
             case 'taskInProgress':
-                buttons.complete.style.display = 'block';
+                buttons.complete.style.display = 'flex'; // Changed from 'block' to 'flex'
+                buttons.endDay.style.display = 'flex'; // Show end day button even during task
                 break;
             case 'dayEnded':
-                buttons.reopenDay.style.display = 'block';
+                buttons.reopenDay.style.display = 'flex'; // Changed from 'block' to 'flex'
                 break;
         }
     }
+
+
 
     async validateSelectedTime() {
         // Get the selected time from the time picker
