@@ -6,7 +6,6 @@
         <div class="hidden md:flex space-x-6">
           <a href="/" class="nav-link px-3 py-2 text-sm font-medium text-gray-900 hover:text-blue-600 transition-colors">Home</a>
           <a href="/task_browser" class="nav-link px-3 py-2 text-sm font-medium text-gray-500 hover:text-blue-600 transition-colors">Tasks</a>
-          <a href="/summary" class="nav-link px-3 py-2 text-sm font-medium text-gray-500 hover:text-blue-600 transition-colors">Summary</a>
           <a href="/client_manager" class="nav-link px-3 py-2 text-sm font-medium text-gray-500 hover:text-blue-600 transition-colors">Clients</a>
         </div>
       </div>
@@ -24,99 +23,109 @@
 </nav>
 
 <script>
-  let clientTimer
+  // Store task start time as an absolute timestamp
+  let taskStartTimestamp = null
+  let timerUpdateInterval = null
   
   document.addEventListener('DOMContentLoaded', function () {
     checkForUnfinishedTask()
     const loadTime = new Date()
     const loadTimeString = loadTime.toLocaleString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true })
     document.getElementById('load-time').textContent = loadTimeString
-    
+  
     // Add event listener for custom event when a task is completed
-    document.addEventListener('taskCompleted', function() {
+    document.addEventListener('taskCompleted', function () {
       stopAndResetTimer()
     })
   })
-
-  document.addEventListener('taskStarted', function(event) {
+  
+  document.addEventListener('taskStarted', function (event) {
     if (event.detail && event.detail.startTime) {
-      startTimerWithTime(event.detail.startTime);
+      startTimerWithTime(event.detail.startTime)
     } else {
-      checkForUnfinishedTask();
+      checkForUnfinishedTask()
     }
-  });
-
-
+  })
+  
   function startTimerWithTime(timeString) {
-    console.log("Starting timer with time:", timeString);
-    
+    console.log('Starting timer with time:', timeString)
+  
     // Handle different time formats
-    let taskStartTime;
-    
+    let taskStartTime
+  
     // Check if the time is in HH:MM:SS format
     if (/^\d{1,2}:\d{2}:\d{2}$/.test(timeString)) {
-        taskStartTime = secondsSinceMidnight(timeString);
-    } 
+      taskStartTime = secondsSinceMidnight(timeString)
+    }
     // Check if the time is in HH:MM format
     else if (/^\d{1,2}:\d{2}$/.test(timeString)) {
-        taskStartTime = secondsSinceMidnight(timeString + ":00");
+      taskStartTime = secondsSinceMidnight(timeString + ':00')
     }
     // Check if the time is in 12-hour format (e.g., "3:30 PM")
     else if (/^\d{1,2}:\d{2}\s*[AP]M$/i.test(timeString)) {
-        // Convert to 24-hour format
-        const match = timeString.match(/(\d+):(\d+)\s*([AP]M)/i);
-        if (match) {
-            let [_, hours, minutes, ampm] = match;
-            hours = parseInt(hours);
-            
-            // Convert to 24-hour format
-            if (ampm.toUpperCase() === 'PM' && hours < 12) {
-                hours += 12;
-            } else if (ampm.toUpperCase() === 'AM' && hours === 12) {
-                hours = 0;
-            }
-            
-            // Format as HH:MM:00
-            const formattedTime = `${hours.toString().padStart(2, '0')}:${minutes}:00`;
-            taskStartTime = secondsSinceMidnight(formattedTime);
-        }
-    } else {
-        console.error("Unrecognized time format:", timeString);
-        // Fall back to checking for unfinished tasks
-        checkForUnfinishedTask();
-        return;
-    }
-    
-    const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const currentSeconds = (now - startOfDay) / 1000;
-    const startingTime = currentSeconds - taskStartTime;
-    
-    console.log("Task start seconds:", taskStartTime);
-    console.log("Current seconds:", currentSeconds);
-    console.log("Elapsed time:", startingTime);
-    
-    startTimer(startingTime);
-}
-
-
+      // Convert to 24-hour format
+      const match = timeString.match(/(\d+):(\d+)\s*([AP]M)/i)
+      if (match) {
+        let [_, hours, minutes, ampm] = match
+        hours = parseInt(hours)
   
-  function startTimer(startingTime) {
-    // Stop any existing timer first
+        // Convert to 24-hour format
+        if (ampm.toUpperCase() === 'PM' && hours < 12) {
+          hours += 12
+        } else if (ampm.toUpperCase() === 'AM' && hours === 12) {
+          hours = 0
+        }
+  
+        // Format as HH:MM:00
+        const formattedTime = `${hours.toString().padStart(2, '0')}:${minutes}:00`
+        taskStartTime = secondsSinceMidnight(formattedTime)
+      }
+    } else {
+      console.error('Unrecognized time format:', timeString)
+      // Fall back to checking for unfinished tasks
+      checkForUnfinishedTask()
+      return
+    }
+  
+    const now = new Date()
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const currentSeconds = (now - startOfDay) / 1000
+  
+    // Calculate when the task actually started in absolute time
+    const taskStartedSecondsAgo = currentSeconds - taskStartTime
+  
+    // Store the absolute timestamp when the task started
+    taskStartTimestamp = Date.now() - taskStartedSecondsAgo * 1000
+  
+    console.log('Task start seconds:', taskStartTime)
+    console.log('Current seconds:', currentSeconds)
+    console.log('Task started seconds ago:', taskStartedSecondsAgo)
+    console.log('Task start timestamp:', new Date(taskStartTimestamp).toISOString())
+  
+    startTimer()
+  }
+  
+  function startTimer() {
+    // Clear any existing interval
     stopTimer()
-    
-    clientTimer = setInterval(function () {
-      startingTime++
-      updateTimerDisplay(startingTime)
-    }, 1000)
+  
+    // Update immediately
+    updateTimerDisplay()
+  
+    // Set up interval to update every second
+    timerUpdateInterval = setInterval(updateTimerDisplay, 1000)
   }
   
   function stopTimer() {
-    clearInterval(clientTimer)
+    if (timerUpdateInterval) {
+      clearInterval(timerUpdateInterval)
+      timerUpdateInterval = null
+    }
   }
   
   function stopAndResetTimer() {
     stopTimer()
+    taskStartTimestamp = null
     updateTimerDisplay('No timer running')
   }
   
@@ -129,27 +138,28 @@
     const response = await fetch('/unfinished_tasks')
     const tasks = await response.json()
     if (tasks.length > 0) {
-      const taskStartTime = secondsSinceMidnight(tasks[0].start_time)
-      const now1 = new Date()
-      const startOfDay = new Date(now1.getFullYear(), now1.getMonth(), now1.getDate())
-      const currentSeconds1 = (now1 - startOfDay) / 1000
-      const startingTime = currentSeconds1 - taskStartTime
-      startTimer(startingTime)
+      startTimerWithTime(tasks[0].start_time)
     } else {
       updateTimerDisplay('No timer running')
     }
   }
   
-  function updateTimerDisplay(seconds) {
-    if (seconds === 'No timer running') {
+  function updateTimerDisplay(status) {
+    if (status === 'No timer running' || taskStartTimestamp === null) {
       document.getElementById('timer').innerText = 'No timer running'
-    } else {
-      const hours = Math.floor(seconds / 3600)
-      const minutes = Math.floor((seconds % 3600) / 60)
-      const remainingSeconds = parseInt(seconds % 60)
-      const formattedTime = `Task Running: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`
-      document.getElementById('timer').innerText = formattedTime
+      return
     }
+  
+    // Calculate elapsed time based on the absolute start timestamp
+    const elapsedMilliseconds = Date.now() - taskStartTimestamp
+    const elapsedSeconds = Math.floor(elapsedMilliseconds / 1000)
+  
+    const hours = Math.floor(elapsedSeconds / 3600)
+    const minutes = Math.floor((elapsedSeconds % 3600) / 60)
+    const remainingSeconds = elapsedSeconds % 60
+  
+    const formattedTime = `Task Running: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`
+    document.getElementById('timer').innerText = formattedTime
   }
   
   // Make the function available globally so it can be called from other scripts

@@ -118,22 +118,7 @@ export class TaskBrowser extends TimeKeeper {
 
     async fetchInitialData() {
         await this.fetchTasks();
-        await this.fetchBreaks();
         await this.checkDayStatus();
-    }
-
-    async fetchBreaks() {
-        try {
-            const response = await this.fetchFromAPI('/get_breaks', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ date: this.selectedDate.value })
-            });
-            this.renderBreaks(response);
-            return response;
-        } catch (error) {
-            this.showToast('Error fetching breaks', 'error');
-        }
     }
 
     async fetchDayData() {
@@ -202,24 +187,15 @@ export class TaskBrowser extends TimeKeeper {
         }
     }
 
-    renderBreaks(breaks) {
-        const breaksContainer = document.getElementById('break-value');
-        const totalTime = breaks.length ? this.totalNumberofMinutesPerClient(breaks) : 0;
-        breaksContainer.innerHTML = `${this.totalTimeSpentToFractionalHours(totalTime)} hrs. (${this.minutesToHoursMinutes(totalTime)})`;
-        breaksContainer.setAttribute('totalBreakMins', totalTime);
-    }
-
     async updateSummaryValues(totalMinutesForAll, totalFractionalHours) {
         const overallDayTime = await this.fetchDayData() || 0;
-        const totalBreakTime = parseInt(document.getElementById('break-value').getAttribute('totalBreakMins')) || 0;
 
-        // Ensure we don't get negative non-billable time
-        let nonBillableTimeMins = Math.max(0, overallDayTime - totalBreakTime - totalMinutesForAll);
-
+        // Calculate non-billable time (total day time minus billable time)
+        let nonBillableTimeMins = Math.max(0, overallDayTime - totalMinutesForAll);
         const nonBillableHours = this.totalTimeSpentToFractionalHours(nonBillableTimeMins);
 
         const totalTimeFractionalHours = totalFractionalHours + nonBillableHours;
-        const totalTimeLoggedDayMins = Math.max(0, overallDayTime - totalBreakTime);
+        const totalTimeLoggedDayMins = overallDayTime;
 
         // Calculate differences and arrows
         const billDifference = Math.round(totalFractionalHours * 60 - totalMinutesForAll);
@@ -470,14 +446,15 @@ export class TaskBrowser extends TimeKeeper {
         // Update UI state for break time
     }
 
+
     renderTimeline(tasks, selectedDate) {
         const container = document.getElementById('timeline');
         container.innerHTML = `
-            <div class="flex items-center justify-center h-[200px]">
-                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-                <span class="ml-2 text-gray-600">Loading timeline...</span>
-            </div>
-        `;
+        <div class="flex items-center justify-center h-[200px]">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+            <span class="ml-2 text-gray-600">Loading timeline...</span>
+        </div>
+    `;
 
         // Create a color map for clients
         const clientColors = {};
@@ -509,17 +486,65 @@ export class TaskBrowser extends TimeKeeper {
             style: `background-color: ${clientColors[task.client_id]}; color: white; border-radius: 4px; padding: 2px 8px;`
         }));
 
+        // Calculate a view centered on the current time
+        const now = new Date();
+        const today = new Date().toISOString().split('T')[0];
+        const isSelectedDateToday = selectedDate === today;
+
+        // Set the view duration (how many hours to show)
+        const viewDuration = 8; // Show 8 hours
+
+        let centerHour;
+        if (isSelectedDateToday) {
+            // If viewing today, center on current hour
+            centerHour = now.getHours();
+        } else {
+            // If viewing another day, center on midday (12 PM)
+            centerHour = 12;
+        }
+
+        // Calculate start and end times to center the view on the current hour
+        const startHour = Math.max(0, centerHour - Math.floor(viewDuration / 2));
+        const endHour = Math.min(23, startHour + viewDuration);
+
+        const startTime = `${selectedDate}T${String(startHour).padStart(2, '0')}:00:00`;
+        const endTime = `${selectedDate}T${String(endHour).padStart(2, '0')}:00:00`;
+
         const options = {
-            start: `${selectedDate}T00:00:00`,
-            end: `${selectedDate}T23:59:59`,
-            timeAxis: { scale: 'minute', step: 30 },
+            start: startTime,
+            end: endTime,
+            timeAxis: { scale: 'hour', step: 1 },
             orientation: 'top',
             stack: false,
             verticalScroll: true,
             zoomKey: 'ctrlKey',
             height: '200px',
             min: `${selectedDate}T00:00:00`,
-            max: `${selectedDate}T23:59:59`
+            max: `${selectedDate}T23:59:59`,
+            format: {
+                minorLabels: {
+                    millisecond: 'SSS',
+                    second: 's',
+                    minute: 'h:mm A', // AM/PM format
+                    hour: 'h A',      // AM/PM format
+                    weekday: 'ddd D',
+                    day: 'D',
+                    week: 'w',
+                    month: 'MMM',
+                    year: 'YYYY'
+                },
+                majorLabels: {
+                    millisecond: 'h:mm:ss A', // AM/PM format
+                    second: 'D MMMM h:mm A',  // AM/PM format
+                    minute: 'ddd D MMMM',
+                    hour: 'ddd D MMMM',
+                    weekday: 'MMMM YYYY',
+                    day: 'MMMM YYYY',
+                    week: 'MMMM YYYY',
+                    month: 'YYYY',
+                    year: ''
+                }
+            },
         };
 
         container.innerHTML = '';
@@ -532,6 +557,9 @@ export class TaskBrowser extends TimeKeeper {
 
         return timeline;
     }
+
+
+
 }
 
 document.addEventListener('DOMContentLoaded', () => {
