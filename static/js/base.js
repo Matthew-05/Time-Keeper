@@ -1,5 +1,16 @@
 export class TimeKeeper {
     constructor() {
+        this.ensureToastContainer();
+
+    }
+
+    ensureToastContainer() {
+        if (!document.getElementById('toast-container')) {
+            const toastContainer = document.createElement('div');
+            toastContainer.id = 'toast-container';
+            toastContainer.className = 'fixed bottom-4 right-4 flex flex-col-reverse space-y-reverse space-y-2 z-50';
+            document.body.appendChild(toastContainer);
+        }
     }
 
     getCurrentTimeIn12HourFormat() {
@@ -27,23 +38,44 @@ export class TimeKeeper {
     }
 
     showToast(message, type = 'success') {
+        // Ensure toast container exists
+        this.ensureToastContainer();
+
+        const toastContainer = document.getElementById('toast-container');
+
         const toastClasses = {
             success: 'bg-green-500',
             error: 'bg-red-500',
-            warning: 'bg-yellow-500'
+            warning: 'bg-yellow-500',
+            yellow: 'bg-yellow-500', // For backward compatibility
+            red: 'bg-red-500',       // For backward compatibility
+            green: 'bg-green-500'    // For backward compatibility
         };
 
         const toast = document.createElement('div');
-        toast.className = `fixed bottom-4 right-4 px-6 py-3 rounded-lg text-white ${toastClasses[type]} transition-opacity duration-300`;
+        toast.className = `px-6 py-3 rounded-lg text-white ${toastClasses[type] || 'bg-blue-500'} shadow-lg transition-all duration-300 mb-2`;
         toast.textContent = message;
 
-        document.body.appendChild(toast);
+        // Add the toast to the container
+        toastContainer.appendChild(toast);
 
+        // Set a timeout to remove the toast
         setTimeout(() => {
             toast.style.opacity = '0';
-            setTimeout(() => toast.remove(), 300);
+            toast.style.transform = 'translateX(100%)';
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
+                }
+
+                // If no more toasts, remove the container
+                if (toastContainer.children.length === 0) {
+                    toastContainer.remove();
+                }
+            }, 300);
         }, 3000);
     }
+
 
     timeStringToMinutes(timeString) {
         if (!timeString) return 0;

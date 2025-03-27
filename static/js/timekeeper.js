@@ -35,26 +35,22 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.actionButton = document.getElementById('action-button');
         this.completeButton = document.getElementById('complete-button');
         this.startButton = document.getElementById('start-button');
-        this.startBreakButton = document.getElementById('start-break-button');
-        this.endBreakButton = document.getElementById('end-break-button');
         this.startDayButton = document.getElementById('start-day-button');
         this.endDayButton = document.getElementById('end-day-button');
         this.reopenDayButton = document.getElementById('reopen-day-button');
         this.timePicker = document.getElementById('timepicker');
+        this.currentTimeButton = document.getElementById('current-time-button');
     }
+
 
     initializeTimePicker() {
         this.timePickerInstance = flatpickr(this.timePicker, {
             enableTime: true,
             noCalendar: true,
             dateFormat: "h:i K",
-            defaultDate: new Date(),
-            onChange: (selectedDates) => {
-                this.handleTimePickerClose();
-                this.validateSelectedTime();
-            }
         });
     }
+
 
 
     bindEvents() {
@@ -62,10 +58,16 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.endDayButton.addEventListener('click', () => this.handleEndDay());
         this.startButton.addEventListener('click', () => this.startTask());
         this.completeButton.addEventListener('click', () => this.completeTask());
-        this.startBreakButton.addEventListener('click', () => this.startBreak());
-        this.endBreakButton.addEventListener('click', () => this.endBreak());
-        this.reopenDayButton.addEventListener('click', () => this.reopenDay());
+        this.reopenDayButton.addEventListener('click', () => this.handleReopenDay());
+        this.currentTimeButton.addEventListener('click', () => this.setCurrentTime());
     }
+
+    setCurrentTime() {
+        const now = new Date();
+        this.timePickerInstance.setDate(now);
+        this.showToast('Time set to current time', 'success');
+    }
+
 
     async getMostRecentEndTimeFromBackend() {
         const response = await this.fetchFromAPI('/most_recent_end_time');
@@ -85,17 +87,15 @@ export class TimeKeeperIndex extends TimeKeeper {
     }
 
     async checkDayStatus() {
-        const { dayStarted, unfinishedTasksExist, dayEnded, breakTimeStarted } =
+        const { dayStarted, unfinishedTasksExist, dayEnded } =
             await this.fetchFromAPI('/check_day_status');
 
-        if (dayStarted && !dayEnded && !breakTimeStarted) {
+        if (dayStarted && !dayEnded) {
             this.handleOpenDayState(unfinishedTasksExist);
         } else if (!dayStarted && !dayEnded) {
             this.handleNotStartedState();
         } else if (dayEnded) {
             this.handleEndedDayState();
-        } else if (breakTimeStarted) {
-            this.handleBreakState();
         }
     }
 
@@ -115,6 +115,12 @@ export class TimeKeeperIndex extends TimeKeeper {
 
     async handleStartDay() {
         try {
+            // Validate time selection
+            if (!this.timePicker.value) {
+                this.showToast('Please select a start time.', 'error');
+                return;
+            }
+
             const response = await this.fetchFromAPI('/start_day', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -123,6 +129,9 @@ export class TimeKeeperIndex extends TimeKeeper {
 
             // If we get here, the request was successful (fetchFromAPI would throw on error)
             this.showToast('Day started successfully', 'success');
+
+            // Clear the time picker
+            this.timePickerInstance.clear();
 
             // Update the UI
             await this.checkDayStatus();
@@ -145,26 +154,89 @@ export class TimeKeeperIndex extends TimeKeeper {
 
 
 
+    async handleEndDay() {
+        try {
+            // Validate time selection
+            if (!this.timePicker.value) {
+                this.showToast('Please select an end time.', 'error');
+                return;
+            }
+
+            // Then validate the selected time against business rules
+            const isTimeValid = await this.validateSelectedTime();
+            if (!isTimeValid) {
+                return; // Stop if time validation fails
+            }
+
+            // Get the current time from the time picker
+            const selectedTime = this.timePicker.value;
+
+            // Call the API endpoint to end the day
+            const response = await this.fetchFromAPI('/end_day', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ time: selectedTime })
+            });
+
+            // If successful, show a success message
+            this.showToast('Day ended successfully', 'success');
+
+            // Clear the time picker
+            this.timePickerInstance.clear();
+
+            // Update the UI to reflect the day has ended
+            await this.checkDayStatus();
+
+            // Update button visibility
+            this.updateButtonVisibility('dayEnded');
+        } catch (error) {
+            console.error('Failed to end day:', error);
+            // Error is already handled by fetchFromAPI with a toast
+        }
+    }
+
+
+
+
+    getCurrentTimeIn12HourFormat() {
+        const now = new Date();
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        const formattedHours = hours % 12 || 12;
+        const formattedMinutes = minutes.toString().padStart(2, '0');
+        return `${formattedHours}:${formattedMinutes} ${ampm}`;
+    }
+
+
+
 
 
     async startTask() {
         const clientName = this.clientInput.value;
         const selectedTime = this.timePicker.value;
 
+        // Validate client selection
         if (!clientName) {
-            this.showToast('Please select a client.', 'yellow');
+            this.showToast('Please select a client.', 'error');
             return;
         }
 
-        const now = new Date();
-        const currentTime = this.getCurrentTimeIn12HourFormat();
+        // Validate time selection - only check once
+        if (!selectedTime) {
+            this.showToast('Please select a time.', 'error');
+            return;
+        }
 
+        // Compare with current time if needed
+        const currentTime = this.getCurrentTimeIn12HourFormat();
         if (selectedTime !== currentTime) {
             if (!confirm(`Selected time (${selectedTime}) differs from current time (${currentTime}). Continue with selected time?`)) {
                 return;
             }
         }
 
+        // No need for additional time validation here
         const response = await this.fetchFromAPI('/add_unfinished_task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -176,21 +248,41 @@ export class TimeKeeperIndex extends TimeKeeper {
 
         if (response.success) {
             this.clearInputs();
+            // Clear the time picker
+            this.timePickerInstance.clear();
             await this.checkDayStatus();
             await this.checkUnfinishedTasks();
         }
     }
 
 
+
+
     clearInputs() {
         this.clientInput.value = '';
         this.typeInput.value = '';
         this.descriptionInput.value = '';
+        // Clear the time picker
+        this.timePickerInstance.clear();
     }
 
 
 
+
+
     async completeTask() {
+        // Validate time selection
+        if (!this.timePicker.value) {
+            this.showToast('Please select a completion time.', 'error');
+            return;
+        }
+
+        // Validate the selected time against business rules
+        const isTimeValid = await this.validateSelectedTime();
+        if (!isTimeValid) {
+            return; // Stop if time validation fails
+        }
+
         const response = await this.fetchFromAPI('/complete_task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -205,6 +297,8 @@ export class TimeKeeperIndex extends TimeKeeper {
         if (response.success) {
             this.showToast(`Task completed successfully for client: ${this.clientInput.value}`, 'green');
             this.clearInputs();
+            // Clear the time picker
+            this.timePickerInstance.clear();
             this.autocomplete.setChoiceByValue('');
             this.completeButton.style.display = 'none';
             this.startButton.style.display = 'block';
@@ -327,7 +421,6 @@ export class TimeKeeperIndex extends TimeKeeper {
             // When day is started but no tasks are in progress, show both start task and end day options
             this.startButton.style.display = 'block';
             this.endDayButton.style.display = 'block';
-            this.startBreakButton.style.display = 'block';
             this.showStartTaskForm();
         }
     }
@@ -347,13 +440,22 @@ export class TimeKeeperIndex extends TimeKeeper {
     handleEndedDayState() {
         this.updateButtonVisibility('dayEnded');
         this.hideInputFields();
+
+        // Hide the client selector specifically
+        if (this.autocomplete && this.autocomplete.containerOuter) {
+            this.autocomplete.containerOuter.element.style.display = 'none';
+        }
+
+        // Also hide the client input container
+        const clientContainer = this.clientInput.closest('.space-y-3');
+        if (clientContainer) clientContainer.style.display = 'none';
+
+        // Hide the time picker container as well
         document.getElementById('timepicker-container').style.display = 'none';
     }
 
-    handleBreakState() {
-        this.updateButtonVisibility('onBreak');
-        this.hideInputFields();
-    }
+
+
 
     showTaskCompletionForm(task) {
         // Display the form fields
@@ -389,8 +491,6 @@ export class TimeKeeperIndex extends TimeKeeper {
             start: this.startButton,
             startDay: this.startDayButton,
             endDay: this.endDayButton,
-            startBreak: this.startBreakButton,
-            endBreak: this.endBreakButton,
             reopenDay: this.reopenDayButton
         };
 
@@ -411,14 +511,114 @@ export class TimeKeeperIndex extends TimeKeeper {
             case 'taskInProgress':
                 buttons.complete.style.display = 'block';
                 break;
-            case 'onBreak':
-                buttons.endBreak.style.display = 'block';
-                break;
             case 'dayEnded':
                 buttons.reopenDay.style.display = 'block';
                 break;
         }
     }
+
+    async validateSelectedTime() {
+        // Get the selected time from the time picker
+        const selectedTime = this.timePicker.value;
+
+        if (!selectedTime) {
+            this.showToast('Please select a time', 'error');
+            return false;
+        }
+
+        try {
+            // Get the most recent end time from the backend
+            const response = await this.fetchFromAPI('/most_recent_end_time');
+            const mostRecentEndTime = response.mostRecentEndTime;
+
+            if (mostRecentEndTime) {
+                // Convert both times to comparable format (24-hour)
+                const selectedDateTime = new Date(`2000-01-01 ${selectedTime}`);
+                const recentEndDateTime = new Date(`2000-01-01 ${mostRecentEndTime}`);
+
+                // Check if selected time is earlier than the most recent end time
+                if (selectedDateTime < recentEndDateTime) {
+                    this.showToast(`Selected time cannot be earlier than ${mostRecentEndTime}`, 'error');
+
+                    // Reset the time picker to the most recent end time
+                    const hours = recentEndDateTime.getHours();
+                    const minutes = recentEndDateTime.getMinutes();
+                    const ampm = hours >= 12 ? 'PM' : 'AM';
+                    const formattedHours = hours % 12 || 12;
+                    const formattedMinutes = minutes.toString().padStart(2, '0');
+                    const timeString = `${formattedHours}:${formattedMinutes} ${ampm}`;
+
+                    this.timePickerInstance.setDate(recentEndDateTime);
+                    return false;
+                }
+            }
+
+            return true;
+        } catch (error) {
+            console.error('Error validating selected time:', error);
+            this.showToast('Error validating time', 'error');
+            return false;
+        }
+    }
+
+
+
+    async handleReopenDay() {
+        try {
+            // Call the API endpoint to reopen the day
+            const response = await this.fetchFromAPI('/reopen_day', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            // If successful, show a success message
+            this.showToast('Day reopened successfully', 'success');
+            document.getElementById('reopen-day-button').style.display = 'none';
+
+            // Check for unfinished tasks
+            const tasks = await this.fetchFromAPI('/unfinished_tasks');
+
+            // Update the UI based on whether there are unfinished tasks
+            if (tasks.length > 0) {
+                // If there are unfinished tasks, show the task completion form
+                this.handleOpenDayState(true);
+                this.showTaskCompletionForm(tasks[0]);
+                this.completeButton.dataset.taskId = tasks[0].id;
+
+                // Set the client in the autocomplete
+                if (this.autocomplete) {
+                    this.autocomplete.setChoiceByValue(tasks[0].client);
+                }
+            } else {
+                // If there are no unfinished tasks, show the start task form
+                this.handleOpenDayState(false);
+                this.showStartTaskForm();
+
+                // Make sure the client selector is visible
+                const clientContainer = this.clientInput.closest('.space-y-3');
+                if (clientContainer) clientContainer.style.display = 'block';
+
+                // Show the time picker
+                document.getElementById('timepicker-container').style.display = 'block';
+            }
+
+            // Initialize autocomplete if needed
+            if (!this.autocomplete) {
+                await this.initializeAutocomplete();
+            } else if (this.autocomplete.containerOuter) {
+                // Make sure the autocomplete is visible
+                this.autocomplete.containerOuter.element.style.display = 'block';
+            }
+
+            // Update day status to reflect changes
+            await this.checkDayStatus();
+        } catch (error) {
+            console.error('Failed to reopen day:', error);
+            // Error is already handled by fetchFromAPI with a toast
+        }
+    }
+
+
 
 
 }

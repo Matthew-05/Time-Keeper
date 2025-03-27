@@ -14,7 +14,6 @@ export class TaskBrowser extends TimeKeeper {
                 this.fetchTasks();
             }
         }, 60000);
-
     }
 
     initializeElements() {
@@ -50,8 +49,6 @@ export class TaskBrowser extends TimeKeeper {
         });
     }
 
-
-
     async handleTaskDelete(row) {
         const taskId = row.dataset.taskId;
         try {
@@ -64,8 +61,6 @@ export class TaskBrowser extends TimeKeeper {
             this.showToast('Failed to delete task', 'error');
         }
     }
-
-
 
     enableEditMode(row) {
         row.querySelectorAll('.time-display').forEach(span => span.classList.add('hidden'));
@@ -80,9 +75,6 @@ export class TaskBrowser extends TimeKeeper {
         row.querySelector('.edit-task-btn').classList.remove('hidden');
         row.querySelector('.edit-controls').classList.add('hidden');
     }
-
-
-
 
     async handleTaskUpdate(row) {
         const taskId = row.dataset.taskId;
@@ -113,11 +105,8 @@ export class TaskBrowser extends TimeKeeper {
         } catch (error) {
             this.showToast(error.message, 'error');
             // Keep edit mode active so user can fix the error
-            row.querySelector('.edit-controls').classList.remove('hidden');
         }
     }
-
-
 
     getClientOptions(selectedClientId) {
         return this.clients.map(client => `
@@ -126,9 +115,6 @@ export class TaskBrowser extends TimeKeeper {
             </option>
         `).join('');
     }
-
-
-
 
     async fetchInitialData() {
         await this.fetchTasks();
@@ -146,7 +132,7 @@ export class TaskBrowser extends TimeKeeper {
             this.renderBreaks(response);
             return response;
         } catch (error) {
-            this.showToast('Error fetching breaks', 'red');
+            this.showToast('Error fetching breaks', 'error');
         }
     }
 
@@ -182,14 +168,10 @@ export class TaskBrowser extends TimeKeeper {
 
             return this.timeStringToMinutes(effectiveEndTime) - this.timeStringToMinutes(start_time);
         } catch (error) {
-            this.showToast('Error fetching day data', 'red');
+            this.showToast('Error fetching day data', 'error');
             return 0;
         }
     }
-
-
-
-
 
     async fetchTasks() {
         if (this.isLoading) return;
@@ -199,29 +181,26 @@ export class TaskBrowser extends TimeKeeper {
         const tbody = document.getElementById('tasks-tbody');
 
         tbody.innerHTML = `
-        <tr>
-            <td colspan="4">
-                <div class="flex items-center justify-center py-4">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-                </div>
-            </td>
-        </tr>
-    `;
+            <tr>
+                <td colspan="4" class="px-6 py-8 text-center">
+                    <div class="flex items-center justify-center">
+                        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                        <span class="ml-3 text-gray-600">Loading tasks...</span>
+                    </div>
+                </td>
+            </tr>
+        `;
+
         try {
             const response = await this.fetchFromAPI(`/tasks/${this.selectedDate.value}`);
             this.renderTasks(response);
             this.renderTimeline(response, this.selectedDate.value);
         } catch (error) {
-            this.showToast('Error fetching tasks', 'red');
+            this.showToast('Error fetching tasks', 'error');
         } finally {
             this.isLoading = false;
         }
     }
-
-
-
-
-
 
     renderBreaks(breaks) {
         const breaksContainer = document.getElementById('break-value');
@@ -267,10 +246,6 @@ export class TaskBrowser extends TimeKeeper {
         );
     }
 
-
-
-
-
     formatTimeWithDifference(fractionalHours, totalMinutes, difference) {
         const arrow = difference > 0 ? '▲' : '▼';
         const colorClass = difference > 0 ? 'text-green-600' : 'text-red-600';
@@ -294,6 +269,17 @@ export class TaskBrowser extends TimeKeeper {
                 let totalMinutesForAll = 0;
                 let totalFractionalHours = 0;
 
+                if (clientGroups.length === 0) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="4" class="px-6 py-8 text-center text-gray-500">
+                                No tasks found for this date
+                            </td>
+                        </tr>
+                    `;
+                    return;
+                }
+
                 clientGroups.forEach(client => {
                     const totalMinutes = this.totalNumberofMinutesPerClient(client.tasks);
                     totalMinutesForAll += totalMinutes;
@@ -302,12 +288,14 @@ export class TaskBrowser extends TimeKeeper {
 
                     // Add the summary row
                     const summaryRow = document.createElement('tr');
-                    summaryRow.className = 'hover:bg-gray-50 cursor-pointer';
+                    summaryRow.className = 'task-row hover:bg-gray-50 cursor-pointer transition-colors';
                     summaryRow.innerHTML = `
-                        <td class="p-3 border">${client.name}</td>
-                        <td class="p-3 border">${totalMinutes} minutes</td>
-                        <td class="p-3 border">${fractionalHours} hrs.</td>
-                        <td class="p-3 border">${fractionalHours * 60 - totalMinutes} minutes</td>
+                        <td class="px-6 py-4 font-medium">${client.name}</td>
+                        <td class="px-6 py-4">${totalMinutes} minutes</td>
+                        <td class="px-6 py-4 font-semibold">${fractionalHours} hrs.</td>
+                        <td class="px-6 py-4 ${fractionalHours * 60 - totalMinutes > 0 ? 'text-green-600' : 'text-red-600'}">
+                            ${fractionalHours * 60 - totalMinutes} minutes
+                        </td>
                     `;
                     summaryRow.addEventListener('click', () => this.toggleDetailTable(client.id));
                     tbody.appendChild(summaryRow);
@@ -320,8 +308,6 @@ export class TaskBrowser extends TimeKeeper {
                 this.updateSummaryValues(totalMinutesForAll, totalFractionalHours);
             });
     }
-
-
 
     aggregateByClient(tasks) {
         const clientMap = {};
@@ -343,50 +329,54 @@ export class TaskBrowser extends TimeKeeper {
     createDetailRow(client) {
         const detailRow = document.createElement('tr');
         detailRow.id = `detail-row-${client.id}`;
-        detailRow.className = 'hidden bg-gray-50';
+        detailRow.className = 'detail-row hidden';
 
         const detailCell = document.createElement('td');
         detailCell.colSpan = 4;
-        detailCell.className = 'p-3';
+        detailCell.className = 'p-0';
 
         const detailTable = document.createElement('table');
-        detailTable.className = 'w-full border-collapse';
+        detailTable.className = 'w-full border-t border-gray-200';
         detailTable.innerHTML = `
             <thead>
-                <tr>
-                    <th class="p-2 text-left border">Start Time</th>
-                    <th class="p-2 text-left border">End Time</th>
-                    <th class="p-2 text-left border">Description</th>
-                    <th class="p-2 text-left border">Time Spent</th>
-                    <th class="p-2 text-left border">Actions</th>
+                <tr class="bg-gray-100 text-xs uppercase tracking-wider text-gray-600">
+                    <th class="px-4 py-3 text-left">Start Time</th>
+                    <th class="px-4 py-3 text-left">End Time</th>
+                    <th class="px-4 py-3 text-left">Description</th>
+                    <th class="px-4 py-3 text-left">Time Spent</th>
+                    <th class="px-4 py-3 text-left">Actions</th>
                 </tr>
             </thead>
             <tbody>
                 ${client.tasks.map(task => `
-                    <tr data-task-id="${task.id}" ${task.is_ongoing ? 'class="bg-yellow-100"' : ''}>
-                        <td class="p-2 border">
+                    <tr data-task-id="${task.id}" class="${task.is_ongoing ? 'bg-yellow-50' : ''} hover:bg-gray-50">
+                        <td class="px-4 py-3">
                             <span class="time-display">${this.convertTo12HourFormat(task.start_time)}</span>
-                            <input type="text" class="task-time-picker start-time hidden" value="${task.start_time}">
+                            <input type="text" class="task-time-picker start-time hidden w-24 p-1 border rounded" value="${task.start_time}">
                         </td>
-                        <td class="p-2 border">
+                        <td class="px-4 py-3">
                             <span class="time-display">
                                 ${task.is_ongoing ?
-                `${this.convertTo12HourFormat(task.end_time)} (Ongoing)` :
+                `${this.convertTo12HourFormat(task.end_time)} <span class="text-yellow-600 text-xs font-medium ml-1">(Ongoing)</span>` :
                 this.convertTo12HourFormat(task.end_time)}
                             </span>
-                            <input type="text" class="task-time-picker end-time hidden" value="${task.end_time || ''}">
+                            <input type="text" class="task-time-picker end-time hidden w-24 p-1 border rounded" value="${task.end_time || ''}">
                         </td>
-                        <td class="p-2 border">${task.description || ''}</td>
-                        <td class="p-2 border">${this.getMinuteDifference(task.end_time, task.start_time)} minutes</td>
-                        <td class="p-2 border">
-                            <button class="edit-task-btn bg-blue-500 text-white px-2 py-1 rounded">Edit</button>
-                            <button class="delete-task-btn bg-red-500 text-white px-2 py-1 rounded">Delete</button>
-                            <div class="edit-controls hidden">
-                                <select class="client-select">
+                        <td class="px-4 py-3 max-w-xs truncate">${task.description || '<span class="text-gray-400 italic">No description</span>'}</td>
+                        <td class="px-4 py-3">${this.getMinuteDifference(task.end_time, task.start_time)} minutes</td>
+                        <td class="px-4 py-3">
+                            <div class="flex space-x-2">
+                                <button class="edit-task-btn text-white px-3 py-1 rounded text-sm">Edit</button>
+                                <button class="delete-task-btn text-white px-3 py-1 rounded text-sm">Delete</button>
+                            </div>
+                            <div class="edit-controls hidden mt-2 space-y-2">
+                                <select class="client-select w-full p-1 border rounded text-sm">
                                     ${this.getClientOptions(task.client_id)}
                                 </select>
-                                <button class="save-task-btn bg-green-500 text-white px-2 py-1 rounded">Save</button>
-                                <button class="cancel-task-btn bg-gray-500 text-white px-2 py-1 rounded">Cancel</button>
+                                <div class="flex space-x-2">
+                                    <button class="save-task-btn text-white px-3 py-1 rounded text-sm">Save</button>
+                                    <button class="cancel-task-btn text-white px-3 py-1 rounded text-sm">Cancel</button>
+                                </div>
                             </div>
                         </td>
                     </tr>
@@ -402,8 +392,8 @@ export class TaskBrowser extends TimeKeeper {
                 flatpickr(input, {
                     enableTime: true,
                     noCalendar: true,
-                    dateFormat: "h:i K",
-                    time_24hr: false,
+                    dateFormat: "H:i",
+                    time_24hr: true,
                     minuteIncrement: 1
                 });
             });
@@ -412,18 +402,17 @@ export class TaskBrowser extends TimeKeeper {
         return detailRow;
     }
 
-
-
     toggleDetailTable(clientId) {
         const detailRow = document.getElementById(`detail-row-${clientId}`);
         detailRow.classList.toggle('hidden');
     }
 
     convertTo12HourFormat(timeString) {
+        if (!timeString) return '-';
         const [hours, minutes] = timeString.split(':');
         const period = +hours >= 12 ? 'PM' : 'AM';
         const hour = +hours % 12 || 12;
-        return `${String(hour).padStart(2)}:${minutes} ${period}`;
+        return `${String(hour).padStart(2, '0')}:${minutes} ${period}`;
     }
 
     getMinuteDifference(endTime, startTime) {
@@ -443,13 +432,12 @@ export class TaskBrowser extends TimeKeeper {
 
     initializeTimePicker() {
         this.timePicker = flatpickr(this.selectedDate, {
-            enableTime: true,
+            enableTime: false,
             dateFormat: "Y-m-d",
             defaultDate: new Date(),
             onChange: () => this.fetchTasks()
         });
     }
-
 
     async checkDayStatus() {
         const { dayStarted, unfinishedTasksExist, dayEnded, breakTimeStarted } =
@@ -485,26 +473,25 @@ export class TaskBrowser extends TimeKeeper {
     renderTimeline(tasks, selectedDate) {
         const container = document.getElementById('timeline');
         container.innerHTML = `
-        <div class="flex items-center justify-center h-[200px]">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-            <span class="ml-2 text-gray-600">Loading timeline...</span>
-        </div>
-    `;
-
+            <div class="flex items-center justify-center h-[200px]">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                <span class="ml-2 text-gray-600">Loading timeline...</span>
+            </div>
+        `;
 
         // Create a color map for clients
         const clientColors = {};
         const colors = [
-            '#2196F3', // Blue
-            '#4CAF50', // Green
-            '#F44336', // Red
-            '#9C27B0', // Purple
-            '#FF9800', // Orange
-            '#00BCD4', // Cyan
-            '#795548', // Brown
-            '#009688', // Teal
-            '#673AB7', // Deep Purple
-            '#FF5722'  // Deep Orange
+            '#3b82f6', // Blue
+            '#10b981', // Green
+            '#ef4444', // Red
+            '#8b5cf6', // Purple
+            '#f59e0b', // Orange
+            '#06b6d4', // Cyan
+            '#6b7280', // Gray
+            '#0ea5e9', // Sky
+            '#8b5cf6', // Violet
+            '#f43f5e'  // Pink
         ];
 
         // Assign colors to unique clients
@@ -519,7 +506,7 @@ export class TaskBrowser extends TimeKeeper {
             content: task.client_name,
             start: `${selectedDate}T${task.start_time}`,
             end: task.end_time ? `${selectedDate}T${task.end_time}` : undefined,
-            style: `background-color: ${clientColors[task.client_id]}; color: white;`
+            style: `background-color: ${clientColors[task.client_id]}; color: white; border-radius: 4px; padding: 2px 8px;`
         }));
 
         const options = {
@@ -545,8 +532,6 @@ export class TaskBrowser extends TimeKeeper {
 
         return timeline;
     }
-
-
 }
 
 document.addEventListener('DOMContentLoaded', () => {

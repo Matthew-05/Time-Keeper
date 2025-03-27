@@ -39,26 +39,22 @@
 
           <!-- Time Selection -->
           <div class="text-center py-6" id="timepicker-container">
-            <input type="text" id="timepicker" class="text-4xl font-bold text-center bg-gray-50 px-8 py-4 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-blue-500 transition-all" />
+            <div class="flex items-center justify-center space-x-3">
+              <input type="text" id="timepicker" class="text-4xl font-bold text-center bg-gray-50 px-8 py-4 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-blue-500 transition-all" />
+              <button id="current-time-button" class="px-4 py-3 bg-gray-200 text-gray-800 rounded-xl hover:bg-gray-300 transition-all font-medium">
+                <span class="flex items-center">
+                  <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>Now
+                </span>
+              </button>
+            </div>
             <div id="lowestTimeAllowed" class="text-sm text-gray-500 mt-3 font-medium"></div>
           </div>
-        </div>
 
         <!-- Action Buttons -->
         <div class="px-8 py-6 bg-gray-50 border-t border-gray-100">
           <div class="flex justify-between items-center">
-            <!-- Break Controls -->
-            <div class="space-x-4">
-              <button id="start-break-button" class="hidden px-6 py-3 bg-amber-500 text-white rounded-xl hover:bg-amber-600 transition-all transform hover:scale-105 font-medium">
-                <span class="flex items-center">
-                  <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                  </svg>Start Break
-                </span>
-              </button>
-              <button id="end-break-button" class="hidden px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all transform hover:scale-105 font-medium">End Break</button>
-            </div>
-
             <!-- Task Controls -->
             <div class="space-x-4">
               <button id="action-button" class="hidden px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all transform hover:scale-105 font-medium">Add Task</button>

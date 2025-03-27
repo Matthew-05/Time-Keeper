@@ -1,67 +1,192 @@
 {% extends 'base.html' %}
 
 {% block title %}
-  Task Items History
+  Task History | Time Keeper
 {% endblock %}
 
 {% block additional_styles %}
   <style>
+    .timeline-container {
+      background: white;
+      border-radius: 0.75rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    
     .tooltip {
       position: absolute;
       display: none;
       background-color: white;
       border: 1px solid #e5e7eb;
       padding: 0.75rem;
-      border-radius: 0.375rem;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      border-radius: 0.5rem;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
       pointer-events: none;
+      z-index: 1000;
+    }
+    
+    .card {
+      background: white;
+      border-radius: 0.75rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+    }
+    
+    .date-picker-container {
+      position: relative;
+      margin-bottom: 1.5rem;
+    }
+    
+    .date-picker-container::before {
+      content: '📅';
+      position: absolute;
+      left: 1rem;
+      top: 50%;
+      transform: translateY(-50%);
+      pointer-events: none;
+    }
+    
+    #selected-date {
+      padding-left: 2.5rem;
+      background-color: white;
+      border-radius: 0.5rem;
+      border: 1px solid #e5e7eb;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      height: 3rem;
+      font-size: 1rem;
+    }
+    
+    .task-row:hover {
+      background-color: #f9fafb;
+    }
+    
+    .detail-row {
+      background-color: #f3f4f6;
+      transition: all 0.3s ease;
+    }
+    
+    .edit-task-btn,
+    .save-task-btn {
+      background-color: #3b82f6;
+      transition: background-color 0.2s;
+    }
+    
+    .edit-task-btn:hover,
+    .save-task-btn:hover {
+      background-color: #2563eb;
+    }
+    
+    .delete-task-btn,
+    .cancel-task-btn {
+      background-color: #ef4444;
+      transition: background-color 0.2s;
+    }
+    
+    .delete-task-btn:hover,
+    .cancel-task-btn:hover {
+      background-color: #dc2626;
+    }
+    
+    .summary-card {
+      background: white;
+      border-radius: 0.75rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+    }
+    
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    
+    .summary-row:last-child {
+      border-bottom: none;
+    }
+    
+    .summary-label {
+      font-weight: 500;
+      color: #4b5563;
+    }
+    
+    .summary-value {
+      font-weight: 600;
+    }
+    
+    .total-row {
+      background-color: #f3f4f6;
+      border-top: 2px solid #d1d5db;
+    }
+    
+    .break-value {
+      color: #ef4444;
     }
   </style>
 {% endblock %}
 
 {% block content %}
-  <div class="max-w-7xl mx-auto py-6">
-    <h2 class="text-2xl font-bold mb-6">Task Manager</h2>
+  <div class="max-w-7xl mx-auto px-4 py-8">
+    <div class="flex justify-between items-center mb-6">
+      <h1 class="text-2xl font-bold text-gray-800">Task History</h1>
+    </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
       <div class="lg:col-span-3">
-        <input type="text" id="selected-date" class="w-full mb-4 p-2 border rounded cursor-pointer" onchange="fetchTasks()" />
+        <div class="date-picker-container">
+          <input type="text" id="selected-date" class="w-full cursor-pointer" placeholder="Select date..." />
+        </div>
 
-        <div id="timeline" class="my-4"></div>
-        <div id="tooltip" class="tooltip"></div>
+        <div class="timeline-container">
+          <h2 class="text-lg font-semibold mb-3 text-gray-700">Daily Timeline</h2>
+          <div id="timeline" class="h-[200px]"></div>
+          <div id="tooltip" class="tooltip"></div>
+        </div>
 
-        <table class="w-full border-collapse border border-gray-200">
-          <thead>
-            <tr class="bg-gray-50">
-              <th class="p-3 text-left border border-gray-200">Client</th>
-              <th class="p-3 text-left border border-gray-200">Total Time Spent</th>
-              <th class="p-3 text-left border border-gray-200">Qtr. Hr.</th>
-              <th class="p-3 text-left border border-gray-200">Rounded Change</th>
-            </tr>
-          </thead>
-          <tbody id="tasks-tbody"></tbody>
-        </table>
+        <div class="card">
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead>
+                <tr class="bg-gray-50 text-left text-gray-600 text-sm uppercase tracking-wider">
+                  <th class="px-6 py-4 font-medium">Client</th>
+                  <th class="px-6 py-4 font-medium">Total Time</th>
+                  <th class="px-6 py-4 font-medium">Qtr. Hr.</th>
+                  <th class="px-6 py-4 font-medium">Rounded Diff</th>
+                </tr>
+              </thead>
+              <tbody id="tasks-tbody" class="divide-y divide-gray-200">
+                <!-- Task data will be inserted here -->
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       <div class="lg:col-span-1">
-        <table class="w-full">
-          <tr class="border-b">
-            <th class="p-3 text-left">Billable Time</th>
-            <td id="billable-value" class="p-3">-</td>
-          </tr>
-          <tr class="border-b">
-            <th class="p-3 text-left">Non-Billable Time</th>
-            <td id="nonbillable-value" class="p-3">-</td>
-          </tr>
-          <tr class="border-b border-t-2 border-black">
-            <th class="p-3 text-left">Total Time</th>
-            <td id="total-time-value" class="p-3">-</td>
-          </tr>
-          <tr>
-            <th class="p-3 text-left">Break Time</th>
-            <td id="break-value" class="p-3 text-red-600">0</td>
-          </tr>
-        </table>
+        <div class="summary-card">
+          <h2 class="text-lg font-semibold p-4 border-b border-gray-200 text-gray-700">Time Summary</h2>
+
+          <div class="summary-row">
+            <span class="summary-label">Billable Time</span>
+            <span id="billable-value" class="summary-value">-</span>
+          </div>
+
+          <div class="summary-row">
+            <span class="summary-label">Non-Billable Time</span>
+            <span id="nonbillable-value" class="summary-value">-</span>
+          </div>
+
+          <div class="summary-row total-row">
+            <span class="summary-label">Total Time</span>
+            <span id="total-time-value" class="summary-value">-</span>
+          </div>
+
+          <div class="summary-row">
+            <span class="summary-label">Break Time</span>
+            <span id="break-value" class="summary-value break-value">0</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
