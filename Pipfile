@@ -8,8 +8,12 @@ flask = "*"
 flask-admin = "*"
 flask-migrate = "*"
 pywebview = "*"
-flask-cors = "*"
 jsmin = "*"
+requests = "*"
+packaging = "*"
+sqlalchemy = "*"
+flask-sqlalchemy = "*"
+flask-cors = "*"
 
 [dev-packages]
 

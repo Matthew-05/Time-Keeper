@@ -13,17 +13,46 @@ from werkzeug.serving import run_simple
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 import os
 from sqlalchemy import func
-from flask_cors import CORS
 import socket
+from updater import AutoUpdater
+import threading
+import os
+from pathlib import Path
+from models import db, Client, Task_Item, TimeTracking, BreakTracking
+
 
 APP_VERSION = "1.0.0"
+GITHUB_TOKEN = "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"
 
 DEV_MODE = os.environ.get('DEV_MODE', 'False').lower() == 'true'
 
-app = Flask(__name__)
-CORS(app)
-app.config['SECRET_KEY'] = 'your_secret_key_here'  
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///clients.db'
+
+user_data_dir = os.path.join(Path.home(), 'AppData', 'Local', 'TimeKeeper')
+os.makedirs(user_data_dir, exist_ok=True)
+
+# Database file path
+db_path = os.path.join(user_data_dir, 'clients.db')
+
+# Initialize Flask with correct configuration
+if getattr(sys, 'frozen', False):
+    # We are running in a bundle
+    bundle_dir = os.path.dirname(sys.executable)
+    template_folder = os.path.join(bundle_dir, '_internal', 'templates')
+    static_folder = os.path.join(bundle_dir, '_internal', 'static')
+    app = Flask(__name__, 
+                template_folder=template_folder,
+                static_folder=static_folder)
+else:
+    # We are running in a normal Python environment
+    app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your_secret_key_here'
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Tell SQLAlchemy to use the user directory for instance data
+app.instance_path = user_data_dir
+
+# Now initialize the database with the configured app
 db.init_app(app)
 migrate = Migrate(app, db)
 
@@ -677,11 +706,33 @@ def find_free_port():
 # Global variable to store the port
 app_port = find_free_port()
 
+
+import logging
+logging.basicConfig(level=logging.DEBUG, 
+                    filename=os.path.join(user_data_dir, 'timekeeper.log'),
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger('timekeeper')
 def start_server():
-    # Use the dynamically assigned port
-    run_simple('127.0.0.1', app_port, app, use_reloader=False, threaded=True)
+    logger.debug(f"Starting server on port {app_port}")
+    try:
+        run_simple('127.0.0.1', app_port, app, use_reloader=False, threaded=True)
+    except Exception as e:
+        logger.error(f"Error starting server: {str(e)}")
 
 def create_window():
+    logger.debug(f"Creating window with URL: http://127.0.0.1:{app_port}")
+    
+    # Add these lines to handle WebView2 runtime location
+    if getattr(sys, 'frozen', False):
+        # If bundled with PyInstaller
+        import os
+        import webview
+        
+        # Use the existing user_data_dir instead of Program Files
+        webview_dir = os.path.join(user_data_dir, 'webview2')
+        os.makedirs(webview_dir, exist_ok=True)
+        os.environ['WEBVIEW2_USER_DATA_FOLDER'] = webview_dir
+    
     window = webview.create_window(
         'Time Tracker', 
         f'http://127.0.0.1:{app_port}',
@@ -692,6 +743,10 @@ def create_window():
     )
     return window
 
+
+
+def on_loaded():
+    check_for_updates(webview.windows[0])
 
 
 class WebviewAPI:
@@ -707,6 +762,55 @@ admin.add_view(ModelView(TimeTracking, db.session))
 admin.add_view(ModelView(Client, db.session))
 admin.add_view(ModelView(BreakTracking, db.session))
 
+def initialize_updater():
+    github_url = "https://github.com/Matthew-05/Time-Keeper"
+    updater = AutoUpdater(
+        github_url=github_url,
+        current_version=APP_VERSION,
+        executable_name="Time-Keeper",
+        auto_restart=True,
+        github_token=GITHUB_TOKEN,
+        additional_assets=[
+            {
+                "pattern": r"_internal\.zip",
+                "destination": "_internal"
+            }
+        ]
+    )
+    return updater
+
+def check_for_updates(window):
+    print("Checking for updates...")
+    updater = initialize_updater()
+    update_info = updater.get_update_info()
+    
+    if update_info['update_available']:
+        # Show update notification to user
+        result = window.create_confirmation_dialog(
+            "Update Available", 
+            f"A new version ({update_info['latest_version']}) is available. Would you like to update now?",
+            "Update", "Later"
+        )
+        
+        if result:
+            # User chose to update
+            window.evaluate_js("showUpdateProgress()")
+            
+            # Download and apply update in a separate thread to avoid freezing UI
+            def update_thread():
+                success = updater.update()
+                if not success:
+                    # If update failed, show error message
+                    window.evaluate_js("hideUpdateProgress()")
+                    window.create_confirmation_dialog(
+                        "Update Failed", 
+                        "Failed to download or install the update. Please try again later.",
+                        "OK"
+                    )
+            
+            threading.Thread(target=update_thread).start()
+
+
 if __name__ == '__main__':
     # Start Flask server in a separate thread
     t = threading.Thread(target=start_server)
@@ -715,4 +819,8 @@ if __name__ == '__main__':
 
     # Create and start webview window
     window = create_window()
+    
+    # Set up a callback to check for updates after the window loads
+    window.events.loaded += on_loaded
+    
     webview.start(debug=DEV_MODE)

@@ -368,11 +368,12 @@ export class TaskBrowser extends TimeKeeper {
                 flatpickr(input, {
                     enableTime: true,
                     noCalendar: true,
-                    dateFormat: "H:i",
-                    time_24hr: true,
+                    dateFormat: "h:i K", // Changed from "H:i" to "h:i K" for 12-hour format with AM/PM
+                    time_24hr: false,    // Changed from true to false
                     minuteIncrement: 1
                 });
             });
+
         }, 0);
 
         return detailRow;
