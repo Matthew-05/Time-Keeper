@@ -16,7 +16,7 @@ from sqlalchemy import func
 import socket
 from pathlib import Path
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 
 user_data_dir = os.path.join(Path.home(), 'AppData', 'Local', 'TimeKeeper')
@@ -667,6 +667,40 @@ def delete_task(task_id):
     db.session.delete(task)
     db.session.commit()
     return jsonify({'success': True})
+
+@app.route('/update_day_time', methods=['POST'])
+def update_day_time():
+    data = request.json
+    date_str = data.get('date')
+    time_type = data.get('type')  # 'start' or 'end'
+    time_str = data.get('time')
+    
+    if not date_str or not time_type or not time_str:
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    try:
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+        time_obj = datetime.strptime(time_str, '%I:%M %p').time()
+    except ValueError:
+        return jsonify({'error': 'Invalid date or time format'}), 400
+    
+    # Find or create time tracking entry for the date
+    time_tracking = TimeTracking.query.filter_by(date=date_obj).first()
+    
+    if not time_tracking:
+        time_tracking = TimeTracking(date=date_obj)
+        db.session.add(time_tracking)
+    
+    # Update the appropriate time field
+    if time_type == 'start':
+        time_tracking.start_time = time_obj
+    elif time_type == 'end':
+        time_tracking.end_time = time_obj
+    else:
+        return jsonify({'error': 'Invalid time type'}), 400
+    
+    db.session.commit()
+    return jsonify({'success': True}), 200
 
 # Define the global stop event
 stop_event = threading.Event()

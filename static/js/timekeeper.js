@@ -15,14 +15,15 @@ export class TimeKeeperIndex extends TimeKeeper {
         await this.checkDayStatus();
 
         // Only check for unfinished tasks if day has started
-        const { dayStarted } = await this.fetchFromAPI('/check_day_status');
-        if (dayStarted) {
+        const { dayStarted, dayEnded } = await this.fetchFromAPI('/check_day_status');
+        if (dayStarted && !dayEnded) {
             await this.initializeAutocomplete();
             await this.checkUnfinishedTasks();
-        } else {
+        } else if (!dayStarted && !dayEnded) {
             // Still initialize autocomplete for when day starts
             await this.initializeAutocomplete();
         }
+        // If day is ended, don't initialize autocomplete at all
 
         console.log("Timekeeper.js loaded");
     }
@@ -62,10 +63,13 @@ export class TimeKeeperIndex extends TimeKeeper {
 
 
     initializeTimePicker() {
+        const now = new Date();
         this.timePickerInstance = flatpickr(this.timePicker, {
             enableTime: true,
             noCalendar: true,
             dateFormat: "h:i K",
+            defaultHour: now.getHours(),
+            defaultMinute: now.getMinutes(),
         });
     }
 
@@ -612,14 +616,14 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.updateButtonVisibility('dayEnded');
         this.hideInputFields();
 
-        // Hide the client selector specifically
+        // Hide the client input container first (works even before autocomplete is initialized)
+        const clientContainer = this.clientInput.closest('.space-y-3');
+        if (clientContainer) clientContainer.style.display = 'none';
+
+        // Hide the client selector specifically (if autocomplete is already initialized)
         if (this.autocomplete && this.autocomplete.containerOuter) {
             this.autocomplete.containerOuter.element.style.display = 'none';
         }
-
-        // Also hide the client input container
-        const clientContainer = this.clientInput.closest('.space-y-3');
-        if (clientContainer) clientContainer.style.display = 'none';
 
         // Hide the time picker container as well
         document.getElementById('timepicker-container').style.display = 'none';

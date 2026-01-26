@@ -6,6 +6,7 @@ export class TaskBrowser extends TimeKeeper {
         this.isLoading = false;
         this.initializeElements();
         this.initializeTimePicker();
+        this.initializeDayTimePickers();
         this.fetchInitialData();
         this.initializeTaskEditing();
 
@@ -18,11 +19,173 @@ export class TaskBrowser extends TimeKeeper {
 
     initializeElements() {
         this.selectedDate = document.getElementById('selected-date');
+        this.dayStartTime = document.getElementById('day-start-time');
+        this.dayEndTime = document.getElementById('day-end-time');
+        this.closeDayBtn = document.getElementById('close-day-btn');
+        this.closeDayContainer = document.getElementById('close-day-container');
+        
+        // Action buttons
+        this.dayStartActions = document.getElementById('day-start-actions');
+        this.dayEndActions = document.getElementById('day-end-actions');
+        this.saveStartBtn = document.getElementById('save-start-time');
+        this.cancelStartBtn = document.getElementById('cancel-start-time');
+        this.saveEndBtn = document.getElementById('save-end-time');
+        this.cancelEndBtn = document.getElementById('cancel-end-time');
+        
+        // Store original values
+        this.originalStartTime = '';
+        this.originalEndTime = '';
+        
         this.datePicker = flatpickr(this.selectedDate, {
             defaultDate: new Date(),
             dateFormat: "Y-m-d",
             onChange: () => this.fetchTasks()
         });
+
+        // Bind action buttons
+        this.closeDayBtn.addEventListener('click', () => this.handleCloseDay());
+        this.saveStartBtn.addEventListener('click', () => this.handleSaveTime('start'));
+        this.cancelStartBtn.addEventListener('click', () => this.handleCancelTime('start'));
+        this.saveEndBtn.addEventListener('click', () => this.handleSaveTime('end'));
+        this.cancelEndBtn.addEventListener('click', () => this.handleCancelTime('end'));
+    }
+
+    initializeDayTimePickers() {
+        // Initialize time pickers with onChange to show action buttons
+        this.dayStartTimePicker = flatpickr(this.dayStartTime, {
+            enableTime: true,
+            noCalendar: true,
+            dateFormat: "h:i K",
+            time_24hr: false,
+            onChange: () => {
+                this.showTimeActions('start');
+            }
+        });
+
+        this.dayEndTimePicker = flatpickr(this.dayEndTime, {
+            enableTime: true,
+            noCalendar: true,
+            dateFormat: "h:i K",
+            time_24hr: false,
+            onChange: () => {
+                this.showTimeActions('end');
+            }
+        });
+    }
+
+    showTimeActions(type) {
+        if (type === 'start') {
+            this.dayStartActions.classList.remove('action-buttons-hidden');
+            this.dayStartActions.classList.add('action-buttons-visible');
+        } else if (type === 'end') {
+            this.dayEndActions.classList.remove('action-buttons-hidden');
+            this.dayEndActions.classList.add('action-buttons-visible');
+        }
+    }
+
+    hideTimeActions(type) {
+        if (type === 'start') {
+            this.dayStartActions.classList.remove('action-buttons-visible');
+            this.dayStartActions.classList.add('action-buttons-hidden');
+        } else if (type === 'end') {
+            this.dayEndActions.classList.remove('action-buttons-visible');
+            this.dayEndActions.classList.add('action-buttons-hidden');
+        }
+    }
+
+    async handleSaveTime(type) {
+        const timeStr = type === 'start' ? this.dayStartTime.value : this.dayEndTime.value;
+        
+        if (!timeStr) {
+            this.showToast('Please select a time', 'error');
+            return;
+        }
+
+        try {
+            const response = await this.fetchFromAPI('/update_day_time', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    date: this.selectedDate.value,
+                    type: type,
+                    time: timeStr
+                })
+            });
+
+            if (response.success) {
+                this.showToast(`Day ${type} time updated successfully`, 'success');
+                
+                // Update the original value and flatpickr default
+                if (type === 'start') {
+                    this.originalStartTime = timeStr;
+                    this.dayStartTimePicker.setDate(timeStr, false);
+                } else {
+                    this.originalEndTime = timeStr;
+                    this.dayEndTimePicker.setDate(timeStr, false);
+                }
+                
+                // Hide action buttons
+                this.hideTimeActions(type);
+                
+                // Refresh tasks to update calculations
+                await this.fetchTasks();
+            }
+        } catch (error) {
+            this.showToast(`Failed to update day ${type} time`, 'error');
+        }
+    }
+
+    handleCancelTime(type) {
+        // Revert to original value
+        if (type === 'start') {
+            this.dayStartTime.value = this.originalStartTime;
+            this.dayStartTimePicker.setDate(this.originalStartTime);
+        } else {
+            this.dayEndTime.value = this.originalEndTime;
+            this.dayEndTimePicker.setDate(this.originalEndTime);
+        }
+        
+        // Hide action buttons
+        this.hideTimeActions(type);
+    }
+
+    async handleCloseDay() {
+        try {
+            // Check if there are unsaved changes
+            const startChanged = this.dayStartActions.classList.contains('action-buttons-visible');
+            const endChanged = this.dayEndActions.classList.contains('action-buttons-visible');
+            
+            if (startChanged || endChanged) {
+                this.showToast('Please save or cancel pending time changes first', 'error');
+                return;
+            }
+
+            // Get the end time to use for closing the day
+            const endTimeStr = this.dayEndTime.value;
+            if (!endTimeStr) {
+                this.showToast('Please set an end time before closing the day', 'error');
+                return;
+            }
+
+            // Call the end_day endpoint
+            const response = await this.fetchFromAPI('/end_day', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ time: endTimeStr })
+            });
+
+            if (response.message) {
+                this.showToast('Day closed successfully', 'success');
+                
+                // Hide the close day button after closing
+                this.closeDayContainer.classList.add('hidden');
+                
+                // Refresh tasks and summary
+                await this.fetchTasks();
+            }
+        } catch (error) {
+            this.showToast('Failed to close day', 'error');
+        }
     }
 
     initializeTaskEditing() {
@@ -177,6 +340,9 @@ export class TaskBrowser extends TimeKeeper {
         `;
 
         try {
+            // Always fetch and populate day data first
+            await this.populateDayTimes();
+            
             const response = await this.fetchFromAPI(`/tasks/${this.selectedDate.value}`);
             this.renderTasks(response);
             this.renderTimeline(response, this.selectedDate.value);
@@ -184,6 +350,98 @@ export class TaskBrowser extends TimeKeeper {
             this.showToast('Error fetching tasks', 'error');
         } finally {
             this.isLoading = false;
+        }
+    }
+
+    async populateDayTimes() {
+        try {
+            const response = await this.fetchFromAPI('/get_day_data', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date: this.selectedDate.value })
+            });
+            const { start_time, end_time } = response;
+
+            // Update the day time pickers with fetched data
+            if (start_time) {
+                const formattedStartTime = this.convertTo12HourFormat(start_time);
+                this.dayStartTime.value = formattedStartTime;
+                this.originalStartTime = formattedStartTime;
+                
+                // Set the flatpickr default date to the existing time
+                this.dayStartTimePicker.setDate(formattedStartTime, false);
+            } else {
+                this.dayStartTime.value = '';
+                this.originalStartTime = '';
+                this.dayStartTimePicker.clear();
+            }
+
+            if (end_time) {
+                const formattedEndTime = this.convertTo12HourFormat(end_time);
+                this.dayEndTime.value = formattedEndTime;
+                this.originalEndTime = formattedEndTime;
+                
+                // Set the flatpickr default date to the existing time
+                this.dayEndTimePicker.setDate(formattedEndTime, false);
+            } else {
+                this.dayEndTime.value = '';
+                this.originalEndTime = '';
+                
+                // For open days (has start_time but no end_time), set picker default to current time
+                const today = new Date().toISOString().split('T')[0];
+                const isToday = this.selectedDate.value === today;
+                
+                if (start_time && isToday) {
+                    // Day is open and it's today - set picker default to current time but keep input empty
+                    const now = new Date();
+                    this.dayEndTimePicker.set('defaultHour', now.getHours());
+                    this.dayEndTimePicker.set('defaultMinute', now.getMinutes());
+                    this.dayEndTimePicker.clear();
+                } else {
+                    this.dayEndTimePicker.clear();
+                }
+            }
+
+            // Hide action buttons when loading fresh data
+            this.hideTimeActions('start');
+            this.hideTimeActions('end');
+
+            // Check if we should show the Close Day button
+            await this.updateCloseDayButtonVisibility();
+        } catch (error) {
+            console.error('Error populating day times:', error);
+            this.dayStartTime.value = '';
+            this.dayEndTime.value = '';
+            this.originalStartTime = '';
+            this.originalEndTime = '';
+            this.closeDayContainer.classList.add('hidden');
+        }
+    }
+
+    async updateCloseDayButtonVisibility() {
+        try {
+            // Check if the selected date is today
+            const today = new Date().toISOString().split('T')[0];
+            const isToday = this.selectedDate.value === today;
+
+            if (!isToday) {
+                this.closeDayContainer.classList.add('hidden');
+                return;
+            }
+
+            // Check day status
+            const status = await this.fetchFromAPI('/check_day_status');
+            const { dayStarted, dayEnded } = status;
+
+            // Show button only if day is started but not ended
+            if (dayStarted && !dayEnded) {
+                this.closeDayContainer.classList.remove('hidden');
+            } else {
+                this.closeDayContainer.classList.add('hidden');
+            }
+        } catch (error) {
+            console.error('Error checking day status:', error);
+            this.closeDayContainer.classList.add('hidden');
         }
     }
 
@@ -253,6 +511,8 @@ export class TaskBrowser extends TimeKeeper {
                             </td>
                         </tr>
                     `;
+                    // Still update summary values even with no tasks
+                    this.updateSummaryValues(0, 0);
                     return;
                 }
 
@@ -389,7 +649,7 @@ export class TaskBrowser extends TimeKeeper {
         const [hours, minutes] = timeString.split(':');
         const period = +hours >= 12 ? 'PM' : 'AM';
         const hour = +hours % 12 || 12;
-        return `${String(hour).padStart(2, '0')}:${minutes} ${period}`;
+        return `${hour}:${minutes} ${period}`;
     }
 
     getMinuteDifference(endTime, startTime) {

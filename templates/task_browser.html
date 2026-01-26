@@ -98,8 +98,11 @@
     .summary-row {
       display: flex;
       justify-content: space-between;
+      align-items: center;
       padding: 1rem 1.5rem;
       border-bottom: 1px solid #e5e7eb;
+      min-height: 3.5rem;
+      overflow: visible;
     }
     
     .summary-row:last-child {
@@ -109,15 +112,163 @@
     .summary-label {
       font-weight: 500;
       color: #4b5563;
+      flex-shrink: 0;
+      margin-right: 1rem;
     }
     
     .summary-value {
       font-weight: 600;
+      text-align: right;
     }
     
     .total-row {
       background-color: #f3f4f6;
       border-top: 2px solid #d1d5db;
+    }
+    
+    .time-input-container {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      justify-content: flex-end;
+      flex-shrink: 0;
+    }
+    
+    .day-time-input {
+      cursor: pointer;
+      text-align: center;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    
+    .day-time-input:hover {
+      border-color: #9ca3af;
+    }
+    
+    .day-time-input:focus {
+      outline: none;
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+    
+    .time-action-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      width: 1.75rem;
+      height: 1.75rem;
+      flex-shrink: 0;
+      transition: all 0.2s;
+    }
+    
+    .time-action-btn:hover {
+      transform: scale(1.1);
+    }
+    
+    .time-action-btn:active {
+      transform: scale(0.95);
+    }
+    
+    .time-action-btn svg {
+      width: 1.125rem;
+      height: 1.125rem;
+    }
+    
+    .action-buttons-container {
+      display: flex;
+      gap: 0.125rem;
+      align-items: center;
+      width: 3.75rem;
+      flex-shrink: 0;
+    }
+    
+    .action-buttons-hidden {
+      visibility: hidden;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    
+    .action-buttons-visible {
+      visibility: visible;
+      pointer-events: auto;
+      opacity: 1;
+      transition: opacity 0.2s;
+    }
+    
+    /* Responsive styles for smaller screens */
+    @media (max-width: 1280px) {
+      .summary-row {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 0.75rem 1.5rem;
+        gap: 0.5rem;
+      }
+      
+      .summary-label {
+        margin-right: 0;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.025em;
+        color: #6b7280;
+      }
+      
+      .time-input-container {
+        width: 100%;
+        justify-content: space-between;
+        flex-direction: row-reverse;
+      }
+      
+      .summary-value {
+        width: 100%;
+      }
+      
+      .day-time-input {
+        flex: 1;
+        max-width: 10rem;
+      }
+    }
+    
+    /* Even smaller screens */
+    @media (max-width: 640px) {
+      .summary-row {
+        padding: 0.5rem 1rem;
+      }
+      
+      .summary-label {
+        font-size: 0.7rem;
+      }
+      
+      .day-time-input {
+        max-width: 8rem;
+        font-size: 0.875rem;
+      }
+      
+      .time-action-btn {
+        width: 1.5rem;
+        height: 1.5rem;
+      }
+      
+      .time-action-btn svg {
+        width: 1rem;
+        height: 1rem;
+      }
+      
+      .action-buttons-container {
+        width: 3.125rem;
+      }
+      
+      #close-day-container {
+        padding: 0.75rem 1rem;
+      }
+      
+      #close-day-btn {
+        font-size: 0.875rem;
+        padding: 0.5rem 1rem;
+      }
     }
   </style>
 {% endblock %}
@@ -162,6 +313,50 @@
       <div class="lg:col-span-1">
         <div class="summary-card">
           <h2 class="text-lg font-semibold p-4 border-b border-gray-200 text-gray-700">Time Summary</h2>
+
+          <div class="summary-row">
+            <span class="summary-label">Day Start</span>
+            <div class="time-input-container">
+              <input type="text" id="day-start-time" class="day-time-input px-3 py-1.5 border rounded text-sm w-28" placeholder="--:-- --" readonly>
+              <div id="day-start-actions" class="action-buttons-container action-buttons-hidden">
+                <button id="save-start-time" class="time-action-btn save-btn rounded hover:bg-green-100" title="Save">
+                  <svg class="text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                </button>
+                <button id="cancel-start-time" class="time-action-btn cancel-btn rounded hover:bg-red-100" title="Cancel">
+                  <svg class="text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="summary-row">
+            <span class="summary-label">Day End</span>
+            <div class="time-input-container">
+              <input type="text" id="day-end-time" class="day-time-input px-3 py-1.5 border rounded text-sm w-28" placeholder="--:-- --" readonly>
+              <div id="day-end-actions" class="action-buttons-container action-buttons-hidden">
+                <button id="save-end-time" class="time-action-btn save-btn rounded hover:bg-green-100" title="Save">
+                  <svg class="text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                </button>
+                <button id="cancel-end-time" class="time-action-btn cancel-btn rounded hover:bg-red-100" title="Cancel">
+                  <svg class="text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div id="close-day-container" class="p-4 border-b border-gray-200 hidden">
+            <button id="close-day-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition-colors">
+              Close Day
+            </button>
+          </div>
 
           <div class="summary-row">
             <span class="summary-label">Billable Time</span>
