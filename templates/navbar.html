@@ -10,10 +10,6 @@
         </div>
       </div>
       <div class="flex items-center space-x-6">
-        <div class="flex items-center space-x-2 text-sm text-gray-500">
-          <span class="hidden sm:inline">Last updated:</span>
-          <span id="load-time" class="font-medium text-gray-900"></span>
-        </div>
         <div class="flex items-center bg-blue-50 px-3 py-1.5 rounded-full">
           <span id="timer" class="text-sm font-medium text-blue-600">Loading...</span>
         </div>
@@ -29,9 +25,6 @@
   
   document.addEventListener('DOMContentLoaded', function () {
     checkForUnfinishedTask()
-    const loadTime = new Date()
-    const loadTimeString = loadTime.toLocaleString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true })
-    document.getElementById('load-time').textContent = loadTimeString
   
     // Add event listener for custom event when a task is completed
     document.addEventListener('taskCompleted', function () {
@@ -115,6 +108,23 @@
     // Set up interval to update every second
     timerUpdateInterval = setInterval(updateTimerDisplay, 1000)
   }
+  
+  // Handle page visibility changes to keep timer accurate when window regains focus
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden && taskStartTimestamp !== null) {
+      // Page became visible again - immediately update the timer display
+      // This ensures the timer shows the correct time even if it was throttled while hidden
+      updateTimerDisplay()
+    }
+  })
+  
+  // Also handle when window regains focus (additional safeguard)
+  window.addEventListener('focus', function() {
+    if (taskStartTimestamp !== null) {
+      // Window regained focus - immediately update the timer display
+      updateTimerDisplay()
+    }
+  })
   
   function stopTimer() {
     if (timerUpdateInterval) {

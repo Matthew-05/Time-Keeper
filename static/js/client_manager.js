@@ -4,6 +4,7 @@ export class ClientManager extends TimeKeeper {
     constructor() {
         super();
         this.originalText = {};
+        this.deleteConfirmTimers = {};
         this.initializeElements();
         this.bindEvents();
         this.initOriginalText();
@@ -28,8 +29,14 @@ export class ClientManager extends TimeKeeper {
             } else if (target.name === 'delete') {
                 const row = target.closest('tr');
                 const id = row.id.split('_')[1];
-                if (confirm('Are you sure you want to delete this client?')) {
+                
+                // Check if this is already in confirm mode
+                if (target.dataset.confirmMode === 'true') {
+                    // Actually delete the client
                     this.deleteClient(id);
+                } else {
+                    // Enter confirm mode
+                    this.enterDeleteConfirmMode(target, id);
                 }
             } else if (target.name === 'save') {
                 const row = target.closest('tr');
@@ -164,6 +171,38 @@ export class ClientManager extends TimeKeeper {
         this.resetRow(id);
     }
 
+    enterDeleteConfirmMode(button, id) {
+        // Store original text and styling
+        button.dataset.originalText = button.textContent;
+        button.dataset.confirmMode = 'true';
+        
+        // Change button appearance to confirm state
+        button.textContent = 'Confirm Delete?';
+        button.classList.remove('text-red-600', 'hover:text-red-900', 'bg-red-50', 'hover:bg-red-100');
+        button.classList.add('text-white', 'bg-red-600', 'hover:bg-red-700', 'font-semibold', 'animate-pulse');
+        
+        // Clear any existing timer for this button
+        if (this.deleteConfirmTimers[id]) {
+            clearTimeout(this.deleteConfirmTimers[id]);
+        }
+        
+        // Set timer to revert after 3 seconds
+        this.deleteConfirmTimers[id] = setTimeout(() => {
+            this.revertDeleteButton(button);
+            delete this.deleteConfirmTimers[id];
+        }, 3000);
+    }
+    
+    revertDeleteButton(button) {
+        // Revert button to original state
+        button.textContent = button.dataset.originalText || 'Delete';
+        button.dataset.confirmMode = 'false';
+        
+        // Restore original styling
+        button.classList.remove('text-white', 'bg-red-600', 'hover:bg-red-700', 'font-semibold', 'animate-pulse');
+        button.classList.add('text-red-600', 'hover:text-red-900', 'bg-red-50', 'hover:bg-red-100');
+    }
+
     resetRow(id) {
         const row = document.getElementById(`row_${id}`);
         const nameCell = document.getElementById(`name_${id}`);
@@ -194,6 +233,12 @@ export class ClientManager extends TimeKeeper {
     }
 
     async deleteClient(id) {
+        // Clear the confirmation timer
+        if (this.deleteConfirmTimers[id]) {
+            clearTimeout(this.deleteConfirmTimers[id]);
+            delete this.deleteConfirmTimers[id];
+        }
+        
         try {
             const row = document.getElementById(`row_${id}`);
 
@@ -214,6 +259,19 @@ export class ClientManager extends TimeKeeper {
 
             setTimeout(() => {
                 row.remove();
+                
+                // Check if table is now empty and show "No clients found" message
+                const tbody = document.querySelector('tbody');
+                const remainingRows = tbody.querySelectorAll('tr[id^="row_"]');
+                if (remainingRows.length === 0) {
+                    const emptyRow = document.createElement('tr');
+                    emptyRow.innerHTML = `
+                        <td colspan="2" class="px-6 py-8 text-center text-gray-500">
+                            No clients found. Add your first client using the form above.
+                        </td>
+                    `;
+                    tbody.appendChild(emptyRow);
+                }
             }, 500);
 
             this.showToast('Client deleted successfully');
@@ -223,8 +281,10 @@ export class ClientManager extends TimeKeeper {
 
             // Reset the row if delete fails
             const row = document.getElementById(`row_${id}`);
-            row.style.backgroundColor = "";
-            row.style.opacity = "";
+            if (row) {
+                row.style.backgroundColor = "";
+                row.style.opacity = "";
+            }
         }
     }
 
@@ -262,6 +322,13 @@ export class ClientManager extends TimeKeeper {
 
     addNewClientRow(client) {
         const tbody = document.querySelector('tbody');
+        
+        // Remove "No clients found" message if it exists
+        const emptyMessage = tbody.querySelector('td[colspan="2"]');
+        if (emptyMessage) {
+            emptyMessage.closest('tr').remove();
+        }
+        
         const newRow = document.createElement('tr');
         newRow.id = `row_${client.id}`;
         newRow.className = 'bg-green-50';

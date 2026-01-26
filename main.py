@@ -14,17 +14,9 @@ from werkzeug.middleware.dispatcher import DispatcherMiddleware
 import os
 from sqlalchemy import func
 import socket
-from updater import AutoUpdater
-import threading
-import os
 from pathlib import Path
-from models import db, Client, Task_Item, TimeTracking, BreakTracking
-
 
 APP_VERSION = "1.0.0"
-GITHUB_TOKEN = "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"
-
-DEV_MODE = os.environ.get('DEV_MODE', 'False').lower() == 'true'
 
 
 user_data_dir = os.path.join(Path.home(), 'AppData', 'Local', 'TimeKeeper')
@@ -141,7 +133,7 @@ def create_client():
             new_client = Client(name=name)
             db.session.add(new_client)
             db.session.commit()
-            return jsonify({'success': True}), 201
+            return jsonify({'id': new_client.id, 'name': new_client.name}), 201
         return jsonify({'error': 'Client already exists'}), 400
     return jsonify({'error': 'Name field is required'}), 400
 
@@ -575,24 +567,6 @@ def get_min_time():
     min_time = '12:00 AM'
     return jsonify({'min_time': min_time})
 
-app.route('/clients', methods=['POST'])
-def create_client():
-    data = request.get_json()
-    client_name = data.get('name')
-    
-    if not client_name:
-        return jsonify({'error': 'Client name is required'}), 400
-    
-    new_client = Client(name=client_name)
-    
-    try:
-        db.session.add(new_client)
-        db.session.commit()
-        return jsonify({'id': new_client.id, 'name': new_client.name}), 201
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/summary')
 def summary_page():
     clients = Client.query.all()
@@ -725,9 +699,6 @@ def create_window():
     # Add these lines to handle WebView2 runtime location
     if getattr(sys, 'frozen', False):
         # If bundled with PyInstaller
-        import os
-        import webview
-        
         # Use the existing user_data_dir instead of Program Files
         webview_dir = os.path.join(user_data_dir, 'webview2')
         os.makedirs(webview_dir, exist_ok=True)
@@ -745,10 +716,6 @@ def create_window():
 
 
 
-def on_loaded():
-    check_for_updates(webview.windows[0])
-
-
 class WebviewAPI:
     def navigate(self, url):
         webview.windows[0].evaluate_js(f'window.location.href = "{url}"')
@@ -762,55 +729,6 @@ admin.add_view(ModelView(TimeTracking, db.session))
 admin.add_view(ModelView(Client, db.session))
 admin.add_view(ModelView(BreakTracking, db.session))
 
-def initialize_updater():
-    github_url = "https://github.com/Matthew-05/Time-Keeper"
-    updater = AutoUpdater(
-        github_url=github_url,
-        current_version=APP_VERSION,
-        executable_name="Time-Keeper",
-        auto_restart=True,
-        github_token=GITHUB_TOKEN,
-        additional_assets=[
-            {
-                "pattern": r"_internal\.zip",
-                "destination": "_internal"
-            }
-        ]
-    )
-    return updater
-
-def check_for_updates(window):
-    print("Checking for updates...")
-    updater = initialize_updater()
-    update_info = updater.get_update_info()
-    
-    if update_info['update_available']:
-        # Show update notification to user
-        result = window.create_confirmation_dialog(
-            "Update Available", 
-            f"A new version ({update_info['latest_version']}) is available. Would you like to update now?",
-            "Update", "Later"
-        )
-        
-        if result:
-            # User chose to update
-            window.evaluate_js("showUpdateProgress()")
-            
-            # Download and apply update in a separate thread to avoid freezing UI
-            def update_thread():
-                success = updater.update()
-                if not success:
-                    # If update failed, show error message
-                    window.evaluate_js("hideUpdateProgress()")
-                    window.create_confirmation_dialog(
-                        "Update Failed", 
-                        "Failed to download or install the update. Please try again later.",
-                        "OK"
-                    )
-            
-            threading.Thread(target=update_thread).start()
-
-
 if __name__ == '__main__':
     # Start Flask server in a separate thread
     t = threading.Thread(target=start_server)
@@ -820,7 +738,4 @@ if __name__ == '__main__':
     # Create and start webview window
     window = create_window()
     
-    # Set up a callback to check for updates after the window loads
-    window.events.loaded += on_loaded
-    
-    webview.start(debug=DEV_MODE)
+    webview.start()
