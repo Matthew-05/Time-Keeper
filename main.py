@@ -1,3 +1,23 @@
+import sys
+import os
+from pathlib import Path
+
+# Set up temp directories FIRST if running as frozen executable
+if getattr(sys, 'frozen', False):
+    user_data_dir = os.path.join(Path.home(), 'AppData', 'Local', 'TimeKeeper')
+    os.makedirs(user_data_dir, exist_ok=True)
+    
+    # Create temp directory for webview
+    temp_dir = os.path.join(user_data_dir, 'temp')
+    os.makedirs(temp_dir, exist_ok=True)
+    os.environ['TEMP'] = temp_dir
+    os.environ['TMP'] = temp_dir
+    
+    # Set WebView2 user data folder
+    webview_dir = os.path.join(user_data_dir, 'webview2')
+    os.makedirs(webview_dir, exist_ok=True)
+    os.environ['WEBVIEW2_USER_DATA_FOLDER'] = webview_dir
+
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from models import db, Client, Task_Item, TimeTracking, BreakTracking
 import threading
@@ -8,13 +28,10 @@ from flask_migrate import Migrate
 from flask_admin import Admin
 from flask_admin.contrib.sqla import ModelView
 import webview
-import sys
 from werkzeug.serving import run_simple
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
-import os
 from sqlalchemy import func
 import socket
-from pathlib import Path
 
 APP_VERSION = "1.1.0"
 
@@ -27,10 +44,16 @@ db_path = os.path.join(user_data_dir, 'clients.db')
 
 # Initialize Flask with correct configuration
 if getattr(sys, 'frozen', False):
-    # We are running in a bundle
-    bundle_dir = os.path.dirname(sys.executable)
-    template_folder = os.path.join(bundle_dir, '_internal', 'templates')
-    static_folder = os.path.join(bundle_dir, '_internal', 'static')
+    # We are running in a bundle - use _MEIPASS for onefile mode
+    bundle_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+    template_folder = os.path.join(bundle_dir, 'templates')
+    static_folder = os.path.join(bundle_dir, 'static')
+    print(f"Running as frozen executable")
+    print(f"Bundle dir: {bundle_dir}")
+    print(f"Template folder: {template_folder}")
+    print(f"Static folder: {static_folder}")
+    print(f"Template folder exists: {os.path.exists(template_folder)}")
+    print(f"Static folder exists: {os.path.exists(static_folder)}")
     app = Flask(__name__, 
                 template_folder=template_folder,
                 static_folder=static_folder)
@@ -729,14 +752,6 @@ def start_server():
 
 def create_window():
     logger.debug(f"Creating window with URL: http://127.0.0.1:{app_port}")
-    
-    # Add these lines to handle WebView2 runtime location
-    if getattr(sys, 'frozen', False):
-        # If bundled with PyInstaller
-        # Use the existing user_data_dir instead of Program Files
-        webview_dir = os.path.join(user_data_dir, 'webview2')
-        os.makedirs(webview_dir, exist_ok=True)
-        os.environ['WEBVIEW2_USER_DATA_FOLDER'] = webview_dir
     
     window = webview.create_window(
         'Time Tracker', 

@@ -14,6 +14,7 @@ packaging = "*"
 sqlalchemy = "*"
 flask-sqlalchemy = "*"
 flask-cors = "*"
+pyinstaller = "*"
 
 [dev-packages]
 
