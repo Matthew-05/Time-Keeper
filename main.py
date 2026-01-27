@@ -33,7 +33,7 @@ from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from sqlalchemy import func
 import socket
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 
 user_data_dir = os.path.join(Path.home(), 'AppData', 'Local', 'TimeKeeper')
@@ -115,12 +115,12 @@ def index():
 @app.route('/clients', methods=['GET'])
 def get_clients():
     query = request.args.get('query', '')
-    clients = Client.query.filter(Client.name.like(f'%{query}%')).all() if query else Client.query.all()
+    clients = Client.query.filter(Client.name.like(f'%{query}%')).order_by(Client.name).all() if query else Client.query.order_by(Client.name).all()
     return jsonify([{'id': client.id, 'name': client.name} for client in clients])
 
 @app.route('/autocomplete', methods=['GET'])
 def autocomplete():
-    clients = Client.query.all()
+    clients = Client.query.order_by(Client.name).all()
     results = [client.name for client in clients]
     return jsonify(results)
 
@@ -181,7 +181,7 @@ def delete_client(id):
 
 @app.route('/client_manager')
 def client_manager():
-    clients = Client.query.all()
+    clients = Client.query.order_by(Client.name).all()
     return render_template('client_manager.html', clients=clients, version=APP_VERSION)
 
 @app.route('/new_client', methods=['GET', 'POST'])
@@ -592,7 +592,7 @@ def get_min_time():
 
 @app.route('/summary')
 def summary_page():
-    clients = Client.query.all()
+    clients = Client.query.order_by(Client.name).all()
     return render_template('time_summary.html', clients=clients, version=APP_VERSION)
     
 @app.route('/api/summary/<string:period>/<int:client_id>', methods=['GET'])
@@ -770,15 +770,52 @@ class WebviewAPI:
         webview.windows[0].evaluate_js(f'window.location.href = "{url}"')
 
 
-admin = Admin(app, name='Admin Panel', template_mode='bootstrap3')
+#admin = Admin(app, name='Admin Panel', template_mode='bootstrap3')
 
 # Add model views to Flask-Admin
-admin.add_view(ModelView(Task_Item, db.session))
-admin.add_view(ModelView(TimeTracking, db.session))
-admin.add_view(ModelView(Client, db.session))
-admin.add_view(ModelView(BreakTracking, db.session))
+#admin.add_view(ModelView(Task_Item, db.session))
+#admin.add_view(ModelView(TimeTracking, db.session))
+#admin.add_view(ModelView(Client, db.session))
+#admin.add_view(ModelView(BreakTracking, db.session))
+
+def close_unclosed_days():
+    """Check for any days that were not properly closed and set their end time to 23:59:59"""
+    with app.app_context():
+        try:
+            # Get today's date
+            today = date.today()
+            
+            # Find all TimeTracking entries where end_time is None (unclosed days)
+            unclosed_days = TimeTracking.query.filter_by(end_time=None).all()
+            
+            if unclosed_days:
+                logger.info(f"Found {len(unclosed_days)} unclosed day(s)")
+                closed_count = 0
+                
+                for day in unclosed_days:
+                    # Skip today - only close past unclosed days
+                    if day.date == today:
+                        logger.info(f"Skipping current day ({day.date}) - still open")
+                        continue
+                    
+                    # Set end time to 23:59:59 for past unclosed days
+                    day.end_time = datetime.strptime('23:59:59', '%H:%M:%S').time()
+                    logger.info(f"Closed day for {day.date} with end time 23:59:59")
+                    closed_count += 1
+                
+                if closed_count > 0:
+                    db.session.commit()
+                    logger.info(f"Closed {closed_count} past unclosed day(s)")
+                else:
+                    logger.info("No past unclosed days to close")
+        except Exception as e:
+            logger.error(f"Error closing unclosed days: {str(e)}")
+            db.session.rollback()
 
 if __name__ == '__main__':
+    # Close any unclosed days from previous sessions
+    close_unclosed_days()
+    
     # Start Flask server in a separate thread
     t = threading.Thread(target=start_server)
     t.daemon = True

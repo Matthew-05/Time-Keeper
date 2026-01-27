@@ -44,6 +44,8 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.timePicker = document.getElementById('timepicker');
         this.currentTimeButton = document.getElementById('current-time-button');
         this.taskStartTimeDisplay = document.getElementById('task-start-time');
+        this.recentTaskEndTime = document.getElementById('recent-task-end-time');
+        this.recentTaskTimeValue = document.getElementById('recent-task-time-value');
 
         this.saveIndicator = document.createElement('span');
         this.saveIndicator.innerHTML = '<svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
@@ -83,6 +85,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.reopenDayButton.addEventListener('click', () => this.handleReopenDay());
         this.currentTimeButton.addEventListener('click', () => this.setCurrentTime());
         this.descriptionInput.addEventListener('input', () => this.handleDescriptionChange());
+        this.recentTaskEndTime.addEventListener('click', () => this.useRecentTaskEndTime());
 
     }
 
@@ -141,6 +144,37 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.showToast('Time set to current time', 'success');
     }
 
+    async updateRecentTaskEndTime() {
+        try {
+            const response = await this.fetchFromAPI('/most_recent_task_end_time');
+            if (response.mostRecentTaskEndTime) {
+                // Format time as h:mm AM/PM (remove leading zero from hour)
+                const timeStr = response.mostRecentTaskEndTime;
+                const formattedTime = timeStr.replace(/^0/, ''); // Remove leading zero if present
+                
+                this.recentTaskTimeValue.textContent = formattedTime;
+                this.recentTaskEndTime.classList.remove('hidden');
+                // Store the original time for later use
+                this.storedRecentTaskEndTime = response.mostRecentTaskEndTime;
+            } else {
+                this.recentTaskEndTime.classList.add('hidden');
+                this.storedRecentTaskEndTime = null;
+            }
+        } catch (error) {
+            console.error('Failed to get recent task end time:', error);
+            this.recentTaskEndTime.classList.add('hidden');
+        }
+    }
+
+    useRecentTaskEndTime() {
+        if (this.storedRecentTaskEndTime) {
+            // Parse the stored time and set it in the time picker
+            const dateObj = new Date(`2000-01-01 ${this.storedRecentTaskEndTime}`);
+            this.timePickerInstance.setDate(dateObj);
+            this.showToast('Time set to previous task end time', 'success');
+        }
+    }
+
 
     async getMostRecentEndTimeFromBackend() {
         const response = await this.fetchFromAPI('/most_recent_end_time');
@@ -191,11 +225,17 @@ export class TimeKeeperIndex extends TimeKeeper {
 
             this.showTaskCompletionForm(currentTask);
             this.completeButton.dataset.taskId = currentTask.id;
+            
+            // Hide recent task end time when a task is in progress
+            this.recentTaskEndTime.classList.add('hidden');
         } else {
             // Hide the description input container for starting a new task
             document.getElementById('description-input-container').style.display = 'none';
 
             this.showStartTaskForm();
+            
+            // Update and show recent task end time when ready to start a new task
+            await this.updateRecentTaskEndTime();
         }
     }
 
@@ -233,6 +273,9 @@ export class TimeKeeperIndex extends TimeKeeper {
 
             // Update buttons to show start task option
             this.updateButtonVisibility('dayStarted');
+            
+            // Update recent task end time display
+            await this.updateRecentTaskEndTime();
         } catch (error) {
             console.error('Failed to start day:', error);
             // Error is already handled by fetchFromAPI with a toast
@@ -355,6 +398,9 @@ export class TimeKeeperIndex extends TimeKeeper {
 
             await this.checkDayStatus();
             await this.checkUnfinishedTasks();
+            
+            // Hide recent task end time after starting a new task
+            this.recentTaskEndTime.classList.add('hidden');
         }
     }
 
@@ -447,6 +493,9 @@ export class TimeKeeperIndex extends TimeKeeper {
 
             await this.checkDayStatus();
             await this.checkUnfinishedTasks();
+            
+            // Update recent task end time after completing a task
+            await this.updateRecentTaskEndTime();
         }
     }
 
@@ -504,8 +553,9 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.autocomplete = new Choices(this.clientInput, {
             searchPlaceholderValue: 'Start typing client name...',
             placeholder: true,
-            placeholderValue: 'Select a client',
+            placeholderValue: 'Choose a client...',
             searchResultLimit: 10,
+            shouldSort: false, // Don't re-sort, keep alphabetical order from server
             classNames: {
                 containerOuter: 'choices',
                 containerInner: 'choices__inner',
@@ -610,6 +660,9 @@ export class TimeKeeperIndex extends TimeKeeper {
 
         // Show the time picker for selecting start time
         document.getElementById('timepicker-container').style.display = 'block';
+        
+        // Hide recent task end time when day hasn't started
+        this.recentTaskEndTime.classList.add('hidden');
     }
 
     handleEndedDayState() {
@@ -627,6 +680,9 @@ export class TimeKeeperIndex extends TimeKeeper {
 
         // Hide the time picker container as well
         document.getElementById('timepicker-container').style.display = 'none';
+        
+        // Hide recent task end time when day has ended
+        this.recentTaskEndTime.classList.add('hidden');
     }
 
 
@@ -856,6 +912,11 @@ export class TimeKeeperIndex extends TimeKeeper {
 
             // Update day status to reflect changes
             await this.checkDayStatus();
+            
+            // Update recent task end time if no unfinished tasks
+            if (tasks.length === 0) {
+                await this.updateRecentTaskEndTime();
+            }
         } catch (error) {
             console.error('Failed to reopen day:', error);
             // Error is already handled by fetchFromAPI with a toast

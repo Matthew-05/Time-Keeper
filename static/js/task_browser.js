@@ -314,9 +314,41 @@ export class TaskBrowser extends TimeKeeper {
                 effectiveEndTime = end_time;
             }
 
-            return this.timeStringToMinutes(effectiveEndTime) - this.timeStringToMinutes(start_time);
+            // Calculate total day duration
+            const totalDayMinutes = this.timeStringToMinutes(effectiveEndTime) - this.timeStringToMinutes(start_time);
+
+            // Fetch and subtract break time
+            const breakMinutes = await this.fetchBreakDuration();
+            
+            // Return day duration minus break time
+            return Math.max(0, totalDayMinutes - breakMinutes);
         } catch (error) {
             this.showToast('Error fetching day data', 'error');
+            return 0;
+        }
+    }
+
+    async fetchBreakDuration() {
+        try {
+            const response = await this.fetchFromAPI('/get_breaks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date: this.selectedDate.value })
+            });
+
+            // Sum up all completed breaks for the day
+            let totalBreakMinutes = 0;
+            for (const breakItem of response) {
+                if (breakItem.start_time && breakItem.end_time) {
+                    const breakDuration = this.timeStringToMinutes(breakItem.end_time) - 
+                                        this.timeStringToMinutes(breakItem.start_time);
+                    totalBreakMinutes += breakDuration;
+                }
+            }
+
+            return totalBreakMinutes;
+        } catch (error) {
+            console.error('Error fetching break duration:', error);
             return 0;
         }
     }
@@ -446,9 +478,11 @@ export class TaskBrowser extends TimeKeeper {
     }
 
     async updateSummaryValues(totalMinutesForAll, totalFractionalHours) {
+        // Fetch total working time (day_end - day_start - breaks)
         const overallDayTime = await this.fetchDayData() || 0;
 
-        // Calculate non-billable time (total day time minus billable time)
+        // Calculate non-billable time (working time minus billable task time)
+        // Non-billable = time at work but not tracked to any client task
         let nonBillableTimeMins = Math.max(0, overallDayTime - totalMinutesForAll);
         const nonBillableHours = this.totalTimeSpentToFractionalHours(nonBillableTimeMins);
 
