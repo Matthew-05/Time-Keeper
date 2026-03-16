@@ -11,7 +11,7 @@ export class TaskBrowser extends TimeKeeper {
         this.initializeTaskEditing();
 
         setInterval(() => {
-            if (this.selectedDate.value === new Date().toISOString().split('T')[0]) {
+            if (this.selectedDate.value === this.getLocalDateString()) {
                 this.fetchTasks();
             }
         }, 60000);
@@ -42,12 +42,33 @@ export class TaskBrowser extends TimeKeeper {
             onChange: () => this.fetchTasks()
         });
 
+        // Prev/next day buttons
+        this.prevDayBtn = document.getElementById('prev-day-btn');
+        this.nextDayBtn = document.getElementById('next-day-btn');
+        if (this.prevDayBtn) this.prevDayBtn.addEventListener('click', () => this.navigateDay(-1));
+        if (this.nextDayBtn) this.nextDayBtn.addEventListener('click', () => this.navigateDay(1));
+
         // Bind action buttons
         this.closeDayBtn.addEventListener('click', () => this.handleCloseDay());
         this.saveStartBtn.addEventListener('click', () => this.handleSaveTime('start'));
         this.cancelStartBtn.addEventListener('click', () => this.handleCancelTime('start'));
         this.saveEndBtn.addEventListener('click', () => this.handleSaveTime('end'));
         this.cancelEndBtn.addEventListener('click', () => this.handleCancelTime('end'));
+    }
+
+    navigateDay(delta) {
+        const current = this.selectedDate.value || this.getLocalDateString();
+        const [y, m, d] = current.split('-').map(Number);
+        const date = new Date(y, m - 1, d);
+        date.setDate(date.getDate() + delta);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const nextDateStr = `${year}-${month}-${day}`;
+        // Use the active flatpickr instance (timePicker is created second and replaces datePicker on same element)
+        const picker = this.timePicker || this.datePicker;
+        if (picker) picker.setDate(nextDateStr, true);
+        this.fetchTasks();
     }
 
     initializeDayTimePickers() {
@@ -190,6 +211,16 @@ export class TaskBrowser extends TimeKeeper {
 
     initializeTaskEditing() {
         document.addEventListener('click', e => {
+            // Click to copy description (unfolded row or summary description cell)
+            const descCell = e.target.closest('.task-description-cell');
+            if (descCell) {
+                e.preventDefault();
+                e.stopPropagation();
+                const text = descCell.dataset.copyText || '';
+                this.copyToClipboard(text);
+                return;
+            }
+
             // Handle delete button clicks separately
             if (e.target.classList.contains('delete-task-btn')) {
                 if (confirm('Are you sure you want to delete this task?')) {
@@ -271,6 +302,32 @@ export class TaskBrowser extends TimeKeeper {
         }
     }
 
+    escapeHtml(str) {
+        if (str == null || str === '') return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    escapeHtmlAttr(str) {
+        if (str == null || str === '') return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    async copyToClipboard(text) {
+        if (!text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            this.showToast('Copied to clipboard', 'success');
+        } catch {
+            this.showToast('Failed to copy', 'error');
+        }
+    }
+
     getClientOptions(selectedClientId) {
         return this.clients.map(client => `
             <option value="${client.id}" ${client.id === selectedClientId ? 'selected' : ''}>
@@ -301,7 +358,7 @@ export class TaskBrowser extends TimeKeeper {
             // If end time is missing, use current time for today, or end of day for past dates
             let effectiveEndTime;
             if (!end_time) {
-                const today = new Date().toISOString().split('T')[0];
+                const today = this.getLocalDateString();
                 if (this.selectedDate.value === today) {
                     // For today, use current time
                     const now = new Date();
@@ -362,7 +419,7 @@ export class TaskBrowser extends TimeKeeper {
 
         tbody.innerHTML = `
             <tr>
-                <td colspan="4" class="px-6 py-8 text-center">
+                <td colspan="5" class="px-6 py-8 text-center">
                     <div class="flex items-center justify-center">
                         <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
                         <span class="ml-3 text-gray-600">Loading tasks...</span>
@@ -420,7 +477,7 @@ export class TaskBrowser extends TimeKeeper {
                 this.originalEndTime = '';
                 
                 // For open days (has start_time but no end_time), set picker default to current time
-                const today = new Date().toISOString().split('T')[0];
+                const today = this.getLocalDateString();
                 const isToday = this.selectedDate.value === today;
                 
                 if (start_time && isToday) {
@@ -453,7 +510,7 @@ export class TaskBrowser extends TimeKeeper {
     async updateCloseDayButtonVisibility() {
         try {
             // Check if the selected date is today
-            const today = new Date().toISOString().split('T')[0];
+            const today = this.getLocalDateString();
             const isToday = this.selectedDate.value === today;
 
             if (!isToday) {
@@ -540,7 +597,7 @@ export class TaskBrowser extends TimeKeeper {
                 if (clientGroups.length === 0) {
                     tbody.innerHTML = `
                         <tr>
-                            <td colspan="4" class="px-6 py-8 text-center text-gray-500">
+                            <td colspan="5" class="px-6 py-8 text-center text-gray-500">
                                 No tasks found for this date
                             </td>
                         </tr>
@@ -556,18 +613,38 @@ export class TaskBrowser extends TimeKeeper {
                     const fractionalHours = this.totalTimeSpentToFractionalHours(totalMinutes);
                     totalFractionalHours += fractionalHours;
 
+                    // Combined descriptions for this client's tasks (for copy + display)
+                    const fullDescriptions = client.tasks
+                        .map(t => (t.description || '').trim())
+                        .filter(Boolean);
+                    const fullDescriptionText = fullDescriptions.length
+                        ? fullDescriptions.join(', ')
+                        : '';
+                    const truncatedDescription = fullDescriptionText.length > 60
+                        ? fullDescriptionText.slice(0, 60) + '…'
+                        : (fullDescriptionText || '—');
+
                     // Add the summary row
                     const summaryRow = document.createElement('tr');
                     summaryRow.className = 'task-row hover:bg-gray-50 cursor-pointer transition-colors';
                     summaryRow.innerHTML = `
                         <td class="px-6 py-4 font-medium">${client.name}</td>
+                        <td class="px-6 py-4 max-w-xs truncate client-description-cell cursor-pointer" title="${this.escapeHtmlAttr(fullDescriptionText) || 'Click to copy'}" data-copy-text="${this.escapeHtmlAttr(fullDescriptionText)}">${this.escapeHtml(truncatedDescription)}</td>
                         <td class="px-6 py-4">${totalMinutes} minutes</td>
                         <td class="px-6 py-4 font-semibold">${fractionalHours} hrs.</td>
                         <td class="px-6 py-4 ${fractionalHours * 60 - totalMinutes > 0 ? 'text-green-600' : 'text-red-600'}">
                             ${fractionalHours * 60 - totalMinutes} minutes
                         </td>
                     `;
-                    summaryRow.addEventListener('click', () => this.toggleDetailTable(client.id));
+                    summaryRow.addEventListener('click', (e) => {
+                        if (e.target.closest('.client-description-cell')) {
+                            e.stopPropagation();
+                            const copyText = e.target.closest('.client-description-cell').dataset.copyText || '';
+                            if (copyText) this.copyToClipboard(copyText);
+                            return;
+                        }
+                        this.toggleDetailTable(client.id);
+                    });
                     tbody.appendChild(summaryRow);
 
                     // Add the detail row
@@ -602,7 +679,7 @@ export class TaskBrowser extends TimeKeeper {
         detailRow.className = 'detail-row hidden';
 
         const detailCell = document.createElement('td');
-        detailCell.colSpan = 4;
+        detailCell.colSpan = 5;
         detailCell.className = 'p-0';
 
         const detailTable = document.createElement('table');
@@ -632,7 +709,7 @@ export class TaskBrowser extends TimeKeeper {
                             </span>
                             <input type="text" class="task-time-picker end-time hidden w-24 p-1 border rounded" value="${task.end_time || ''}">
                         </td>
-                        <td class="px-4 py-3 max-w-xs truncate">${task.description || '<span class="text-gray-400 italic">No description</span>'}</td>
+                        <td class="px-4 py-3 max-w-xs truncate task-description-cell cursor-pointer" title="${this.escapeHtmlAttr(task.description || '') || 'Click to copy'}" data-copy-text="${this.escapeHtmlAttr(task.description || '')}">${task.description ? this.escapeHtml(task.description) : '<span class="text-gray-400 italic">No description</span>'}</td>
                         <td class="px-4 py-3">${this.getMinuteDifference(task.end_time, task.start_time)} minutes</td>
                         <td class="px-4 py-3">
                             <div class="flex space-x-2">
@@ -684,6 +761,14 @@ export class TaskBrowser extends TimeKeeper {
         const period = +hours >= 12 ? 'PM' : 'AM';
         const hour = +hours % 12 || 12;
         return `${hour}:${minutes} ${period}`;
+    }
+
+    getLocalDateString() {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
     }
 
     getMinuteDifference(endTime, startTime) {
@@ -783,7 +868,7 @@ export class TaskBrowser extends TimeKeeper {
 
         // Calculate a view centered on the current time
         const now = new Date();
-        const today = new Date().toISOString().split('T')[0];
+        const today = this.getLocalDateString();
         const isSelectedDateToday = selectedDate === today;
 
         // Set the view duration (how many hours to show)
