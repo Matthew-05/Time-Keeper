@@ -15,6 +15,7 @@ sqlalchemy = "*"
 flask-sqlalchemy = "*"
 flask-cors = "*"
 pyinstaller = "*"
+httpx = "*"
 
 [dev-packages]
 

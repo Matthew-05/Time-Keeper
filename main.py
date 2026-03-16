@@ -1,6 +1,8 @@
 import sys
 import os
 from pathlib import Path
+import httpx
+import getpass
 
 # Set up temp directories FIRST if running as frozen executable
 if getattr(sys, 'frozen', False):
@@ -33,7 +35,54 @@ from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from sqlalchemy import func
 import socket
 
-APP_VERSION = "1.2.0"
+
+class UsageLogger:
+    """Handles logging of automation usage to external API."""
+
+    @staticmethod
+    def send_log(action_name, details=None):
+        """Send usage log to external API.
+
+        Args:
+            action_name: Name of the action/automation being logged
+            details: Optional dictionary of additional details to log
+        """
+        try:
+            url = 'https://matthewcodes.xyz/api/project-usage/'
+
+            headers = {
+                'Authorization': 'J9EuaQDk85QQIRbsKmQ-RfjKKzlT8U7NnBj-eJTr30c',
+                'Content-Type': 'application/json',
+            }
+
+            data = {
+                'application_name': 'Time-Keeper',
+                'action': action_name,
+                'username': getpass.getuser(),
+            }
+
+            # Add details if provided
+            if details:
+                data.update(details)
+
+            with httpx.Client() as client:
+                response = client.post(
+                    url,
+                    json=data,
+                    headers=headers,
+                    follow_redirects=True
+                )
+                print(f"Request method: {response.request.method}")
+                print(f"Response status: {response.status_code}")
+                print(f"Response content: {response.text}")
+
+                return response.json() if response.status_code in (200, 201) else response.text
+        except Exception as e:
+            print(f"Error sending log: {str(e)}")
+            return None
+
+
+APP_VERSION = "1.1.0"
 
 
 user_data_dir = os.path.join(Path.home(), 'AppData', 'Local', 'TimeKeeper')
@@ -54,11 +103,28 @@ if getattr(sys, 'frozen', False):
     print(f"Static folder: {static_folder}")
     print(f"Template folder exists: {os.path.exists(template_folder)}")
     print(f"Static folder exists: {os.path.exists(static_folder)}")
+    
+    # Log application startup in frozen state
+    UsageLogger.send_log('Program started', {
+        'version': APP_VERSION,
+        'frozen_state': True,
+        'bundle_dir': bundle_dir
+    })
+    
     app = Flask(__name__, 
                 template_folder=template_folder,
                 static_folder=static_folder)
 else:
     # We are running in a normal Python environment
+    print(f"Running in development mode")
+    
+    # Log application startup in development mode (for debugging)
+    UsageLogger.send_log('Program started', {
+        'version': APP_VERSION,
+        'frozen_state': False,
+        'working_directory': os.getcwd()
+    })
+    
     app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_secret_key_here'
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
@@ -115,12 +181,12 @@ def index():
 @app.route('/clients', methods=['GET'])
 def get_clients():
     query = request.args.get('query', '')
-    clients = Client.query.filter(Client.name.like(f'%{query}%')).order_by(Client.name).all() if query else Client.query.order_by(Client.name).all()
+    clients = Client.query.filter(Client.name.like(f'%{query}%')).all() if query else Client.query.all()
     return jsonify([{'id': client.id, 'name': client.name} for client in clients])
 
 @app.route('/autocomplete', methods=['GET'])
 def autocomplete():
-    clients = Client.query.order_by(Client.name).all()
+    clients = Client.query.all()
     results = [client.name for client in clients]
     return jsonify(results)
 
@@ -181,7 +247,7 @@ def delete_client(id):
 
 @app.route('/client_manager')
 def client_manager():
-    clients = Client.query.order_by(Client.name).all()
+    clients = Client.query.all()
     return render_template('client_manager.html', clients=clients, version=APP_VERSION)
 
 @app.route('/new_client', methods=['GET', 'POST'])
@@ -592,7 +658,7 @@ def get_min_time():
 
 @app.route('/summary')
 def summary_page():
-    clients = Client.query.order_by(Client.name).all()
+    clients = Client.query.all()
     return render_template('time_summary.html', clients=clients, version=APP_VERSION)
     
 @app.route('/api/summary/<string:period>/<int:client_id>', methods=['GET'])
@@ -770,52 +836,15 @@ class WebviewAPI:
         webview.windows[0].evaluate_js(f'window.location.href = "{url}"')
 
 
-#admin = Admin(app, name='Admin Panel', template_mode='bootstrap3')
+admin = Admin(app, name='Admin Panel', template_mode='bootstrap3')
 
 # Add model views to Flask-Admin
-#admin.add_view(ModelView(Task_Item, db.session))
-#admin.add_view(ModelView(TimeTracking, db.session))
-#admin.add_view(ModelView(Client, db.session))
-#admin.add_view(ModelView(BreakTracking, db.session))
-
-def close_unclosed_days():
-    """Check for any days that were not properly closed and set their end time to 23:59:59"""
-    with app.app_context():
-        try:
-            # Get today's date
-            today = date.today()
-            
-            # Find all TimeTracking entries where end_time is None (unclosed days)
-            unclosed_days = TimeTracking.query.filter_by(end_time=None).all()
-            
-            if unclosed_days:
-                logger.info(f"Found {len(unclosed_days)} unclosed day(s)")
-                closed_count = 0
-                
-                for day in unclosed_days:
-                    # Skip today - only close past unclosed days
-                    if day.date == today:
-                        logger.info(f"Skipping current day ({day.date}) - still open")
-                        continue
-                    
-                    # Set end time to 23:59:59 for past unclosed days
-                    day.end_time = datetime.strptime('23:59:59', '%H:%M:%S').time()
-                    logger.info(f"Closed day for {day.date} with end time 23:59:59")
-                    closed_count += 1
-                
-                if closed_count > 0:
-                    db.session.commit()
-                    logger.info(f"Closed {closed_count} past unclosed day(s)")
-                else:
-                    logger.info("No past unclosed days to close")
-        except Exception as e:
-            logger.error(f"Error closing unclosed days: {str(e)}")
-            db.session.rollback()
+admin.add_view(ModelView(Task_Item, db.session))
+admin.add_view(ModelView(TimeTracking, db.session))
+admin.add_view(ModelView(Client, db.session))
+admin.add_view(ModelView(BreakTracking, db.session))
 
 if __name__ == '__main__':
-    # Close any unclosed days from previous sessions
-    close_unclosed_days()
-    
     # Start Flask server in a separate thread
     t = threading.Thread(target=start_server)
     t.daemon = True
