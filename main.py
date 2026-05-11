@@ -29,10 +29,11 @@ from sqlalchemy import text, inspect, desc, and_
 from flask_migrate import Migrate
 from flask_admin import Admin
 from flask_admin.contrib.sqla import ModelView
+from flask_admin.theme import Bootstrap4Theme
 import webview
 from werkzeug.serving import run_simple
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
-from sqlalchemy import func
+from sqlalchemy import func, String, literal
 import socket
 
 
@@ -82,7 +83,7 @@ class UsageLogger:
             return None
 
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 
 user_data_dir = os.path.join(Path.home(), 'AppData', 'Local', 'TimeKeeper')
@@ -171,8 +172,98 @@ def timer_status():
 @app.context_processor
 def inject_version():
     return dict(app_version=APP_VERSION)
+
+
+REMOVED_CLIENT_LABEL = 'REMOVED'
+
+
+def task_client_display_name(task):
+    """Label for API/UI when the task's client row was deleted."""
+    if task.client_id is None:
+        return REMOVED_CLIENT_LABEL
+    if task.client is None:
+        return REMOVED_CLIENT_LABEL
+    return task.client.name
+
+
+def _ensure_task_client_id_nullable():
+    """SQLite cannot drop NOT NULL in-place; rebuild task__item if needed."""
+    eng = db.engine
+    if eng.dialect.name != 'sqlite':
+        return
+    table = Task_Item.__table__.name
+    insp = inspect(eng)
+    if table not in insp.get_table_names():
+        return
+    col = next((c for c in insp.get_columns(table) if c['name'] == 'client_id'), None)
+    if not col or col.get('nullable'):
+        return
+    client_table = Client.__table__.name
+    tmp = f'{table}_tk_nullable_client'
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                f"""
+                CREATE TABLE {tmp} (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    date DATE NOT NULL,
+                    start_time TIME NOT NULL,
+                    end_time TIME,
+                    client_id INTEGER,
+                    type VARCHAR(50),
+                    description TEXT,
+                    time_spent INTEGER,
+                    adjust_entry BOOLEAN,
+                    FOREIGN KEY(client_id) REFERENCES {client_table} (id)
+                )
+                """
+            )
+        )
+        cols = (
+            'id, date, start_time, end_time, client_id, '
+            'type, description, time_spent, adjust_entry'
+        )
+        conn.execute(
+            text(f'INSERT INTO {tmp} ({cols}) SELECT {cols} FROM {table}')
+        )
+        conn.execute(text(f'DROP TABLE {table}'))
+        conn.execute(text(f'ALTER TABLE {tmp} RENAME TO {table}'))
+
+
 with app.app_context():
     db.create_all()
+    _ensure_task_client_id_nullable()
+
+
+def _task_moment_sort_string():
+    """Lexicographically sortable 'YYYY-MM-DD HH:MM:SS' per task for ordering."""
+    time_part = func.coalesce(
+        Task_Item.end_time.cast(String),
+        Task_Item.start_time.cast(String),
+    )
+    return Task_Item.date.cast(String) + literal(" ") + time_part
+
+
+def clients_query_most_recent_first():
+    """Clients with a task history first (by last task end/start), then name."""
+    moment = _task_moment_sort_string()
+    last_used_sq = (
+        db.session.query(
+            Task_Item.client_id,
+            func.max(moment).label("last_used"),
+        )
+        .filter(Task_Item.client_id.isnot(None))
+        .group_by(Task_Item.client_id)
+        .subquery()
+    )
+    return (
+        Client.query.outerjoin(last_used_sq, Client.id == last_used_sq.c.client_id)
+        .order_by(
+            desc(last_used_sq.c.last_used).nulls_last(),
+            Client.name,
+        )
+    )
+
 
 @app.route('/')
 def index():
@@ -181,12 +272,15 @@ def index():
 @app.route('/clients', methods=['GET'])
 def get_clients():
     query = request.args.get('query', '')
-    clients = Client.query.filter(Client.name.like(f'%{query}%')).all() if query else Client.query.all()
+    q = clients_query_most_recent_first()
+    if query:
+        q = q.filter(Client.name.like(f'%{query}%'))
+    clients = q.all()
     return jsonify([{'id': client.id, 'name': client.name} for client in clients])
 
 @app.route('/autocomplete', methods=['GET'])
 def autocomplete():
-    clients = Client.query.all()
+    clients = clients_query_most_recent_first().all()
     results = [client.name for client in clients]
     return jsonify(results)
 
@@ -241,6 +335,12 @@ def update_client(id):
 @app.route('/clients/<int:id>', methods=['DELETE'])
 def delete_client(id):
     client = Client.query.get(id)
+    if client is None:
+        return jsonify({'error': 'Client not found'}), 404
+    Task_Item.query.filter(Task_Item.client_id == id).update(
+        {Task_Item.client_id: None},
+        synchronize_session=False,
+    )
     db.session.delete(client)
     db.session.commit()
     return jsonify({'success': True})
@@ -325,7 +425,7 @@ def get_tasks(date):
         'start_time': task.start_time.strftime('%H:%M:%S'),
         'end_time': current_time.strftime('%H:%M:%S') if task.end_time is None else task.end_time.strftime('%H:%M:%S'),
         'client_id': task.client_id,
-        'client_name': task.client.name,
+        'client_name': task_client_display_name(task),
         'type': task.type,
         'description': task.description,
         'time_spent': task.time_spent,
@@ -340,7 +440,7 @@ def get_unfinished_tasks():
     unfinished_tasks = Task_Item.query.filter_by(date=today, end_time=None).all()
     tasks_data = [{
         'id': task.id,
-        'client': task.client.name,
+        'client': task_client_display_name(task),
         'description': task.description,
         'start_time': task.start_time.strftime('%H:%M:%S')
     } for task in unfinished_tasks]
@@ -729,8 +829,14 @@ def update_task(task_id):
 
     task.start_time = new_start
     task.end_time = new_end
-    task.client_id = data['client_id']
-    
+    try:
+        new_client_id = int(data['client_id'])
+    except (TypeError, ValueError, KeyError):
+        return jsonify({'error': 'A valid client is required'}), 400
+    if Client.query.get(new_client_id) is None:
+        return jsonify({'error': 'Client not found'}), 404
+    task.client_id = new_client_id
+
     db.session.commit()
     return jsonify({'success': True})
 
@@ -836,7 +942,7 @@ class WebviewAPI:
         webview.windows[0].evaluate_js(f'window.location.href = "{url}"')
 
 
-admin = Admin(app, name='Admin Panel', template_mode='bootstrap3')
+admin = Admin(app, name='Admin Panel', theme=Bootstrap4Theme())
 
 # Add model views to Flask-Admin
 admin.add_view(ModelView(Task_Item, db.session))

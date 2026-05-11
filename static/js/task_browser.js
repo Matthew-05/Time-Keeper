@@ -274,7 +274,12 @@ export class TaskBrowser extends TimeKeeper {
         const taskId = row.dataset.taskId;
         const startTime = row.querySelector('.start-time').value;
         const endTime = row.querySelector('.end-time').value;
-        const clientId = parseInt(row.querySelector('.client-select').value);
+        const rawClientId = row.querySelector('.client-select').value;
+        const clientId = parseInt(rawClientId, 10);
+        if (rawClientId === '' || Number.isNaN(clientId)) {
+            this.showToast('Please select a client', 'error');
+            return;
+        }
 
         try {
             const response = await fetch(`/update_task/${taskId}`, {
@@ -329,11 +334,18 @@ export class TaskBrowser extends TimeKeeper {
     }
 
     getClientOptions(selectedClientId) {
-        return this.clients.map(client => `
+        const parts = [];
+        if (selectedClientId == null) {
+            parts.push('<option value="" selected disabled>REMOVED</option>');
+        }
+        parts.push(
+            ...this.clients.map(client => `
             <option value="${client.id}" ${client.id === selectedClientId ? 'selected' : ''}>
                 ${client.name}
             </option>
-        `).join('');
+        `)
+        );
+        return parts.join('');
     }
 
     async fetchInitialData() {
@@ -643,7 +655,7 @@ export class TaskBrowser extends TimeKeeper {
                             if (copyText) this.copyToClipboard(copyText);
                             return;
                         }
-                        this.toggleDetailTable(client.id);
+                        this.toggleDetailTable(client.detailKey);
                     });
                     tbody.appendChild(summaryRow);
 
@@ -659,23 +671,25 @@ export class TaskBrowser extends TimeKeeper {
     aggregateByClient(tasks) {
         const clientMap = {};
         tasks.forEach((task) => {
-            if (!clientMap[task.client_id]) {
-                clientMap[task.client_id] = {
+            const detailKey = task.client_id == null ? '__removed__' : String(task.client_id);
+            if (!clientMap[detailKey]) {
+                clientMap[detailKey] = {
                     id: task.client_id,
+                    detailKey,
                     name: task.client_name,
                     totalTimeSpent: 0,
                     tasks: [],
                 };
             }
-            clientMap[task.client_id].totalTimeSpent += task.time_spent;
-            clientMap[task.client_id].tasks.push(task);
+            clientMap[detailKey].totalTimeSpent += task.time_spent;
+            clientMap[detailKey].tasks.push(task);
         });
         return Object.values(clientMap);
     }
 
     createDetailRow(client) {
         const detailRow = document.createElement('tr');
-        detailRow.id = `detail-row-${client.id}`;
+        detailRow.id = `detail-row-${client.detailKey}`;
         detailRow.className = 'detail-row hidden';
 
         const detailCell = document.createElement('td');
@@ -851,10 +865,10 @@ export class TaskBrowser extends TimeKeeper {
             '#f43f5e'  // Pink
         ];
 
-        // Assign colors to unique clients
-        const uniqueClients = [...new Set(tasks.map(task => task.client_id))];
-        uniqueClients.forEach((clientId, index) => {
-            clientColors[clientId] = colors[index % colors.length];
+        // Assign colors to unique clients (null client_id = removed)
+        const uniqueClients = [...new Set(tasks.map(task => (task.client_id == null ? '__removed__' : task.client_id)))];
+        uniqueClients.forEach((clientKey, index) => {
+            clientColors[clientKey] = colors[index % colors.length];
         });
 
         // Create data sets for timeline with client colors
@@ -863,7 +877,7 @@ export class TaskBrowser extends TimeKeeper {
             content: task.client_name,
             start: `${selectedDate}T${task.start_time}`,
             end: task.end_time ? `${selectedDate}T${task.end_time}` : undefined,
-            style: `background-color: ${clientColors[task.client_id]}; color: white; border-radius: 4px; padding: 2px 8px;`
+            style: `background-color: ${clientColors[task.client_id == null ? '__removed__' : task.client_id]}; color: white; border-radius: 4px; padding: 2px 8px;`
         }));
 
         // Calculate a view centered on the current time

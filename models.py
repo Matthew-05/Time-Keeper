@@ -15,7 +15,11 @@ class Task_Item(db.Model):
     date = db.Column(db.Date, nullable=False)  # Start date is required
     start_time = db.Column(db.Time, nullable=False)  # Start time is required
     end_time = db.Column(db.Time, nullable=True)  # Nullable end time
-    client_id = db.Column(db.Integer, db.ForeignKey('client.id'), nullable=False)  # Client foreign key is required
+    client_id = db.Column(
+        db.Integer,
+        db.ForeignKey('client.id', ondelete='SET NULL'),
+        nullable=True,
+    )
     client = db.relationship('Client', backref=db.backref('tasks', lazy=True))
     type = db.Column(db.String(50), nullable=True)  # Type is not required
     description = db.Column(db.Text, nullable=True)  # Description is not required

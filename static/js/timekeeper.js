@@ -473,9 +473,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         if (response.success) {
             this.showToast(`Task completed successfully for client: ${this.clientInput.value}`, 'green');
             this.clearInputs();
-            // Clear the time picker
-            this.timePickerInstance.clear();
-            this.autocomplete.setChoiceByValue('');
+            if (this.autocomplete) this.autocomplete.removeActiveItems();
             this.completeButton.style.display = 'none';
             this.startButton.style.display = 'block';
 
@@ -555,7 +553,7 @@ export class TimeKeeperIndex extends TimeKeeper {
             placeholder: true,
             placeholderValue: 'Choose a client...',
             searchResultLimit: 10,
-            shouldSort: false, // Don't re-sort, keep alphabetical order from server
+            shouldSort: false, // Keep server order (most recently used clients first)
             classNames: {
                 containerOuter: 'choices',
                 containerInner: 'choices__inner',
