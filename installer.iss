@@ -1,6 +1,6 @@
 
 #define MyAppName "Time Keeper"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "Matthew Codes"
 #define MyAppExeName "Time-Keeper.exe"
 
@@ -12,7 +12,7 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=Build\dist
-OutputBaseFilename=Time-Keeper-Setup-1.0.0
+OutputBaseFilename=Time-Keeper-Setup-1.2.0
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern

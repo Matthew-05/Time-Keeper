@@ -1,9 +1,9 @@
 import os
 import subprocess
 import shutil
-import site
+import sys
 
-VERSION = "1.0.0"  # Match the version in main.py
+VERSION = "1.2.0"  # Match the version in main.py
 
 def ensure_build_directories():
     build_dirs = ['Build/Console', 'Build/dist']
@@ -43,15 +43,22 @@ VSVersionInfo(
         f.write(version_info)
 
 def build_application():
+    if sys.version_info[:2] != (3, 12):
+        raise SystemExit(
+            f"This build must run under Python 3.12 (found {sys.version_info.major}.{sys.version_info.minor}). "
+            "Use `py -3.12 build.py` or activate a 3.12 venv."
+        )
+
     input('Check you have updated the main.py version number and press enter to continue')
     input('Check you have updated the build.py version number and press enter to continue')
     input('Check you have set DEV_MODE in .env to False and press enter to continue')
-    
-    # Path to Inno Setup compiler - update this path if needed
-    iscc_path = r"C:/Program Files (x86)/Inno Setup 6/ISCC.exe"
-    
-    # Path to Python DLL - update this path to match your Python installation
-    python_dll = r"C:/Program Files/Python313/python313.dll"
+
+    python_dll = os.path.join(
+        sys.base_prefix,
+        f"python{sys.version_info.major}{sys.version_info.minor}.dll",
+    )
+    if not os.path.isfile(python_dll):
+        raise SystemExit(f"Python DLL not found at {python_dll!r}; install Python 3.12 or fix base_prefix.")
 
     if os.path.exists('Build'):
         shutil.rmtree('Build')
@@ -59,9 +66,10 @@ def build_application():
 
     update_version_in_files()
 
-    # Common PyInstaller arguments
+    # Common PyInstaller arguments (--onefile: single .exe, no _internal folder)
     common_args = [
         '--noconfirm',
+        '--onefile',
         '--name=Time-Keeper',
         '--icon=icon.ico',
         '--version-file=version_info.txt',
@@ -147,60 +155,19 @@ def build_application():
         'main.py'
     ])
 
-    # Only create installer if builds succeeded
-    if windowed_result.returncode == 0 and os.path.exists('Build/dist/Time-Keeper'):
-        # Create or update installer.iss file
-        create_installer_script()
-        
-        # Run Inno Setup compiler
-        subprocess.run([
-            iscc_path,
-            '/O"Build/dist"',
-            'installer.iss'
-        ])
+    if console_result.returncode != 0:
+        raise SystemExit("Console build failed (see PyInstaller output above).")
+    if windowed_result.returncode != 0:
+        raise SystemExit("Windowed build failed (see PyInstaller output above).")
 
-def create_installer_script():
-    """Create the Inno Setup script file for Time-Keeper"""
-    inno_script = f"""
-#define MyAppName "Time Keeper"
-#define MyAppVersion "{VERSION}"
-#define MyAppPublisher "Matthew Codes"
-#define MyAppExeName "Time-Keeper.exe"
+    console_exe = os.path.abspath("Build/Console/Time-Keeper.exe")
+    windowed_exe = os.path.abspath("Build/dist/Time-Keeper.exe")
+    if not os.path.isfile(console_exe) or not os.path.isfile(windowed_exe):
+        raise SystemExit("Build reported success but expected .exe output was missing.")
+    print("Build complete.")
+    print(f"  Console:  {console_exe}")
+    print(f"  Windowed: {windowed_exe}")
 
-[Setup]
-AppId={{{{F8E24CA1-1A41-4F94-9A37-78D7C145A77E}}}}
-AppName={{#MyAppName}}
-AppVersion={{#MyAppVersion}}
-AppPublisher={{#MyAppPublisher}}
-DefaultDirName={{autopf}}\\{{#MyAppName}}
-DisableProgramGroupPage=yes
-OutputDir=Build\\dist
-OutputBaseFilename=Time-Keeper-Setup-{VERSION}
-Compression=lzma
-SolidCompression=yes
-WizardStyle=modern
-PrivilegesRequired=admin
-
-[Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
-
-[Tasks]
-Name: "desktopicon"; Description: "{{cm:CreateDesktopIcon}}"; GroupDescription: "{{cm:AdditionalIcons}}"
-Name: "startupicon"; Description: "Start at system startup"; GroupDescription: "{{cm:AdditionalIcons}}"
-
-[Files]
-Source: "Build\\dist\\Time-Keeper\\*"; DestDir: "{{app}}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-[Icons]
-Name: "{{autoprograms}}\\{{#MyAppName}}"; Filename: "{{app}}\\{{#MyAppExeName}}"
-Name: "{{autodesktop}}\\{{#MyAppName}}"; Filename: "{{app}}\\{{#MyAppExeName}}"; Tasks: desktopicon
-Name: "{{commonstartup}}\\{{#MyAppName}}"; Filename: "{{app}}\\{{#MyAppExeName}}"; Tasks: startupicon
-
-[Run]
-Filename: "{{app}}\\{{#MyAppExeName}}"; Description: "{{cm:LaunchProgram,{{#StringChange(MyAppName, '&', '&&')}}}}"; Flags: nowait postinstall skipifsilent
-"""
-    with open('installer.iss', 'w') as f:
-        f.write(inno_script)
 
 if __name__ == '__main__':
     build_application()
