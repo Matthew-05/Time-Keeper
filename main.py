@@ -785,6 +785,97 @@ def summary_page():
     clients = Client.query.all()
     return render_template('time_summary.html', clients=clients, version=APP_VERSION)
     
+def _parse_range(start_date, end_date):
+    """Parse two YYYY-MM-DD strings, tolerating them being the wrong way round.
+
+    Returns (start, end) or raises ValueError.
+    """
+    start = datetime.strptime(start_date, '%Y-%m-%d').date()
+    end = datetime.strptime(end_date, '%Y-%m-%d').date()
+    return (end, start) if start > end else (start, end)
+
+
+def task_duration_seconds(task, now=None):
+    """How long a task ran, in seconds.
+
+    Task_Item.time_spent is never populated (it's written as 0 on creation and
+    never updated), so duration always has to be derived from the timestamps.
+
+    An unfinished task on today's date is measured up to the current time; on
+    any earlier date there's no sensible end, so it counts as zero rather than
+    silently inventing time.
+    """
+    now = now or datetime.now()
+
+    end = task.end_time
+    if end is None:
+        if task.date != now.date():
+            return 0
+        end = now.time()
+
+    delta = (
+        datetime.combine(task.date, end)
+        - datetime.combine(task.date, task.start_time)
+    ).total_seconds()
+
+    # Guard against a corrupted row where end precedes start.
+    return max(0, int(delta))
+
+
+def tasks_between(start, end):
+    return Task_Item.query.filter(
+        Task_Item.date >= start,
+        Task_Item.date <= end,
+    ).all()
+
+
+@app.route('/api/summary/custom/<start_date>/<end_date>', methods=['GET'])
+def get_custom_summary(start_date, end_date):
+    """Total tracked time per client across a date range.
+
+    Returns [{client_name, total_time}] with total_time in SECONDS — the
+    summary page divides by 3600 to plot hours.
+    """
+    try:
+        start, end = _parse_range(start_date, end_date)
+    except ValueError:
+        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD.'}), 400
+
+    now = datetime.now()
+    totals = {}
+    for task in tasks_between(start, end):
+        name = task_client_display_name(task)
+        totals[name] = totals.get(name, 0) + task_duration_seconds(task, now)
+
+    return jsonify([
+        {'client_name': name, 'total_time': seconds}
+        for name, seconds in sorted(totals.items(), key=lambda kv: -kv[1])
+    ])
+
+
+@app.route('/api/summary/daily/<start_date>/<end_date>', methods=['GET'])
+def get_daily_summary(start_date, end_date):
+    """Total tracked time per day across a date range.
+
+    Returns [{date, total_hours}] ordered by date. Only days that actually have
+    tasks are included, so days off don't drag the moving average down.
+    """
+    try:
+        start, end = _parse_range(start_date, end_date)
+    except ValueError:
+        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD.'}), 400
+
+    now = datetime.now()
+    totals = {}
+    for task in tasks_between(start, end):
+        totals[task.date] = totals.get(task.date, 0) + task_duration_seconds(task, now)
+
+    return jsonify([
+        {'date': day.strftime('%Y-%m-%d'), 'total_hours': round(seconds / 3600, 2)}
+        for day, seconds in sorted(totals.items())
+    ])
+
+
 @app.route('/api/summary/<string:period>/<int:client_id>', methods=['GET'])
 def get_time_summary(period, client_id):
     if period not in ['weekly', 'monthly']:
@@ -796,17 +887,19 @@ def get_time_summary(period, client_id):
     else:  # monthly
         start_date = today.replace(day=1)
 
-    summary = db.session.query(
-        func.sum(Task_Item.time_spent).label('total_time')
-    ).filter(
-        Task_Item.client_id == client_id,
-        Task_Item.date >= start_date
-    ).first()
+    now = datetime.now()
+    total_time = sum(
+        task_duration_seconds(task, now)
+        for task in Task_Item.query.filter(
+            Task_Item.client_id == client_id,
+            Task_Item.date >= start_date,
+        ).all()
+    )
 
     return jsonify({
         'client_id': client_id,
         'period': period,
-        'total_time': summary.total_time if summary.total_time else 0
+        'total_time': total_time
     })
 
 @app.route('/update_task/<int:task_id>', methods=['PUT'])

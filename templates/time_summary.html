@@ -8,8 +8,7 @@
   <div class="tk-page max-w-5xl">
     <div class="tk-page-header">
       <div>
-        <h1 class="tk-title">Time summary</h1>
-        <p class="tk-subtitle">Billable hours across a date range.</p>
+        <h1 class="tk-title">Billable time summary</h1>
       </div>
 
       <div class="relative">
@@ -28,16 +27,26 @@
       </div>
     </div>
 
-    <section class="tk-card p-4">
-      <div class="tab-content" id="client-tab">
-        <div class="h-[60vh] min-h-[320px]">
-          <canvas id="timeChart"></canvas>
-        </div>
+    <section class="tk-card">
+      <div class="flex items-center gap-2 border-b border-border px-4 py-2.5 text-xs text-muted">
+        <svg class="h-3.5 w-3.5 flex-shrink-0 text-faint" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 16v-4M12 8h.01" />
+        </svg>
+        <span>Logged task time only. Gaps between tasks aren't counted.</span>
       </div>
 
-      <div class="tab-content hidden" id="daily-tab">
-        <div class="h-[60vh] min-h-[320px]">
-          <canvas id="dailyTimeChart"></canvas>
+      <div class="p-4">
+        <div class="tab-content" id="client-tab">
+          <div class="h-[60vh] min-h-[320px]">
+            <canvas id="timeChart"></canvas>
+          </div>
+        </div>
+
+        <div class="tab-content hidden" id="daily-tab">
+          <div class="h-[60vh] min-h-[320px]">
+            <canvas id="dailyTimeChart"></canvas>
+          </div>
         </div>
       </div>
     </section>
@@ -71,6 +80,11 @@
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)} billable hrs`,
+            },
+          },
           title: { display: true, text: title, color: t.text, font: { size: 14, weight: '600' } },
           legend: { labels: { color: t.muted, boxWidth: 12, boxHeight: 12, usePointStyle: true } },
         },
@@ -81,7 +95,7 @@
           },
           y: {
             beginAtZero: true,
-            title: { display: true, text: 'Hours', color: t.muted },
+            title: { display: true, text: 'Billable hours', color: t.muted },
             ticks: { color: t.faint },
             grid: { color: t.border, drawBorder: false },
           },
@@ -96,38 +110,86 @@
       return clientColorMap[clientName]
     }
 
+    /** Current selection as [start, end]. A single-day pick counts as both. */
+    function selectedRange() {
+      const [start, end] = document.getElementById('date-range').value.split(' to ')
+      return start ? [start, end || start] : null
+    }
+
+    /**
+     * Fetch JSON, but fail loudly and legibly. A 404 from Flask is an HTML error
+     * page, and calling .json() on that throws an opaque "Unexpected token '<'".
+     */
+    async function fetchJSON(url) {
+      const response = await fetch(url)
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText} — ${url}`)
+      }
+      const body = await response.text()
+      try {
+        return JSON.parse(body)
+      } catch {
+        throw new Error(`Expected JSON from ${url} but got ${body.slice(0, 40)}…`)
+      }
+    }
+
+    /** Swap a tab to a message, discarding its canvas. */
+    function showMessage(tabId, message) {
+      document.getElementById(tabId).innerHTML = `<div class="tk-empty">${message}</div>`
+    }
+
+    /** Put the canvas back if a previous error or empty state replaced it. */
+    function ensureCanvas(tabId, canvasId) {
+      const tab = document.getElementById(tabId)
+      if (!document.getElementById(canvasId)) {
+        tab.innerHTML = `<div class="h-[60vh] min-h-[320px]"><canvas id="${canvasId}"></canvas></div>`
+      }
+      return document.getElementById(canvasId)
+    }
+
     async function updateChart() {
-      const dateRange = document.getElementById('date-range').value
-      const [startDate, endDate] = dateRange.split(' to ')
-      if (!startDate || !endDate) return
-      const response = await fetch(`/api/summary/custom/${startDate}/${endDate}`)
-      createBarChart('timeChart', 'Time by client', await response.json())
+      const range = selectedRange()
+      if (!range) return
+      try {
+        const data = await fetchJSON(`/api/summary/custom/${range[0]}/${range[1]}`)
+        if (!data.length) return showMessage('client-tab', 'No billable time logged in this range.')
+        createBarChart('timeChart', 'Billable time by client', data)
+      } catch (error) {
+        console.error(error)
+        showMessage('client-tab', 'Could not load the client summary.')
+      }
     }
 
     async function updateDailyChart() {
-      const dateRange = document.getElementById('date-range').value
-      const [startDate, endDate] = dateRange.split(' to ')
-      if (!startDate || !endDate) return
-      const response = await fetch(`/api/summary/daily/${startDate}/${endDate}`)
-      createDailyChart('dailyTimeChart', 'Daily billable hours', await response.json())
+      const range = selectedRange()
+      if (!range) return
+      try {
+        const data = await fetchJSON(`/api/summary/daily/${range[0]}/${range[1]}`)
+        if (!data.length) return showMessage('daily-tab', 'No billable time logged in this range.')
+        createDailyChart('dailyTimeChart', 'Daily billable hours', data)
+      } catch (error) {
+        console.error(error)
+        showMessage('daily-tab', 'Could not load the daily summary.')
+      }
     }
 
     function createBarChart(canvasId, title, data) {
       if (chart) chart.destroy()
+      const canvas = ensureCanvas('client-tab', canvasId)
 
       data.sort((a, b) => b.total_time - a.total_time)
       const totalHours = (data.reduce((sum, item) => sum + item.total_time, 0) / 3600).toFixed(2)
 
-      const options = baseChartOptions(`${title} — ${totalHours} hrs total`)
+      const options = baseChartOptions(`${title} — ${totalHours} billable hrs total`)
       options.plugins.legend.display = false
 
-      chart = new Chart(document.getElementById(canvasId).getContext('2d'), {
+      chart = new Chart(canvas.getContext('2d'), {
         type: 'bar',
         data: {
           labels: data.map((item) => item.client_name),
           datasets: [
             {
-              label: 'Hours',
+              label: 'Billable hours',
               data: data.map((item) => item.total_time / 3600),
               backgroundColor: data.map((item) => getClientColor(item.client_name)),
               borderRadius: 4,
@@ -141,6 +203,7 @@
 
     function createDailyChart(canvasId, title, data) {
       if (dailyChart) dailyChart.destroy()
+      const canvas = ensureCanvas('daily-tab', canvasId)
 
       const t = tokens()
       const hours = data.map((item) => item.total_hours)
@@ -151,13 +214,13 @@
         return window.reduce((a, b) => a + b, 0) / window.length
       })
 
-      dailyChart = new Chart(document.getElementById(canvasId).getContext('2d'), {
+      dailyChart = new Chart(canvas.getContext('2d'), {
         type: 'line',
         data: {
           labels: data.map((item) => item.date),
           datasets: [
             {
-              label: 'Total hours',
+              label: 'Billable hours',
               data: hours,
               borderColor: t.accent,
               backgroundColor: t.accent,
@@ -166,7 +229,7 @@
               fill: false,
             },
             {
-              label: '5-day average',
+              label: '5-day average (billable)',
               data: movingAverage,
               borderColor: t.danger,
               borderDash: [5, 5],
