@@ -390,7 +390,11 @@ export class TimeKeeperIndex extends TimeKeeper {
 
             await this.checkDayStatus();
             await this.checkUnfinishedTasks();
-            
+
+            // Starting a task makes it in-progress, which promotes its client
+            // to the top of the ordering - refresh so that's reflected.
+            await this.refreshChoices();
+
             // Hide recent task end time after starting a new task
             this.recentTaskEndTime.classList.add('hidden');
         }
@@ -484,7 +488,11 @@ export class TimeKeeperIndex extends TimeKeeper {
 
             await this.checkDayStatus();
             await this.checkUnfinishedTasks();
-            
+
+            // This client is now the most recently used - re-pull the list so
+            // the dropdown ordering reflects that without needing a page reload.
+            await this.refreshChoices();
+
             // Update recent task end time after completing a task
             await this.updateRecentTaskEndTime();
         }
@@ -640,6 +648,9 @@ export class TimeKeeperIndex extends TimeKeeper {
     async loadChoices() {
         try {
             const data = await this.fetchFromAPI('/autocomplete');
+            // replaceChoices = true: /autocomplete returns the full client list
+            // already ordered most-recently-used first. Appending instead would
+            // leave stale entries behind and freeze the original ordering.
             this.autocomplete.setChoices(
                 data.map(item => ({
                     value: item,
@@ -647,10 +658,26 @@ export class TimeKeeperIndex extends TimeKeeper {
                 })),
                 'value',
                 'label',
-                false
+                true
             );
         } catch (error) {
             console.error('Failed to load choices:', error);
+        }
+    }
+
+
+    /**
+     * Re-pull the client list so the "most recent first" ordering reflects
+     * tasks completed during this session, not just those that existed at page
+     * load. Preserves the current selection.
+     */
+    async refreshChoices() {
+        if (!this.autocomplete) return;
+
+        const selected = this.autocomplete.getValue(true);
+        await this.loadChoices();
+        if (selected) {
+            this.setClientValue(selected);
         }
     }
 

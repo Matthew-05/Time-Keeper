@@ -235,22 +235,33 @@ with app.app_context():
     _ensure_task_client_id_nullable()
 
 
-def _task_moment_sort_string():
-    """Lexicographically sortable 'YYYY-MM-DD HH:MM:SS' per task for ordering."""
-    time_part = func.coalesce(
-        Task_Item.end_time.cast(String),
-        Task_Item.start_time.cast(String),
+#: Sorts above every real timestamp, so an in-progress task ranks as "right now".
+_IN_PROGRESS_SORT_KEY = "9999-12-31 23:59:59.999999"
+
+
+def _task_end_sort_string():
+    """Lexicographically sortable 'YYYY-MM-DD HH:MM:SS.ffffff' end moment per task.
+
+    SQLAlchemy stores SQLite Date/Time as zero-padded ISO text, so plain string
+    comparison is chronological. A task that has not been completed yet has no
+    end time; it counts as the most recent activity, so it gets a sentinel key
+    that sorts above every real timestamp.
+    """
+    return func.coalesce(
+        Task_Item.date.cast(String) + literal(" ") + Task_Item.end_time.cast(String),
+        literal(_IN_PROGRESS_SORT_KEY),
     )
-    return Task_Item.date.cast(String) + literal(" ") + time_part
 
 
 def clients_query_most_recent_first():
-    """Clients with a task history first (by last task end/start), then name."""
-    moment = _task_moment_sort_string()
+    """Clients ordered by most recent task end time (newest first), then name.
+
+    Clients with no task history at all sort last, alphabetically.
+    """
     last_used_sq = (
         db.session.query(
             Task_Item.client_id,
-            func.max(moment).label("last_used"),
+            func.max(_task_end_sort_string()).label("last_used"),
         )
         .filter(Task_Item.client_id.isnot(None))
         .group_by(Task_Item.client_id)
