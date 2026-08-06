@@ -848,6 +848,12 @@ def update_task(task_id):
         return jsonify({'error': 'Client not found'}), 404
     task.client_id = new_client_id
 
+    if 'description' in data:
+        description = data.get('description')
+        task.description = description.strip() if isinstance(description, str) else description
+        if task.description == '':
+            task.description = None
+
     db.session.commit()
     return jsonify({'success': True})
 

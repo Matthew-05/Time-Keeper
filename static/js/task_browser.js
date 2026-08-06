@@ -211,6 +211,11 @@ export class TaskBrowser extends TimeKeeper {
 
     initializeTaskEditing() {
         document.addEventListener('click', e => {
+            // Don't intercept clicks inside the description textarea while editing
+            if (e.target.classList.contains('task-description-input')) {
+                return;
+            }
+
             // Click to copy description (unfolded row or summary description cell)
             const descCell = e.target.closest('.task-description-cell');
             if (descCell) {
@@ -238,7 +243,13 @@ export class TaskBrowser extends TimeKeeper {
                 this.handleTaskUpdate(e.target.closest('tr'));
             }
             if (e.target.classList.contains('cancel-task-btn')) {
-                this.disableEditMode(e.target.closest('tr'));
+                const row = e.target.closest('tr');
+                const descCell = row.querySelector('.task-description-cell');
+                const input = row.querySelector('.task-description-input');
+                if (descCell && input) {
+                    input.value = descCell.dataset.copyText || '';
+                }
+                this.disableEditMode(row);
             }
         });
     }
@@ -259,6 +270,8 @@ export class TaskBrowser extends TimeKeeper {
     enableEditMode(row) {
         row.querySelectorAll('.time-display').forEach(span => span.classList.add('hidden'));
         row.querySelectorAll('.task-time-picker').forEach(input => input.classList.remove('hidden'));
+        row.querySelectorAll('.description-display').forEach(span => span.classList.add('hidden'));
+        row.querySelectorAll('.task-description-input').forEach(input => input.classList.remove('hidden'));
         row.querySelector('.edit-task-btn').classList.add('hidden');
         row.querySelector('.edit-controls').classList.remove('hidden');
     }
@@ -266,6 +279,8 @@ export class TaskBrowser extends TimeKeeper {
     disableEditMode(row) {
         row.querySelectorAll('.time-display').forEach(span => span.classList.remove('hidden'));
         row.querySelectorAll('.task-time-picker').forEach(input => input.classList.add('hidden'));
+        row.querySelectorAll('.description-display').forEach(span => span.classList.remove('hidden'));
+        row.querySelectorAll('.task-description-input').forEach(input => input.classList.add('hidden'));
         row.querySelector('.edit-task-btn').classList.remove('hidden');
         row.querySelector('.edit-controls').classList.add('hidden');
     }
@@ -276,6 +291,7 @@ export class TaskBrowser extends TimeKeeper {
         const endTime = row.querySelector('.end-time').value;
         const rawClientId = row.querySelector('.client-select').value;
         const clientId = parseInt(rawClientId, 10);
+        const description = row.querySelector('.task-description-input').value;
         if (rawClientId === '' || Number.isNaN(clientId)) {
             this.showToast('Please select a client', 'error');
             return;
@@ -288,7 +304,8 @@ export class TaskBrowser extends TimeKeeper {
                 body: JSON.stringify({
                     start_time: startTime,
                     end_time: endTime,
-                    client_id: clientId
+                    client_id: clientId,
+                    description: description
                 })
             });
 
@@ -723,7 +740,10 @@ export class TaskBrowser extends TimeKeeper {
                             </span>
                             <input type="text" class="task-time-picker end-time hidden w-24 p-1 border rounded" value="${task.end_time || ''}">
                         </td>
-                        <td class="px-4 py-3 max-w-xs truncate task-description-cell cursor-pointer" title="${this.escapeHtmlAttr(task.description || '') || 'Click to copy'}" data-copy-text="${this.escapeHtmlAttr(task.description || '')}">${task.description ? this.escapeHtml(task.description) : '<span class="text-gray-400 italic">No description</span>'}</td>
+                        <td class="px-4 py-3 max-w-xs task-description-cell cursor-pointer" title="${this.escapeHtmlAttr(task.description || '') || 'Click to copy'}" data-copy-text="${this.escapeHtmlAttr(task.description || '')}">
+                            <span class="description-display truncate block">${task.description ? this.escapeHtml(task.description) : '<span class="text-gray-400 italic">No description</span>'}</span>
+                            <textarea class="task-description-input hidden w-full p-1 border rounded text-sm" rows="2">${task.description ? this.escapeHtml(task.description) : ''}</textarea>
+                        </td>
                         <td class="px-4 py-3">${this.getMinuteDifference(task.end_time, task.start_time)} minutes</td>
                         <td class="px-4 py-3">
                             <div class="flex space-x-2">
