@@ -127,8 +127,9 @@
 {% block page_scripts %}
   <script type="module">
     import { TimeKeeperIndex } from "{{ url_for('static', filename='js/timekeeper.js') }}"
+    import { ready } from "{{ url_for('static', filename='js/base.js') }}"
 
-    document.addEventListener('DOMContentLoaded', async () => {
+    ready(async () => {
       document.getElementById('today-date').textContent = new Date().toLocaleDateString(undefined, {
         weekday: 'long',
         month: 'long',
@@ -136,7 +137,14 @@
       })
 
       const timekeeper = new TimeKeeperIndex()
-      await timekeeper.init()
+      try {
+        await timekeeper.init()
+      } catch (error) {
+        // init() awaits several requests; one rejecting used to abort the whole
+        // chain and leave the dashboard with every control hidden.
+        console.error('Dashboard init failed, retrying:', error)
+        setTimeout(() => timekeeper.init().catch((e) => console.error(e)), 3000)
+      }
     })
   </script>
 {% endblock %}

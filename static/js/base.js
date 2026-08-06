@@ -1,3 +1,26 @@
+/**
+ * Run `fn` once the DOM is parsed.
+ *
+ * Every page used to call `document.addEventListener('DOMContentLoaded', …)`
+ * from inside a module. Modules are deferred, so if evaluation lands after the
+ * event has already fired the listener is registered too late and simply never
+ * runs — the page renders its loading placeholders and sits there forever with
+ * no error. Checking readyState first removes that race entirely.
+ */
+export function ready(fn) {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', fn, { once: true });
+    } else {
+        // Already parsed — don't wait for an event that has been and gone.
+        fn();
+    }
+}
+
+/** Surface anything that escapes a promise chain instead of failing silently. */
+window.addEventListener('unhandledrejection', (event) => {
+    console.error('Unhandled promise rejection:', event.reason);
+});
+
 export class TimeKeeper {
     constructor() {
         this.ensureToastContainer();
@@ -25,16 +48,73 @@ export class TimeKeeper {
         return `${hours}:${minutes} ${ampm}`;
     }
 
-    async fetchFromAPI(endpoint, options = {}) {
-        try {
-            const response = await fetch(endpoint, options);
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            return await response.json();
-        } catch (error) {
-            console.error('API Error:', error);
-            this.showToast(error.message, 'red');
-            throw error;
+    /**
+     * Fetch JSON from the local Flask server.
+     *
+     * Two things this guards against, both of which used to hang a page:
+     *
+     *  - A request that never settles. `fetch` has no default timeout, so a
+     *    connection the server never answers leaves the caller awaiting
+     *    forever and the loading placeholder on screen permanently.
+     *  - A transient failure. Pages fire several requests at once on load, and
+     *    the server plus SQLite can briefly refuse or lock under that.
+     *
+     * The backend is local and ours, so reads simply hammer it until they
+     * succeed — there's no shared service to be polite to, and a read that
+     * eventually works is strictly better than an error the user has to act on.
+     *
+     * Writes are NOT retried by default. A POST that reached the server but
+     * whose response was lost would be replayed, which for this app means a
+     * duplicate task or client. Pass `retries` explicitly to override.
+     */
+    async fetchFromAPI(endpoint, options = {}, overrides = {}) {
+        const method = (options.method || 'GET').toUpperCase();
+        const idempotent = method === 'GET' || method === 'HEAD';
+
+        const {
+            timeout = 10000,
+            // ~40 attempts over roughly a minute: long enough to ride out a
+            // slow start or a locked database, short enough to eventually stop.
+            retries = idempotent ? 40 : 0,
+            quiet = idempotent,
+        } = overrides;
+
+        let lastError;
+
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeout);
+
+            try {
+                const response = await fetch(endpoint, { ...options, signal: controller.signal });
+                if (!response.ok) {
+                    throw new Error(`${response.status} ${response.statusText} — ${endpoint}`);
+                }
+                return await response.json();
+            } catch (error) {
+                lastError = error.name === 'AbortError'
+                    ? new Error(`Request timed out after ${timeout}ms — ${endpoint}`)
+                    : error;
+
+                // Don't retry a request the caller deliberately cancelled.
+                if (options.signal?.aborted) throw lastError;
+
+                if (attempt < retries) {
+                    // Fast at first so a blip is invisible, then back off to a
+                    // steady 2s poll so a longer outage recovers on its own.
+                    const delay = Math.min(2000, 150 * 2 ** Math.min(attempt, 4));
+                    console.warn(`Retrying ${endpoint} in ${delay}ms after: ${lastError.message}`);
+                    await new Promise((resolve) => setTimeout(resolve, delay));
+                }
+            } finally {
+                clearTimeout(timer);
+            }
         }
+
+        console.error('API Error:', lastError);
+        if (quiet) throw lastError;
+        this.showToast(lastError.message, 'error');
+        throw lastError;
     }
 
     showToast(message, type = 'success') {

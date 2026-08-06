@@ -9,6 +9,7 @@
     <div class="tk-page-header">
       <div>
         <h1 class="tk-title">Billable time summary</h1>
+        <p class="tk-subtitle">Summary of billable time logged.</p>
       </div>
 
       <div class="relative">
@@ -119,18 +120,47 @@
     /**
      * Fetch JSON, but fail loudly and legibly. A 404 from Flask is an HTML error
      * page, and calling .json() on that throws an opaque "Unexpected token '<'".
+     *
+     * Retries hard — these are reads against our own local server, so there's
+     * nothing to be gained by giving up early or asking the user to click.
      */
-    async function fetchJSON(url) {
-      const response = await fetch(url)
-      if (!response.ok) {
-        throw new Error(`${response.status} ${response.statusText} — ${url}`)
+    async function fetchJSON(url, retries = 40) {
+      let lastError
+
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 10000)
+
+        try {
+          const response = await fetch(url, { signal: controller.signal })
+          if (!response.ok) {
+            throw new Error(`${response.status} ${response.statusText} — ${url}`)
+          }
+          const body = await response.text()
+          try {
+            return JSON.parse(body)
+          } catch {
+            throw new Error(`Expected JSON from ${url} but got ${body.slice(0, 40)}…`)
+          }
+        } catch (error) {
+          lastError = error
+          if (attempt < retries) {
+            await new Promise((r) => setTimeout(r, Math.min(2000, 150 * 2 ** Math.min(attempt, 4))))
+          }
+        } finally {
+          clearTimeout(timeout)
+        }
       }
-      const body = await response.text()
-      try {
-        return JSON.parse(body)
-      } catch {
-        throw new Error(`Expected JSON from ${url} but got ${body.slice(0, 40)}…`)
-      }
+
+      throw lastError
+    }
+
+    let chartRetryTimer = null
+
+    /** Nothing to click — just keep trying in the background. */
+    function scheduleChartRetry() {
+      clearTimeout(chartRetryTimer)
+      chartRetryTimer = setTimeout(refreshCharts, 3000)
     }
 
     /** Swap a tab to a message, discarding its canvas. */
@@ -156,7 +186,8 @@
         createBarChart('timeChart', 'Billable time by client', data)
       } catch (error) {
         console.error(error)
-        showMessage('client-tab', 'Could not load the client summary.')
+        showMessage('client-tab', 'Can\'t reach the server. Reconnecting…')
+        scheduleChartRetry()
       }
     }
 
@@ -169,7 +200,8 @@
         createDailyChart('dailyTimeChart', 'Daily billable hours', data)
       } catch (error) {
         console.error(error)
-        showMessage('daily-tab', 'Could not load the daily summary.')
+        showMessage('daily-tab', 'Can\'t reach the server. Reconnecting…')
+        scheduleChartRetry()
       }
     }
 
@@ -244,6 +276,7 @@
     }
 
     function refreshCharts() {
+      clearTimeout(chartRetryTimer)
       updateChart()
       updateDailyChart()
     }

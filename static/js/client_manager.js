@@ -1,4 +1,4 @@
-import { TimeKeeper } from './base.js';
+import { TimeKeeper, ready } from './base.js';
 
 export class ClientManager extends TimeKeeper {
     constructor() {
@@ -324,7 +324,7 @@ export class ClientManager extends TimeKeeper {
     }
 }
 
-// Initialize the client manager when the DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-    const clientManager = new ClientManager();
+// Initialize the client manager once the DOM is ready
+ready(() => {
+    new ClientManager();
 });

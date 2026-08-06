@@ -1,4 +1,4 @@
-import { TimeKeeper } from './base.js';
+import { TimeKeeper, ready } from './base.js';
 
 export class TimeKeeperIndex extends TimeKeeper {
     constructor() {

@@ -1,4 +1,4 @@
-import { TimeKeeper } from './base.js';
+import { TimeKeeper, ready } from './base.js';
 
 export class TaskBrowser extends TimeKeeper {
     constructor() {
@@ -7,7 +7,11 @@ export class TaskBrowser extends TimeKeeper {
         this.initializeElements();
         this.initializeTimePicker();
         this.initializeDayTimePickers();
-        this.fetchInitialData();
+        // Floating this promise un-caught meant any failure during startup
+        // aborted the chain silently and left the page on its placeholders.
+        this.fetchInitialData().catch((error) => {
+            console.error('Initial load failed:', error);
+        });
         this.initializeTaskEditing();
 
         setInterval(() => {
@@ -370,6 +374,12 @@ export class TaskBrowser extends TimeKeeper {
         await this.checkDayStatus();
     }
 
+    /** Replace the task table with a message plus a way to try again. */
+    showTasksMessage(html) {
+        const tbody = document.getElementById('tasks-tbody');
+        if (tbody) tbody.innerHTML = `<tr><td colspan="5">${html}</td></tr>`;
+    }
+
     async fetchDayData() {
         try {
             const response = await this.fetchFromAPI('/get_day_data', {
@@ -439,33 +449,58 @@ export class TaskBrowser extends TimeKeeper {
         }
     }
 
-    async fetchTasks() {
-        if (this.isLoading) return;
+    fetchTasks() {
+        // Previously a concurrent call was dropped on the floor, so a date
+        // change or the 60s refresh landing mid-load was simply lost. Share the
+        // in-flight promise instead so every caller settles.
+        if (this.loadPromise) return this.loadPromise;
 
         this.isLoading = true;
-        const timelineContainer = document.getElementById('timeline');
-        const tbody = document.getElementById('tasks-tbody');
+        this.loadPromise = this.#loadTasks().finally(() => {
+            this.isLoading = false;
+            this.loadPromise = null;
+        });
 
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="5">
-                    <div class="tk-loading"><span class="tk-spinner"></span> Loading tasks…</div>
-                </td>
-            </tr>
-        `;
+        return this.loadPromise;
+    }
+
+    async #loadTasks() {
+        const date = this.selectedDate.value;
+
+        this.showTasksMessage('<div class="tk-loading"><span class="tk-spinner"></span> Loading tasks…</div>');
 
         try {
             // Always fetch and populate day data first
             await this.populateDayTimes();
-            
-            const response = await this.fetchFromAPI(`/tasks/${this.selectedDate.value}`);
-            this.renderTasks(response);
-            this.renderTimeline(response, this.selectedDate.value);
+
+            const response = await this.fetchFromAPI(`/tasks/${date}`);
+            await this.renderTasks(response);
+            this.renderTimeline(response, date);
+
+            // Recovered — drop any queued retry.
+            clearTimeout(this.reloadTimer);
         } catch (error) {
-            this.showToast('Error fetching tasks', 'error');
-        } finally {
-            this.isLoading = false;
+            console.error('Error fetching tasks:', error);
+
+            // Say what's happening rather than leaving a bare spinner, then keep
+            // trying on our own. The backend is local, so there's no reason to
+            // make the user click anything — it'll come back when it comes back.
+            this.showTasksMessage(
+                '<div class="tk-empty"><span class="tk-spinner"></span>'
+                + '<span class="ml-2">Can\'t reach the server. Reconnecting…</span></div>'
+            );
+
+            const timeline = document.getElementById('timeline');
+            if (timeline) timeline.innerHTML = '';
+
+            this.scheduleReload();
         }
+    }
+
+    /** Keep retrying a failed load in the background, indefinitely. */
+    scheduleReload(delay = 3000) {
+        clearTimeout(this.reloadTimer);
+        this.reloadTimer = setTimeout(() => this.fetchTasks(), delay);
     }
 
     async populateDayTimes() {
@@ -608,83 +643,84 @@ export class TaskBrowser extends TimeKeeper {
             + diffDisplay;
     }
 
-    renderTasks(tasks) {
+    async renderTasks(tasks) {
         const tbody = document.getElementById('tasks-tbody');
+
+        // First fetch all clients for the dropdown. This used to be a bare
+        // .then() with no .catch(): a failure here cleared the table and then
+        // rejected into nothing, leaving a permanently blank page.
+        const clients = await this.fetchFromAPI('/clients');
         tbody.innerHTML = '';
 
-        // First fetch all clients for the dropdown
-        this.fetchFromAPI('/clients')
-            .then(clients => {
-                this.clients = clients;
+        this.clients = clients;
 
-                const clientGroups = this.aggregateByClient(tasks);
-                let totalMinutesForAll = 0;
-                let totalFractionalHours = 0;
+        const clientGroups = this.aggregateByClient(tasks);
+        let totalMinutesForAll = 0;
+        let totalFractionalHours = 0;
 
-                if (clientGroups.length === 0) {
-                    tbody.innerHTML = `
-                        <tr>
-                            <td colspan="5" class="tk-empty">No time tracked on this date.</td>
-                        </tr>
-                    `;
-                    // Still update summary values even with no tasks
-                    this.updateSummaryValues(0, 0);
+        if (clientGroups.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="tk-empty">No time tracked on this date.</td>
+                </tr>
+            `;
+            // Still update summary values even with no tasks
+            this.updateSummaryValues(0, 0);
+            return;
+        }
+
+        clientGroups.forEach(client => {
+            const totalMinutes = this.totalNumberofMinutesPerClient(client.tasks);
+            totalMinutesForAll += totalMinutes;
+            const fractionalHours = this.totalTimeSpentToFractionalHours(totalMinutes);
+            totalFractionalHours += fractionalHours;
+
+            // Combined descriptions for this client's tasks (for copy + display)
+            const fullDescriptions = client.tasks
+                .map(t => (t.description || '').trim())
+                .filter(Boolean);
+            const fullDescriptionText = fullDescriptions.length
+                ? fullDescriptions.join(', ')
+                : '';
+            const truncatedDescription = fullDescriptionText.length > 60
+                ? fullDescriptionText.slice(0, 60) + '…'
+                : (fullDescriptionText || '—');
+
+            // Add the summary row
+            const summaryRow = document.createElement('tr');
+            summaryRow.className = 'task-row';
+            const roundingDiff = Math.round(fractionalHours * 60 - totalMinutes);
+            summaryRow.innerHTML = `
+                <td class="font-medium">
+                    <span class="inline-flex items-center gap-2">
+                        <svg class="tk-chevron h-3.5 w-3.5 flex-shrink-0 text-faint transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                        ${this.escapeHtml(client.name)}
+                    </span>
+                </td>
+                <td class="max-w-xs truncate text-muted client-description-cell tk-copyable" title="${this.escapeHtmlAttr(fullDescriptionText) || 'Click to copy'}" data-copy-text="${this.escapeHtmlAttr(fullDescriptionText)}">${this.escapeHtml(truncatedDescription)}</td>
+                <td class="tk-num text-muted">${this.minutesToHoursMinutes(totalMinutes)}</td>
+                <td class="tk-num font-semibold">${fractionalHours}</td>
+                <td class="tk-num ${roundingDiff === 0 ? 'text-faint' : roundingDiff > 0 ? 'text-success' : 'text-danger'}">
+                    ${roundingDiff === 0 ? '—' : (roundingDiff > 0 ? '+' : '−') + Math.abs(roundingDiff) + 'm'}
+                </td>
+            `;
+            summaryRow.addEventListener('click', (e) => {
+                if (e.target.closest('.client-description-cell')) {
+                    e.stopPropagation();
+                    const copyText = e.target.closest('.client-description-cell').dataset.copyText || '';
+                    if (copyText) this.copyToClipboard(copyText);
                     return;
                 }
-
-                clientGroups.forEach(client => {
-                    const totalMinutes = this.totalNumberofMinutesPerClient(client.tasks);
-                    totalMinutesForAll += totalMinutes;
-                    const fractionalHours = this.totalTimeSpentToFractionalHours(totalMinutes);
-                    totalFractionalHours += fractionalHours;
-
-                    // Combined descriptions for this client's tasks (for copy + display)
-                    const fullDescriptions = client.tasks
-                        .map(t => (t.description || '').trim())
-                        .filter(Boolean);
-                    const fullDescriptionText = fullDescriptions.length
-                        ? fullDescriptions.join(', ')
-                        : '';
-                    const truncatedDescription = fullDescriptionText.length > 60
-                        ? fullDescriptionText.slice(0, 60) + '…'
-                        : (fullDescriptionText || '—');
-
-                    // Add the summary row
-                    const summaryRow = document.createElement('tr');
-                    summaryRow.className = 'task-row';
-                    const roundingDiff = Math.round(fractionalHours * 60 - totalMinutes);
-                    summaryRow.innerHTML = `
-                        <td class="font-medium">
-                            <span class="inline-flex items-center gap-2">
-                                <svg class="tk-chevron h-3.5 w-3.5 flex-shrink-0 text-faint transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
-                                ${this.escapeHtml(client.name)}
-                            </span>
-                        </td>
-                        <td class="max-w-xs truncate text-muted client-description-cell tk-copyable" title="${this.escapeHtmlAttr(fullDescriptionText) || 'Click to copy'}" data-copy-text="${this.escapeHtmlAttr(fullDescriptionText)}">${this.escapeHtml(truncatedDescription)}</td>
-                        <td class="tk-num text-muted">${this.minutesToHoursMinutes(totalMinutes)}</td>
-                        <td class="tk-num font-semibold">${fractionalHours}</td>
-                        <td class="tk-num ${roundingDiff === 0 ? 'text-faint' : roundingDiff > 0 ? 'text-success' : 'text-danger'}">
-                            ${roundingDiff === 0 ? '—' : (roundingDiff > 0 ? '+' : '−') + Math.abs(roundingDiff) + 'm'}
-                        </td>
-                    `;
-                    summaryRow.addEventListener('click', (e) => {
-                        if (e.target.closest('.client-description-cell')) {
-                            e.stopPropagation();
-                            const copyText = e.target.closest('.client-description-cell').dataset.copyText || '';
-                            if (copyText) this.copyToClipboard(copyText);
-                            return;
-                        }
-                        this.toggleDetailTable(client.detailKey);
-                    });
-                    tbody.appendChild(summaryRow);
-
-                    // Add the detail row
-                    const detailRow = this.createDetailRow(client);
-                    tbody.appendChild(detailRow);
-                });
-
-                this.updateSummaryValues(totalMinutesForAll, totalFractionalHours);
+                this.toggleDetailTable(client.detailKey);
             });
+            tbody.appendChild(summaryRow);
+
+            // Add the detail row
+            const detailRow = this.createDetailRow(client);
+            tbody.appendChild(detailRow);
+        });
+
+        this.updateSummaryValues(totalMinutesForAll, totalFractionalHours);
     }
 
     aggregateByClient(tasks) {
@@ -979,6 +1015,6 @@ export class TaskBrowser extends TimeKeeper {
 
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    const taskBrowser = new TaskBrowser();
+ready(() => {
+    new TaskBrowser();
 });

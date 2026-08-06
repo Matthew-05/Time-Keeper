@@ -222,13 +222,35 @@
     return hours * 3600 + minutes * 60 + seconds
   }
 
+  let unfinishedRetryTimer = null
+
   async function checkForUnfinishedTask() {
-    const response = await fetch('/unfinished_tasks')
-    const tasks = await response.json()
-    if (tasks.length > 0) {
-      startTimerWithTime(tasks[0].start_time)
-    } else {
-      updateTimerDisplay('No timer running')
+    // This runs on every page. Unguarded it was the most visible instance of
+    // the hang: one failed request and the pill reads "Loading…" forever.
+    // The server is local, so just keep asking until it answers.
+    clearTimeout(unfinishedRetryTimer)
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
+
+    try {
+      const response = await fetch('/unfinished_tasks', { signal: controller.signal })
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+      const tasks = await response.json()
+
+      if (tasks.length > 0) {
+        startTimerWithTime(tasks[0].start_time)
+      } else {
+        updateTimerDisplay('No timer running')
+      }
+    } catch (error) {
+      console.error('Could not check for a running task, retrying:', error)
+      const timerEl = document.getElementById('timer')
+      if (timerEl) timerEl.innerText = 'Reconnecting…'
+      setTimerRunning(false)
+      unfinishedRetryTimer = setTimeout(checkForUnfinishedTask, 2000)
+    } finally {
+      clearTimeout(timeout)
     }
   }
 
