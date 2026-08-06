@@ -20,6 +20,12 @@ paused, so starting a task at 4pm gives you a fresh interval instead of a toast
 the moment you begin. Deciding that is the ``probe`` callback's job; this module
 deliberately knows nothing about the database.
 
+**A hold is scoped to a task, not to a duration.** "Until next task" records
+*which* task you were on rather than a time to wake up at, so it lifts on its own
+the moment the active task changes — whether that's minutes or hours later, and
+whether the current one is completed, replaced, or the day ends. Nothing has to
+remember to cancel it.
+
 **Settings are read every tick, not cached.** Changing the interval on the
 settings page takes effect on the next tick, including for a countdown already
 in flight, because the due time is recomputed from the anchor rather than
@@ -60,9 +66,11 @@ class ReminderService:
     """Owns the reminder timer. One instance, started once from ``main``.
 
     Args:
-        probe: ``() -> bool``. True when there is an active task worth
-            describing. Called from the timer thread, so it must open its own
-            app context.
+        probe: ``() -> task id or None``. The identity of the task worth
+            describing right now, or None when there isn't one. It returns an
+            id rather than a bool so a hold can tell "still the same task" from
+            "a new one started". Called from the timer thread, so it must open
+            its own app context.
         notifier: module or object exposing ``send(title, message, actions)``
             and ``available()`` — ``notifications`` in practice, swappable in
             tests.
@@ -85,6 +93,9 @@ class ReminderService:
 
         self._anchor = None  # Monotonic time of the last activity or fire.
         self._snooze_until = None
+        # The task "until next task" was pressed on. Held until probe() reports
+        # a different one — see the module docstring.
+        self._held_task_id = None
         self._eligible = False
         self._last_sent_at = None  # Wall clock, for the dev status panel.
         self._last_error = None
@@ -122,6 +133,7 @@ class ReminderService:
         with self._lock:
             self._anchor = None
             self._snooze_until = None
+            self._held_task_id = None
 
     def snooze(self):
         """Push the next reminder out by the configured snooze. Returns minutes."""
@@ -131,6 +143,26 @@ class ReminderService:
         self._wake.set()
         logger.debug(f'Reminder snoozed for {minutes} minutes')
         return minutes
+
+    def hold_until_next_task(self):
+        """Go quiet about the current task. Returns its id, or None if idle.
+
+        Probes rather than reading the last tick's value: the click arrives on a
+        request thread up to a full tick after that was taken, and holding the
+        *wrong* task id would silence the new task instead of the old one.
+        """
+        task_id = self._probe()
+        if task_id is None:
+            # Nothing running — there's nothing to be quiet about, and recording
+            # None would mean "held forever".
+            return None
+
+        with self._lock:
+            self._held_task_id = task_id
+            self._snooze_until = None
+        self._wake.set()
+        logger.debug(f'Reminders held until a task other than {task_id} starts')
+        return task_id
 
     # -- the timer ---------------------------------------------------------
 
@@ -155,11 +187,11 @@ class ReminderService:
                 self._eligible = False
             return
 
-        eligible = bool(self._probe())
+        active_id = self._probe()
         with self._lock:
-            self._eligible = eligible
+            self._eligible = active_id is not None
 
-        if not eligible:
+        if active_id is None:
             # Dropping the anchor rather than freezing it is the whole reason
             # a task started after a long gap doesn't fire immediately.
             self.clear()
@@ -169,6 +201,15 @@ class ReminderService:
         interval = prefs['reminder_interval_minutes'] * 60
 
         with self._lock:
+            if self._held_task_id is not None:
+                if self._held_task_id == active_id:
+                    return  # Same task the hold was placed on. Stay quiet.
+                # A different task is running, so the hold has served its
+                # purpose. Start this one's countdown from scratch.
+                self._held_task_id = None
+                self._anchor = now
+                return
+
             if self._anchor is None:
                 # First tick with something to describe: start counting now.
                 self._anchor = now
@@ -203,8 +244,11 @@ class ReminderService:
             if elapsed_seconds is not None
             else BODY_NEVER
         )
+        # Windows lays buttons out in a single row and truncates to fit, so
+        # these stay terse. Three is comfortable; five is the hard limit.
         actions = [
             (f'Snooze {snooze_minutes} min', 'timekeeper://snooze'),
+            ('Until next task', 'timekeeper://snooze-task'),
             ('Open Time Keeper', 'timekeeper://open'),
         ]
 
@@ -269,6 +313,7 @@ class ReminderService:
                 'seconds_until_due': seconds_until_due,
                 'snoozed': self._snooze_until is not None
                 and self._snooze_until > now,
+                'held_task_id': self._held_task_id,
                 'sent_count': self._sent_count,
                 'last_sent_at': self._last_sent_at,
                 'last_error': self._last_error,

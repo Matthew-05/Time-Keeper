@@ -267,13 +267,16 @@ def api_update_settings():
 
 
 def reminder_probe():
-    """Is there an active task whose description is worth nagging about?
+    """The id of the active task worth nagging about, or None.
 
     Both conditions are about not interrupting someone who isn't tracking
     anything: no open task means there's nothing to describe, and no day means
     they haven't started working. The day's *end* time is checked too, for the
     case where a day was closed with a task somehow left open — the working day
     is over either way, so the reminder shouldn't outlive it.
+
+    Returns an id rather than a bool because "until next task" needs to notice
+    when the active task *changes*, not merely that one exists.
 
     Runs on the timer thread, hence the explicit app context.
     """
@@ -282,10 +285,10 @@ def reminder_probe():
 
         day = TimeTracking.query.filter_by(date=today).first()
         if day is None or day.end_time is not None:
-            return False
+            return None
 
         active = Task_Item.query.filter_by(date=today, end_time=None).first()
-        return active is not None
+        return active.id if active else None
 
 
 reminder_service = ReminderService(
@@ -311,6 +314,12 @@ def api_reminder_action():
         minutes = reminder_service.snooze()
         return jsonify({'action': 'snooze', 'minutes': minutes})
 
+    if action == 'snooze-task':
+        # None means nothing was running by the time the click arrived — the
+        # task was finished from the window first. Nothing to suppress.
+        task_id = reminder_service.hold_until_next_task()
+        return jsonify({'action': 'snooze-task', 'held_task_id': task_id})
+
     if action == 'open':
         return jsonify({'action': 'open', 'focused': focus_window()})
 
@@ -326,7 +335,8 @@ def reminder_status_payload():
     so that question gets asked directly rather than read from cache.
     """
     status = reminder_service.status()
-    status['eligible_now'] = reminder_probe()
+    status['active_task_id'] = reminder_probe()
+    status['eligible_now'] = status['active_task_id'] is not None
     return status
 
 

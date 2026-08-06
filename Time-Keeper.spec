@@ -13,7 +13,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[('C:\\Users\\Matthew\\AppData\\Local\\Programs\\Python\\Python312\\python312.dll', '.')],
-    datas=[('templates', 'templates'), ('static', 'static'), ('migrations', 'migrations'), ('icon.ico', '.'), ('icon.png', '.')],
+    datas=[('templates', 'templates'), ('static', 'static'), ('migrations', 'migrations'), ('toast-icon.png', '.')],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

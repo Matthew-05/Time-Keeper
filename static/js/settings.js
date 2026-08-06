@@ -302,9 +302,18 @@ class Settings extends TimeKeeper {
             ],
             [
                 'Active task now',
-                status.eligible_now ? 'yes — reminders can fire' : 'no — staying quiet',
+                status.eligible_now
+                    ? `yes — task #${status.active_task_id}`
+                    : 'no — staying quiet',
             ],
-            ['Next reminder in', status.snoozed ? `${countdown} (snoozed)` : countdown],
+            [
+                'Next reminder in',
+                status.held_task_id !== null && status.held_task_id !== undefined
+                    ? `held until a task after #${status.held_task_id}`
+                    : status.snoozed
+                      ? `${countdown} (snoozed)`
+                      : countdown,
+            ],
             ['Sent this session', String(status.sent_count)],
         ]
 

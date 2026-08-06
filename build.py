@@ -96,11 +96,10 @@ def build_application():
         '--add-data=templates;templates',
         '--add-data=static;static',
         '--add-data=migrations;migrations',
-        # --icon only sets the exe's own icon; the file isn't bundled. The
-        # reminder toast needs both readable at runtime, at a path that still
-        # resolves after the process exits — see notifications.install_icon.
-        '--add-data=icon.ico;.',
-        '--add-data=icon.png;.',
+        # icon.ico's artwork, pre-converted to PNG because toast images can't be
+        # ICO. --icon= sets the exe icon but doesn't bundle anything, so the
+        # toast needs its own copy — see notifications.install_icon.
+        '--add-data=toast-icon.png;.',
         f'--add-binary={python_dll};.',
         # Explicitly include all required modules
         '--hidden-import=flask_sqlalchemy',

@@ -26,18 +26,20 @@ between running from source and running the build, invalidates it.
 import logging
 import os
 import shutil
-import struct
 import sys
-import zlib
 
 logger = logging.getLogger('timekeeper')
 
 PROTOCOL = 'timekeeper'
 APP_ID = 'Time Keeper'
 
-# Where the toast icon is copied to. It has to be a path that still resolves
-# after the app exits: toasts linger in the Action Center, and a PyInstaller
-# onefile bundle's _MEIPASS directory is deleted on shutdown.
+# `toast-icon.png` is icon.ico's artwork, pre-converted and committed. Toast
+# images accept PNG, JPEG and SVG but not ICO, so pointing a toast at icon.ico
+# leaves a blank space where the logo should be. Regenerate it if icon.ico ever
+# changes:
+#
+#     python -c "from PIL import Image; \
+#         Image.open('icon.ico').convert('RGBA').save('toast-icon.png', optimize=True)"
 ICON_NAME = 'toast-icon.png'
 
 _icon_path = None
@@ -66,123 +68,26 @@ def unavailable_reason():
     return None
 
 
-def _png_chunk(tag, payload):
-    """One PNG chunk: length, type, payload, CRC of type+payload."""
-    body = tag + payload
-    return struct.pack('>I', len(payload)) + body + struct.pack('>I', zlib.crc32(body))
-
-
-def _encode_png(width, height, rows):
-    """Minimal 8-bit RGBA PNG encoder. `rows` is top-to-bottom RGBA bytes.
-
-    Filter type 0 on every scanline — no prediction. The icon is 4KB, so the
-    handful of bytes a smarter filter would save aren't worth the code.
-    """
-    header = struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0)
-    raw = b''.join(b'\x00' + row for row in rows)
-    return (
-        b'\x89PNG\r\n\x1a\x0a'
-        + _png_chunk(b'IHDR', header)
-        + _png_chunk(b'IDAT', zlib.compress(raw, 9))
-        + _png_chunk(b'IEND', b'')
-    )
-
-
-def _ico_to_png(path):
-    """Convert a .ico to PNG bytes, or return None if we can't.
-
-    Toast images accept PNG, JPEG and SVG — not ICO — so pointing a toast at
-    icon.ico gets you a blank space where the logo should be. But icon.ico *is*
-    the app's real identity (it's what the exe and the taskbar show), so we take
-    its artwork and re-encode rather than shipping a second, different image.
-
-    Only the two uncompressed forms that matter here are handled: a 32-bit DIB
-    (what icon.ico actually is) and a PNG-compressed entry (what larger modern
-    icons use, where there's nothing to do but pass it through). A palettised
-    or 24-bit icon returns None and the caller falls back to icon.png.
-    """
-    with open(path, 'rb') as fh:
-        data = fh.read()
-
-    reserved, kind, count = struct.unpack('<HHH', data[:6])
-    if reserved != 0 or kind != 1 or count == 0:
-        return None
-
-    entries = []
-    for index in range(count):
-        offset = 6 + index * 16
-        width, height, _, _, _, bpp, size, position = struct.unpack(
-            '<BBBBHHII', data[offset:offset + 16]
-        )
-        # 0 means 256 in the ICO directory — the field is a single byte.
-        entries.append((width or 256, height or 256, bpp, size, position))
-
-    # Biggest, then deepest: the toast logo is rendered around 48px, so more
-    # pixels is strictly better.
-    width, height, bpp, size, position = max(entries, key=lambda e: (e[0] * e[1], e[2]))
-    blob = data[position:position + size]
-
-    if blob[:8] == b'\x89PNG\r\n\x1a\x0a':
-        return blob
-
-    header_size, dib_width, dib_height, _, dib_bpp, compression = struct.unpack(
-        '<IiiHHI', blob[:20]
-    )
-    if header_size != 40 or dib_bpp != 32 or compression != 0:
-        return None
-
-    # An icon DIB stores the colour rows and a 1-bit AND mask stacked, so the
-    # recorded height is double the real one. 32-bit icons carry a real alpha
-    # channel, which makes the mask redundant — we read the colours and stop.
-    height = dib_height // 2
-    width = dib_width
-    pixels = blob[header_size:header_size + width * height * 4]
-    if len(pixels) < width * height * 4:
-        return None
-
-    stride = width * 4
-    rows = []
-    for y in range(height):
-        # DIB rows run bottom-up, and each pixel is BGRA rather than RGBA.
-        row = bytearray(pixels[(height - 1 - y) * stride:(height - y) * stride])
-        row[0::4], row[2::4] = row[2::4], row[0::4]
-        rows.append(bytes(row))
-
-    return _encode_png(width, height, rows)
-
-
 def install_icon(source_dir, user_data_dir):
-    """Put a toast-usable copy of the app icon somewhere stable, and remember it.
+    """Copy the toast icon somewhere stable, and remember where.
 
-    "Stable" matters: toasts linger in the Action Center after the app closes,
-    and a PyInstaller onefile bundle's _MEIPASS directory is deleted on exit, so
-    a toast pointing into it loses its icon the moment you quit.
+    "Stable" is the whole point: toasts linger in the Action Center after the
+    app closes, and a PyInstaller onefile bundle's _MEIPASS directory is deleted
+    on exit — so a toast pointing into it loses its icon the moment you quit.
 
-    Prefers icon.ico — the app's actual icon — converted to PNG, and falls back
-    to icon.png if that conversion can't be done. Best-effort throughout: a
-    toast with no icon still shows.
+    Best-effort. A toast with no icon still shows.
     """
     global _icon_path
 
+    source = os.path.join(source_dir, ICON_NAME)
     target = os.path.join(user_data_dir, ICON_NAME)
-    ico = os.path.join(source_dir, 'icon.ico')
-    png = os.path.join(source_dir, 'icon.png')
 
     try:
-        encoded = None
-        if os.path.exists(ico):
-            try:
-                encoded = _ico_to_png(ico)
-            except (OSError, struct.error, ValueError, zlib.error) as exc:
-                logger.warning(f'Could not convert icon.ico for the toast: {exc}')
-
-        # Rewritten on every launch so a new build's icon replaces the old one.
-        if encoded:
-            with open(target, 'wb') as fh:
-                fh.write(encoded)
-        elif os.path.exists(png):
-            logger.debug('Falling back to icon.png for the toast icon')
-            shutil.copyfile(png, target)
+        if os.path.exists(source):
+            # Re-copied on every launch so a new build's icon replaces the old.
+            shutil.copyfile(source, target)
+        else:
+            logger.warning(f'{ICON_NAME} is missing from {source_dir}')
 
         if os.path.exists(target):
             _icon_path = os.path.abspath(target)
@@ -282,9 +187,14 @@ def ensure_protocol_registered():
             # its content is ignored.
             winreg.SetValueEx(key, 'URL Protocol', 0, winreg.REG_SZ, '')
 
-        if _icon_path:
+        # The shell wants an icon *resource*, not an image file, so this points
+        # at the exe's own embedded icon. Skipped from source, where sys.executable
+        # is a generic python.exe and would just be misleading.
+        if getattr(sys, 'frozen', False):
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf'{root}\DefaultIcon') as key:
-                winreg.SetValueEx(key, '', 0, winreg.REG_SZ, f'{_icon_path},0')
+                winreg.SetValueEx(
+                    key, '', 0, winreg.REG_SZ, f'{os.path.abspath(sys.executable)},0'
+                )
 
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf'{root}\shell\open\command') as key:
             winreg.SetValueEx(key, '', 0, winreg.REG_SZ, command)
