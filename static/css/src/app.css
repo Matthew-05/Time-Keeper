@@ -79,6 +79,12 @@
   --accent-soft: #e9eefc;
   --accent-text: #2444c2;
 
+  /* Input fill for fields that sit on a --surface-2 panel rather than on a
+     card. --surface-2 on --surface-2 is invisible, so those fields need a
+     value that reads as raised in both themes. */
+  --field: #ffffff;
+  --field-focus: #ffffff;
+
   /* Status */
   --success: #12855a;
   --success-soft: #e4f5ec;
@@ -94,6 +100,11 @@
 
   /* Ring used for focus states */
   --ring: color-mix(in srgb, var(--accent) 35%, transparent);
+
+  /* Hover feedback is composited as a translucent layer over whatever is
+     already there, rather than a flat colour that has to win a specificity
+     fight against every state class. See .tk-table-hover. */
+  --hover-tint: rgb(15 23 42 / 0.045);
 }
 
 .dark {
@@ -116,6 +127,14 @@
   --accent-fg: #0b0e14;
   --accent-soft: #1a2340;
   --accent-text: #9db3ff;
+
+  /* Deliberately clear of both --surface and --surface-2, which sit within a
+     few shades of each other down here. */
+  --field: #2a2e37;
+  --field-focus: #333846;
+
+  /* Darkening a dark UI reads as "disabled", not "hovered" — lighten. */
+  --hover-tint: rgb(255 255 255 / 0.055);
 
   --success: #45c98a;
   --success-soft: #12291f;
@@ -320,6 +339,17 @@
   .tk-input:disabled {
     color: var(--faint);
     cursor: not-allowed;
+  }
+
+  /* For a field sitting on a --surface-2 panel rather than on a card, where
+     .tk-input's own --surface-2 fill would be the exact same colour as its
+     container (#timepicker inside #timepicker-container, both themes). */
+  .tk-input-raised {
+    background-color: var(--field);
+  }
+
+  .tk-input-raised:focus {
+    background-color: var(--field-focus);
   }
 
   /* ---- Buttons ---- */
@@ -585,8 +615,20 @@
     border-bottom: none;
   }
 
-  .tk-table-hover tbody tr:hover > td {
-    background-color: var(--surface-2);
+  /* Hover paints a translucent layer *over* the cell's own background instead
+     of replacing it. As a flat `background-color` this selector scored (0,2,3)
+     and beat every state class in the file — `.tk-row-ongoing` (0,1,1),
+     `.tk-row-removing` (0,1,1) and `.tk-copyable:hover` (0,2,0) all silently
+     vanished under the cursor, and inside a `.detail-row` (also --surface-2)
+     it painted the identical colour, so nested rows had no hover at all.
+     `.tk-row-editing` needed a hand-written escape hatch for the same reason;
+     compositing means none of them need one.
+
+     `.detail-row` is excluded because hovering a nested task row also hovers
+     the outer row wrapping the whole panel — without this the entire expanded
+     block would tint alongside the single row under the pointer. */
+  .tk-table-hover tbody tr:hover:not(.detail-row) > td {
+    background-image: linear-gradient(var(--hover-tint), var(--hover-tint));
   }
 
   .tk-table-nested thead th {
@@ -665,9 +707,11 @@
     visibility: visible;
   }
 
-  /* Compact editable time field used in the day summary. */
+  /* Compact editable time field used in the day summary. Uses --field because
+     it sits on the card *and* inside --surface-2 detail rows; --surface-2
+     would make it disappear against the latter. */
   .tk-time-input {
-    background-color: var(--surface-2);
+    background-color: var(--field);
     border: 1px solid var(--border);
     border-radius: 6px;
     color: var(--text);
@@ -683,28 +727,15 @@
     width: 6.5rem;
   }
 
-  /* In dark mode --surface-2 is within a few shades of both the card
-     (--surface) and the detail-row cell (--surface-2, identical), so the
-     field disappears. Lift it well clear of both. */
-  .dark .tk-time-input {
-    background-color: #2a2e37;
-  }
-
   .tk-time-input:hover {
     border-color: var(--border-strong);
   }
 
   .tk-time-input:focus {
-    background-color: var(--surface);
+    background-color: var(--field-focus);
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--ring);
     outline: none;
-  }
-
-  /* Base :focus drops to --surface, which would go darker than the resting
-     state in dark mode. Keep focus the lighter of the two. */
-  .dark .tk-time-input:focus {
-    background-color: #333846;
   }
 
   /* Expandable client row + its nested task table. */
@@ -778,10 +809,9 @@
     }
   }
 
-  /* Tint the whole row being edited, and beat `.tk-table-hover`'s hover rule
-     so the tint doesn't disappear under the cursor. */
-  .tk-table tbody tr.tk-row-editing > td,
-  .tk-table-hover tbody tr.tk-row-editing:hover > td {
+  /* Tint the whole row being edited. No hover-specific counterpart needed —
+     .tk-table-hover composites its tint on top rather than replacing this. */
+  .tk-table tbody tr.tk-row-editing > td {
     background-color: color-mix(in srgb, var(--accent-soft) 60%, var(--surface));
   }
 
@@ -910,9 +940,14 @@
     color: var(--text);
   }
 
-  .tk-nav-link-active {
+  /* The :hover form has to be spelled out: `.tk-nav-link:hover` is (0,2,0) and
+     `.tk-nav-link-active` alone is (0,1,0), so hovering the current page used
+     to drop its highlight from --surface-3 back to --surface-2. Matching the
+     hover selector's specificity and coming later beats it without !important. */
+  .tk-nav-link-active,
+  .tk-nav-link-active:hover {
     background-color: var(--surface-3);
-    color: var(--text) !important;
+    color: var(--text);
   }
 
   /* ---- Segmented control (tabs) ---- */
@@ -937,6 +972,46 @@
     background-color: var(--surface);
     box-shadow: var(--shadow-sm);
     color: var(--text);
+  }
+
+  /* ---- Switch ----
+     A <button role="switch">, not a checkbox: the state lives in aria-checked
+     so there's exactly one source of truth and no hidden input to keep in sync.
+     Everything visual keys off that attribute. */
+
+  .tk-switch {
+    @apply relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-0 p-0 transition-colors;
+    background-color: var(--border-strong);
+  }
+
+  .tk-switch:focus-visible {
+    box-shadow: 0 0 0 3px var(--ring);
+    outline: none;
+  }
+
+  .tk-switch[aria-checked='true'] {
+    background-color: var(--accent);
+  }
+
+  .tk-switch::after {
+    @apply absolute left-0.5 top-0.5 h-5 w-5 rounded-full transition-transform;
+    background-color: #fff;
+    box-shadow: var(--shadow-sm);
+    content: '';
+  }
+
+  .tk-switch[aria-checked='true']::after {
+    transform: translateX(1.25rem);
+  }
+
+  .tk-switch:disabled {
+    @apply cursor-not-allowed opacity-50;
+  }
+
+  /* Dims the controls a switch governs while it's off, without disabling them
+     outright — they stay readable, so you can see what you're turning on. */
+  .tk-subsettings[data-active='false'] {
+    @apply pointer-events-none opacity-45;
   }
 
   /* ---- Tooltip (timeline hover) ---- */
@@ -1121,22 +1196,30 @@
 
 /* ---- flatpickr (time + date pickers) ---- */
 
+/* --field, not --surface: the popup opens out of a .tk-time-input / .tk-input,
+   and on --surface it rendered visibly darker than the field it came from. */
 .flatpickr-calendar {
-  background: var(--surface);
+  background: var(--field);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--shadow-pop);
   color: var(--text);
 }
 
+/* Vendor puts the open calendar at z-index 99999, way outside the app's own
+   scale (nav 40, dropdowns 50, tooltips 60). */
+.flatpickr-calendar.open {
+  z-index: 70;
+}
+
 .flatpickr-calendar.arrowTop::before,
 .flatpickr-calendar.arrowTop::after {
-  border-bottom-color: var(--surface);
+  border-bottom-color: var(--field);
 }
 
 .flatpickr-calendar.arrowBottom::before,
 .flatpickr-calendar.arrowBottom::after {
-  border-top-color: var(--surface);
+  border-top-color: var(--field);
 }
 
 .flatpickr-months,
@@ -1210,11 +1293,19 @@ span.flatpickr-weekday {
   font-variant-numeric: tabular-nums;
 }
 
-.flatpickr-time input:hover,
+/* The hour/minute inputs live inside a .numInputWrapper that already tints on
+   hover — leave the fill to the wrapper so the two don't stack, and keep the
+   input's own rule for focus only. (Vendor's #eee for both is a light-mode
+   assumption, and --surface-2 is *darker* than the --field popup in dark mode,
+   so both read backwards; a tint is correct in either theme.) */
+.flatpickr-time input:hover {
+  background: transparent;
+}
+
 .flatpickr-time input:focus,
 .flatpickr-time .flatpickr-am-pm:hover,
 .flatpickr-time .flatpickr-am-pm:focus {
-  background: var(--surface-2);
+  background: linear-gradient(var(--hover-tint), var(--hover-tint));
 }
 
 .flatpickr-time .numInputWrapper span.arrowUp::after {
@@ -1226,7 +1317,23 @@ span.flatpickr-weekday {
 }
 
 .numInputWrapper:hover {
-  background: var(--surface-2);
+  background: linear-gradient(var(--hover-tint), var(--hover-tint));
+}
+
+/* Vendor leaves the steppers on hardcoded rgba(0,0,0,…) — a hairline border,
+   a darken-on-hover and near-black arrow glyphs, none of which survive a dark
+   background. */
+.numInputWrapper span {
+  border-color: var(--border);
+}
+
+.numInputWrapper span:hover,
+.numInputWrapper span:active {
+  background: linear-gradient(var(--hover-tint), var(--hover-tint));
+}
+
+.numInputWrapper span svg path {
+  fill: var(--muted);
 }
 
 /* ---- vis-timeline (daily timeline) ---- */

@@ -39,6 +39,139 @@
       </div>
     </section>
 
+    <section class="tk-card mt-4">
+      <div class="tk-card-header">
+        <h2 class="tk-card-title">Reminders</h2>
+      </div>
+
+      <div class="border-b border-border p-4">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <span class="tk-label mb-0.5 block">Describe your current task</span>
+            <p class="text-sm text-muted">
+              A Windows notification when you've gone a while without saying what you're
+              working on. Silent unless a task is actually running.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            id="reminder-enabled"
+            class="tk-switch mt-0.5"
+            role="switch"
+            aria-checked="{{ 'true' if settings.reminder_enabled else 'false' }}"
+            aria-label="Description reminder"
+          ></button>
+        </div>
+      </div>
+
+      <!-- Every control below is rendered at its stored value, the same way the
+           theme is: no fetch on load, so nothing flickers from a default into
+           the real setting. data-active is driven by the switch; see
+           .tk-subsettings. -->
+      <div
+        id="reminder-options"
+        class="tk-subsettings"
+        data-active="{{ 'true' if settings.reminder_enabled else 'false' }}"
+      >
+        <div class="border-b border-border p-4">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <span class="tk-label mb-0.5 block">Remind me every</span>
+              <p class="text-sm text-muted">
+                Measured from the last time you saved a description &mdash; not the clock.
+              </p>
+            </div>
+
+            <div class="flex flex-shrink-0 flex-wrap items-center gap-2">
+              <div
+                id="reminder-interval"
+                class="tk-segmented"
+                role="radiogroup"
+                aria-label="Reminder interval"
+              >
+                <button type="button" class="tk-segment tabular" role="radio" aria-checked="false" data-interval="15">15m</button>
+                <button type="button" class="tk-segment tabular" role="radio" aria-checked="false" data-interval="30">30m</button>
+                <button type="button" class="tk-segment tabular" role="radio" aria-checked="false" data-interval="60">60m</button>
+                <button type="button" class="tk-segment" role="radio" aria-checked="false" data-interval="custom">Custom</button>
+              </div>
+
+              <label id="reminder-interval-custom" class="hidden items-center gap-1.5">
+                <input
+                  type="number"
+                  id="reminder-interval-input"
+                  class="tk-input tabular w-20 text-center"
+                  min="1"
+                  max="480"
+                  step="1"
+                  value="{{ settings.reminder_interval_minutes }}"
+                  aria-label="Reminder interval in minutes"
+                />
+                <span class="text-sm text-muted">min</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="p-4">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <span class="tk-label mb-0.5 block">Snooze for</span>
+              <p class="text-sm text-muted">How long the notification's Snooze button puts it off.</p>
+            </div>
+
+            <label class="flex flex-shrink-0 items-center gap-1.5">
+              <input
+                type="number"
+                id="reminder-snooze-input"
+                class="tk-input tabular w-20 text-center"
+                min="1"
+                max="120"
+                step="1"
+                value="{{ settings.reminder_snooze_minutes }}"
+                aria-label="Snooze length in minutes"
+              />
+              <span class="text-sm text-muted">min</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {% if dev_mode %}
+      <!-- Source builds only — inject_version sets dev_mode from DEV_MODE, so
+           this section doesn't exist at all in a packaged app. -->
+      <section class="tk-card mt-4 border-dashed">
+        <div class="tk-card-header">
+          <h2 class="tk-card-title">Developer</h2>
+          <span class="tk-badge tk-badge-warn">dev build</span>
+        </div>
+
+        <div class="p-4">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <span class="tk-label mb-0.5 block">Test the reminder notification</span>
+              <p class="text-sm text-muted">
+                Fires one now, ignoring the interval and the quiet rules. Resets the countdown.
+              </p>
+            </div>
+
+            <button type="button" id="reminder-test" class="tk-btn tk-btn-secondary flex-shrink-0">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.7 21a2 2 0 01-3.4 0" />
+              </svg>
+              Send test
+            </button>
+          </div>
+
+          <dl id="reminder-status" class="mt-4 border-t border-border pt-3 text-xs text-muted">
+            <div class="tk-empty py-2">Loading status…</div>
+          </dl>
+        </div>
+      </section>
+    {% endif %}
+
     <p class="mt-4 text-xs text-faint">
       Settings are saved to <span class="tabular">settings.json</span> in your TimeKeeper app data folder.
     </p>

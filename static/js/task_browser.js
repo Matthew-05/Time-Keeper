@@ -1,4 +1,4 @@
-import { TimeKeeper, ready } from './base.js';
+import { TimeKeeper, ready, clientColor } from './base.js';
 
 export class TaskBrowser extends TimeKeeper {
     constructor() {
@@ -909,34 +909,21 @@ export class TaskBrowser extends TimeKeeper {
         <div class="tk-loading h-[200px]"><span class="tk-spinner"></span> Loading timeline…</div>
     `;
 
-        // Create a color map for clients
-        const clientColors = {};
-        const colors = [
-            '#3b82f6', // Blue
-            '#10b981', // Green
-            '#ef4444', // Red
-            '#8b5cf6', // Purple
-            '#f59e0b', // Orange
-            '#06b6d4', // Cyan
-            '#6b7280', // Gray
-            '#0ea5e9', // Sky
-            '#8b5cf6', // Violet
-            '#f43f5e'  // Pink
-        ];
-
-        // Assign colors to unique clients (null client_id = removed)
-        const uniqueClients = [...new Set(tasks.map(task => (task.client_id == null ? '__removed__' : task.client_id)))];
-        uniqueClients.forEach((clientKey, index) => {
-            clientColors[clientKey] = colors[index % colors.length];
-        });
-
-        // Create data sets for timeline with client colors
+        // Colour comes from clientColor() in base.js, keyed on the client's
+        // name, so a client is the same colour here and on the Summary charts.
+        // This used to be a hardcoded stock-palette array indexed by position,
+        // which meant the colours disagreed between the two pages and ignored
+        // the theme entirely.
+        //
+        // Only background-color is set inline: border-radius and padding are
+        // owned by .vis-item / .vis-item-content in app.css, and setting them
+        // here either lost to an !important or double-padded the content.
         const items = tasks.map(task => ({
             id: task.id,
             content: task.client_name,
             start: `${selectedDate}T${task.start_time}`,
             end: task.end_time ? `${selectedDate}T${task.end_time}` : undefined,
-            style: `background-color: ${clientColors[task.client_id == null ? '__removed__' : task.client_id]}; color: white; border-radius: 4px; padding: 2px 8px;`
+            style: `background-color: ${clientColor(task.client_name)};`
         }));
 
         // Calculate a view centered on the current time

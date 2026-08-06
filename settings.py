@@ -32,6 +32,14 @@ SETTINGS_PATH = os.path.join(USER_DATA_DIR, 'settings.json')
 
 THEME_CHOICES = ('light', 'dark', 'auto')
 
+# Bounds for the description reminder. The UI enforces these too, but a
+# hand-edited file or a stale client shouldn't be able to set a 0-minute
+# interval and turn the reminder into a firehose.
+REMINDER_INTERVAL_MIN = 1
+REMINDER_INTERVAL_MAX = 480  # 8 hours — longer than a working day.
+REMINDER_SNOOZE_MIN = 1
+REMINDER_SNOOZE_MAX = 120
+
 
 def _validate_choice(choices):
     """Build a validator accepting only one of `choices` (case-insensitively)."""
@@ -44,10 +52,42 @@ def _validate_choice(choices):
     return validate
 
 
+def _validate_bool(value):
+    """Accept only a real boolean — not 'true', not 1."""
+    return value if isinstance(value, bool) else None
+
+
+def _validate_int(low, high):
+    """Build a validator for a whole number within an inclusive range."""
+
+    def validate(value):
+        # `bool` is a subclass of `int`, and True is not a sensible interval.
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        # JSON has one number type, so 30.0 arrives as a float. That's a fine
+        # integer; 30.5 is not.
+        if isinstance(value, float) and not value.is_integer():
+            return None
+        value = int(value)
+        return value if low <= value <= high else None
+
+    return validate
+
+
 # key -> (default, validator). The validator returns a cleaned value, or None to
 # reject it and fall back to the default.
 _SCHEMA = {
     'theme': ('auto', _validate_choice(THEME_CHOICES)),
+    # Windows toast nudging you to describe the task you're currently on.
+    'reminder_enabled': (True, _validate_bool),
+    'reminder_interval_minutes': (
+        30,
+        _validate_int(REMINDER_INTERVAL_MIN, REMINDER_INTERVAL_MAX),
+    ),
+    'reminder_snooze_minutes': (
+        10,
+        _validate_int(REMINDER_SNOOZE_MIN, REMINDER_SNOOZE_MAX),
+    ),
 }
 
 DEFAULTS = {key: default for key, (default, _) in _SCHEMA.items()}

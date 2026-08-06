@@ -49,11 +49,13 @@
               <div class="tabular text-sm font-semibold leading-tight text-text" id="recent-task-time-value"></div>
             </button>
 
+            <!-- tk-input-raised, not plain tk-input: this container is
+                 bg-surface-2 and so is .tk-input's fill, which made the field
+                 invisible against it in both themes. -->
             <input
               type="text"
               id="timepicker"
-              class="tk-input tk-time w-40 text-center text-2xl font-semibold tracking-[-0.01em]"
-              style="padding-top: 0.5rem; padding-bottom: 0.5rem;"
+              class="tk-input tk-input-raised tk-time w-40 py-2 text-center text-2xl font-semibold tracking-[-0.01em]"
             />
 
             <button type="button" id="current-time-button" class="tk-btn tk-btn-secondary">

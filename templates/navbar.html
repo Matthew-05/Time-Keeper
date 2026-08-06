@@ -18,8 +18,9 @@
     </div>
 
     <div class="flex flex-shrink-0 items-center gap-2">
-      <!-- Running-task indicator. `is-running` swaps it from muted to accent. -->
-      <div id="timer-pill" class="tk-badge tk-badge-neutral tabular normal-case tracking-normal" style="font-size: 0.75rem; padding: 0.3125rem 0.6875rem;">
+      <!-- Running-task indicator. setTimerRunning() below swaps tk-badge-neutral
+           for tk-badge-accent while a task is running. -->
+      <div id="timer-pill" class="tk-badge tk-badge-neutral tabular normal-case tracking-normal px-[0.6875rem] py-[0.3125rem] text-xs">
         <span id="timer-dot" class="tk-dot"></span>
         <span id="timer">Loading…</span>
       </div>

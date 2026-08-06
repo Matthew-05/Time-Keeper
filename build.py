@@ -96,6 +96,11 @@ def build_application():
         '--add-data=templates;templates',
         '--add-data=static;static',
         '--add-data=migrations;migrations',
+        # --icon only sets the exe's own icon; the file isn't bundled. The
+        # reminder toast needs both readable at runtime, at a path that still
+        # resolves after the process exits — see notifications.install_icon.
+        '--add-data=icon.ico;.',
+        '--add-data=icon.png;.',
         f'--add-binary={python_dll};.',
         # Explicitly include all required modules
         '--hidden-import=flask_sqlalchemy',
@@ -117,6 +122,10 @@ def build_application():
         '--hidden-import=clr',
         '--hidden-import=webview.window',
         '--hidden-import=sqlite3',
+        # Imported inside a try/except in notifications.py, so it's worth being
+        # explicit; winreg likewise is only imported at call time.
+        '--hidden-import=winotify',
+        '--hidden-import=winreg',
     ]
 
     # Add specific imports for SQLAlchemy components

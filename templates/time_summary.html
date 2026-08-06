@@ -56,8 +56,9 @@
 
 {% block page_scripts %}
   <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.min.js') }}"></script>
-  <script>
-    let clientColorMap = {}
+  <script type="module">
+    import { ready, clientColor } from "{{ url_for('static', filename='js/base.js') }}"
+
     let chart
     let dailyChart
 
@@ -112,12 +113,10 @@
       }
     }
 
-    function getClientColor(clientName) {
-      if (!clientColorMap[clientName]) {
-        clientColorMap[clientName] = `hsl(${(Object.keys(clientColorMap).length * 137.5) % 360}, 62%, 58%)`
-      }
-      return clientColorMap[clientName]
-    }
+    /* Was a local golden-angle walk keyed on insertion order, which gave a
+       client a different colour here than on the History timeline. clientColor()
+       hashes the name instead, so the two agree. */
+    const getClientColor = clientColor
 
     /** Current selection as [start, end]. A single-day pick counts as both. */
     function selectedRange() {
@@ -291,7 +290,9 @@
       updateDailyChart()
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
+    // ready(), not DOMContentLoaded: this block is a module now, and modules are
+    // deferred — a listener registered after the event has fired never runs.
+    ready(() => {
       flatpickr('#date-range', {
         mode: 'range',
         dateFormat: 'Y-m-d',

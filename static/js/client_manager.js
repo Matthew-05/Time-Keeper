@@ -239,11 +239,15 @@ export class ClientManager extends TimeKeeper {
                 method: "DELETE",
             });
 
-            // Animate row removal
-            row.style.height = "0";
-            row.style.padding = "0";
-            row.style.margin = "0";
-            row.style.overflow = "hidden";
+            // Animate row removal. Height/padding/margin on the <tr> itself do
+            // nothing — the cells carry .tk-table's padding and set the row's
+            // height — so collapse the cells instead.
+            row.querySelectorAll("td").forEach((cell) => {
+                cell.style.paddingTop = "0";
+                cell.style.paddingBottom = "0";
+                cell.style.lineHeight = "0";
+                cell.style.overflow = "hidden";
+            });
 
             setTimeout(() => {
                 row.remove();

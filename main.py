@@ -12,6 +12,19 @@ DEV_MODE = not getattr(sys, 'frozen', False)
 # TIMEKEEPER_DEVTOOLS=1 before launching. Useful for debugging a real install.
 DEVTOOLS = DEV_MODE or os.environ.get('TIMEKEEPER_DEVTOOLS') == '1'
 
+# A `timekeeper://` URI on the command line means Windows launched us purely to
+# handle a click on a reminder toast's button — see notifications.py. Forward it
+# to the instance the user is actually looking at and exit. This has to happen
+# before anything heavy is imported: the whole process should be gone in well
+# under a second, and it must never reach the point of opening a second window.
+_toast_uri = next(
+    (arg for arg in sys.argv[1:] if arg.lower().startswith('timekeeper:')), None
+)
+if _toast_uri:
+    import ipc
+
+    sys.exit(0 if ipc.forward_uri(_toast_uri) else 1)
+
 # Set up temp directories FIRST if running as frozen executable
 if not DEV_MODE:
     user_data_dir = os.path.join(Path.home(), 'AppData', 'Local', 'TimeKeeper')
@@ -31,6 +44,10 @@ if not DEV_MODE:
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from models import db, Client, Task_Item, TimeTracking, BreakTracking
 import settings as user_settings
+import notifications
+import ipc
+from reminders import ReminderService
+import atexit
 import threading
 import time
 import math
@@ -186,7 +203,10 @@ def timer_status():
 
 @app.context_processor
 def inject_version():
-    return dict(app_version=APP_VERSION)
+    # `dev_mode` gates the developer-only bits of the settings page. It's a
+    # template flag rather than a settings key on purpose — it describes how the
+    # app was launched, not a preference anyone gets to change.
+    return dict(app_version=APP_VERSION, dev_mode=DEV_MODE)
 
 
 @app.context_processor
@@ -235,6 +255,106 @@ def api_update_settings():
         return jsonify({'error': 'Could not write the settings file'}), 500
 
     return jsonify(saved)
+
+
+# --------------------------------------------------------------------------
+# Description reminder
+#
+# See reminders.py for the timer itself. This is the glue: what counts as
+# "there's something to remind about", what a toast button does when it comes
+# back, and where the countdown gets reset.
+# --------------------------------------------------------------------------
+
+
+def reminder_probe():
+    """Is there an active task whose description is worth nagging about?
+
+    Both conditions are about not interrupting someone who isn't tracking
+    anything: no open task means there's nothing to describe, and no day means
+    they haven't started working. The day's *end* time is checked too, for the
+    case where a day was closed with a task somehow left open — the working day
+    is over either way, so the reminder shouldn't outlive it.
+
+    Runs on the timer thread, hence the explicit app context.
+    """
+    with app.app_context():
+        today = date.today()
+
+        day = TimeTracking.query.filter_by(date=today).first()
+        if day is None or day.end_time is not None:
+            return False
+
+        active = Task_Item.query.filter_by(date=today, end_time=None).first()
+        return active is not None
+
+
+reminder_service = ReminderService(
+    probe=reminder_probe,
+    notifier=notifications,
+    settings_module=user_settings,
+)
+
+
+@app.route('/api/reminder/action', methods=['POST'])
+def api_reminder_action():
+    """Handle a toast button press, forwarded here by ipc.forward_uri.
+
+    The request comes from a second, short-lived copy of this program rather
+    than from the page, so there's no session and nothing to authenticate — the
+    server only listens on 127.0.0.1. Unknown actions are rejected rather than
+    ignored so a typo in a URI shows up as a 400 instead of silence.
+    """
+    data = request.get_json(silent=True) or {}
+    action = notifications.parse_action(data.get('uri'))
+
+    if action == 'snooze':
+        minutes = reminder_service.snooze()
+        return jsonify({'action': 'snooze', 'minutes': minutes})
+
+    if action == 'open':
+        return jsonify({'action': 'open', 'focused': focus_window()})
+
+    return jsonify({'error': f'Unknown reminder action: {data.get("uri")!r}'}), 400
+
+
+def reminder_status_payload():
+    """Timer internals plus a live eligibility check, for the dev-mode panel.
+
+    The service's own `eligible` is whatever the last tick found, which is up to
+    a tick stale — and immediately after a manual trigger it may not have been
+    computed at all. The panel is answering "would a reminder fire right now?",
+    so that question gets asked directly rather than read from cache.
+    """
+    status = reminder_service.status()
+    status['eligible_now'] = reminder_probe()
+    return status
+
+
+@app.route('/api/reminder/status', methods=['GET'])
+def api_reminder_status():
+    """Timer internals, for the dev-mode panel on the settings page."""
+    if not DEV_MODE:
+        return jsonify({'error': 'Not found'}), 404
+
+    return jsonify(reminder_status_payload())
+
+
+@app.route('/api/reminder/test', methods=['POST'])
+def api_reminder_test():
+    """Fire a reminder right now, ignoring the clock and the quiet rules.
+
+    Dev-only. Waiting out a 30-minute interval to check a copy change or a
+    button label is not a reasonable way to work, and the alternative — setting
+    the interval to 1 and remembering to set it back — is worse.
+    """
+    if not DEV_MODE:
+        return jsonify({'error': 'Not found'}), 404
+
+    sent, error = reminder_service.trigger_now(reason='dev test button')
+    # Same payload as /status, so the panel renders identically either way. It
+    # previously got the bare service status, which has no `eligible_now` — so
+    # the panel read undefined and reported "no" until the next page load.
+    return jsonify({'sent': sent, 'error': error, 'status': reminder_status_payload()})
 
 
 REMOVED_CLIENT_LABEL = 'REMOVED'
@@ -580,6 +700,10 @@ def complete_task():
         existing_entry.type = type
         existing_entry.end_time = datetime_obj
         db.session.commit()
+        # The task is closed and described. Drop the countdown rather than
+        # resetting it — the next tick finds nothing active anyway, and this
+        # makes that immediate.
+        reminder_service.clear()
         return jsonify({'success': True}), 201
     else:
         print("failed to find existing entry")
@@ -616,6 +740,9 @@ def add_unfinished_task():
     print(new_task)
     db.session.add(new_task)
     db.session.commit()
+    # A new task starts with no description, so the countdown starts here: you
+    # get a full interval to write one before the first nudge.
+    reminder_service.mark_activity()
     return jsonify({'success': True}), 201
 
 @app.route('/start_day', methods=['POST'])
@@ -1052,6 +1179,11 @@ def update_task(task_id):
             task.description = None
 
     db.session.commit()
+    # Editing a description in the task browser counts as activity too, even
+    # though this route is mostly used on already-finished tasks. If nothing is
+    # running the timer is dormant and the reset is harmless.
+    if 'description' in data:
+        reminder_service.mark_activity()
     return jsonify({'success': True})
 
 @app.route('/update_task_description', methods=['POST'])
@@ -1065,6 +1197,10 @@ def update_task_description():
     if unfinished_task:
         unfinished_task.description = description
         db.session.commit()
+        # This is the debounced save behind the description box on the dashboard
+        # — the single clearest signal that the user is on top of their notes.
+        # It restarts the reminder countdown.
+        reminder_service.mark_activity()
         return jsonify({'success': True}), 200
     else:
         return jsonify({'success': False, 'error': 'No unfinished task found'}), 404
@@ -1150,6 +1286,56 @@ def create_window():
     return window
 
 
+def focus_window():
+    """Bring the app window to the front — the "Open Time Keeper" toast button.
+
+    Restoring is the important half: the usual reason someone clicks this is
+    that the window is minimised behind whatever they were actually doing. The
+    on_top flick is a nudge past Windows' foreground-lock, which otherwise
+    flashes the taskbar button instead of raising the window; it's set back
+    immediately so the app doesn't become permanently sticky.
+    """
+    if not webview.windows:
+        return False
+
+    window = webview.windows[0]
+    try:
+        window.restore()
+        window.show()
+        try:
+            window.on_top = True
+            window.on_top = False
+        except Exception:
+            # Not supported on every pywebview backend; the restore still ran.
+            pass
+        return True
+    except Exception as exc:
+        logger.warning(f'Could not focus the window: {exc}')
+        return False
+
+
+def start_reminders():
+    """Get the description reminder ready. Never fatal — it's a convenience.
+
+    Both the icon copy and the protocol registration have to happen before the
+    first toast: the icon because a toast lingering in the Action Center needs a
+    path that outlives the process, the registration because a button whose URI
+    nothing handles silently does nothing when clicked.
+    """
+    try:
+        source_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+        notifications.install_icon(source_dir, user_data_dir)
+        notifications.ensure_protocol_registered()
+
+        reason = notifications.unavailable_reason()
+        if reason:
+            logger.warning(f'Description reminders are disabled: {reason}')
+
+        reminder_service.start()
+    except Exception as exc:
+        logger.error(f'Could not start the reminder service: {exc}')
+
+
 def start_webview():
     """Hand control to pywebview.
 
@@ -1179,10 +1365,18 @@ admin.add_view(ModelView(Client, db.session))
 admin.add_view(ModelView(BreakTracking, db.session))
 
 if __name__ == '__main__':
+    # Publish the port before the server is up: a toast button click can only
+    # arrive once we're listening, and the file is what tells that second
+    # process where to knock.
+    ipc.publish_port(app_port)
+    atexit.register(ipc.clear_port)
+
     # Start Flask server in a separate thread
     t = threading.Thread(target=start_server)
     t.daemon = True
     t.start()
+
+    start_reminders()
 
     # Create and start webview window
     window = create_window()

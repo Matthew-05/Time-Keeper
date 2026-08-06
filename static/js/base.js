@@ -21,6 +21,29 @@ window.addEventListener('unhandledrejection', (event) => {
     console.error('Unhandled promise rejection:', event.reason);
 });
 
+/**
+ * Stable per-client colour, shared by the History timeline and the Summary
+ * charts.
+ *
+ * The hue is derived from the client's name rather than from its position in a
+ * list. Those two pages see different sets of clients — History sees one day,
+ * Summary sees a whole range — so index-based assignment gave the same client a
+ * different colour on each page. Hashing the name makes it agree everywhere and
+ * survive a client being added or removed.
+ *
+ * Saturation and lightness are fixed rather than tokenised: these are
+ * categorical chips with white text baked in, and they have to stay legible in
+ * both themes without re-rendering on `themeChanged`.
+ */
+export function clientColor(name) {
+    const key = String(name ?? '');
+    let hash = 0;
+    for (let i = 0; i < key.length; i++) {
+        hash = (Math.imul(hash, 31) + key.charCodeAt(i)) | 0;
+    }
+    return `hsl(${Math.abs(hash) % 360}, 62%, 58%)`;
+}
+
 export class TimeKeeper {
     constructor() {
         this.ensureToastContainer();
