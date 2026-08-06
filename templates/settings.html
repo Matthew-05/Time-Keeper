@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+
+{% block title %}
+  Settings | Time Keeper
+{% endblock %}
+
+{% block content %}
+  <div class="tk-page max-w-2xl">
+    <div class="tk-page-header">
+      <div>
+        <h1 class="tk-title">Settings</h1>
+        <p class="tk-subtitle">Stored on this machine, outside the database.</p>
+      </div>
+    </div>
+
+    <section class="tk-card">
+      <div class="tk-card-header">
+        <h2 class="tk-card-title">Appearance</h2>
+      </div>
+
+      <div class="p-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <span class="tk-label mb-0.5 block">Theme</span>
+            <p class="text-sm text-muted">Auto follows your Windows light/dark setting.</p>
+          </div>
+
+          <div
+            id="theme-mode"
+            class="tk-segmented flex-shrink-0"
+            role="radiogroup"
+            aria-label="Theme"
+          >
+            <button type="button" class="tk-segment" role="radio" aria-checked="false" data-theme-option="light">Light</button>
+            <button type="button" class="tk-segment" role="radio" aria-checked="false" data-theme-option="dark">Dark</button>
+            <button type="button" class="tk-segment" role="radio" aria-checked="false" data-theme-option="auto">Auto</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <p class="mt-4 text-xs text-faint">
+      Settings are saved to <span class="tabular">settings.json</span> in your TimeKeeper app data folder.
+    </p>
+  </div>
+{% endblock %}
+
+{% block page_scripts %}
+  <script src="{{ url_for('static', filename='js/settings.js') }}" type="module"></script>
+{% endblock %}

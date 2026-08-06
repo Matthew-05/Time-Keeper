@@ -1,5 +1,15 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full">
+<!--
+  The theme comes from settings.json, server-side, so `.dark` is already on the
+  element the parser sees — there is no window in which a dark-mode user could
+  be shown a light page. `auto` is the one case the server can't resolve (it
+  doesn't know the OS preference), and the inline script below handles it.
+-->
+<html
+  lang="en"
+  class="h-full{% if settings.theme == 'dark' %} dark{% endif %}"
+  data-theme-mode="{{ settings.theme }}"
+>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -10,18 +20,19 @@
     </title>
 
     <!--
-      Applied before first paint so a dark-mode user never sees a white flash.
+      Only `auto` is left to resolve, and only the browser can resolve it.
       Deliberately inline and blocking — it must run before the stylesheet
-      paints the body background.
+      paints the body background, or dark-mode users get a white flash.
     -->
     <script>
       ;(function () {
+        if (document.documentElement.dataset.themeMode !== 'auto') return
         try {
-          var saved = localStorage.getItem('tk-theme')
-          var dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches
-          if (dark) document.documentElement.classList.add('dark')
+          if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.classList.add('dark')
+          }
         } catch (e) {
-          /* localStorage unavailable — fall back to light. */
+          /* matchMedia unavailable — fall back to light. */
         }
       })()
     </script>
@@ -50,6 +61,7 @@
     <script src="{{ url_for('static', filename='vendor/flatpickr/flatpickr.min.js') }}"></script>
     <script src="{{ url_for('static', filename='vendor/choices/choices.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/base.js') }}" type="module"></script>
+    <script src="{{ url_for('static', filename='js/theme.js') }}" type="module"></script>
 
     {% block page_scripts %}
 

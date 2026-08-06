@@ -24,73 +24,26 @@
         <span id="timer">Loading…</span>
       </div>
 
-      <button
-        id="theme-toggle"
-        type="button"
-        class="tk-btn-icon"
-        title="Toggle light / dark theme"
-        aria-label="Toggle light / dark theme"
+      <a
+        href="/settings"
+        class="tk-btn-icon{% if request.path == '/settings' %} is-active{% endif %}"
+        title="Settings"
+        aria-label="Settings"
       >
-        <svg id="theme-icon-sun" class="hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="4" />
-          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008.6 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 8.6a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" />
         </svg>
-        <svg id="theme-icon-moon" class="hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-        </svg>
-      </button>
+      </a>
     </div>
   </div>
 </nav>
 
 <script>
   /* ---------------------------------------------------------------------
-     Theme toggle
-     The `.dark` class is already applied (or not) by the bootstrap script in
-     base.html; this only handles switching and persistence.
-     --------------------------------------------------------------------- */
-  ;(function () {
-    const root = document.documentElement
-    const sun = document.getElementById('theme-icon-sun')
-    const moon = document.getElementById('theme-icon-moon')
-
-    function syncIcon() {
-      const dark = root.classList.contains('dark')
-      // Show the icon for the theme you'd switch *to*.
-      sun.classList.toggle('hidden', !dark)
-      moon.classList.toggle('hidden', dark)
-    }
-
-    document.getElementById('theme-toggle').addEventListener('click', function () {
-      const dark = root.classList.toggle('dark')
-      try {
-        localStorage.setItem('tk-theme', dark ? 'dark' : 'light')
-      } catch (e) {
-        /* non-fatal: theme just won't persist */
-      }
-      syncIcon()
-      document.dispatchEvent(new CustomEvent('themeChanged', { detail: { dark } }))
-    })
-
-    // Follow the OS while the user hasn't made an explicit choice.
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function (e) {
-      let saved = null
-      try {
-        saved = localStorage.getItem('tk-theme')
-      } catch (err) {
-        /* ignore */
-      }
-      if (saved) return
-      root.classList.toggle('dark', e.matches)
-      syncIcon()
-      document.dispatchEvent(new CustomEvent('themeChanged', { detail: { dark: e.matches } }))
-    })
-
-    syncIcon()
-  })()
-
-  /* ---------------------------------------------------------------------
      Running-task timer
+     Theme handling lives in static/js/theme.js — the preference is stored in
+     settings.json and applied server-side, so there's nothing to do here.
      --------------------------------------------------------------------- */
 
   // Store task start time as an absolute timestamp

@@ -30,6 +30,7 @@ if not DEV_MODE:
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from models import db, Client, Task_Item, TimeTracking, BreakTracking
+import settings as user_settings
 import threading
 import time
 import math
@@ -186,6 +187,54 @@ def timer_status():
 @app.context_processor
 def inject_version():
     return dict(app_version=APP_VERSION)
+
+
+@app.context_processor
+def inject_settings():
+    """Make user settings available to every template.
+
+    `base.html` needs the theme before it renders the opening <html> tag, so the
+    value has to be here rather than passed by individual view functions.
+    Reading a small JSON file per render is fine at this scale and keeps a stale
+    cached copy from ever being a possibility.
+    """
+    return dict(settings=user_settings.load_settings())
+
+
+@app.route('/settings')
+def settings_page():
+    return render_template('settings.html', version=APP_VERSION)
+
+
+@app.route('/api/settings', methods=['GET'])
+def api_get_settings():
+    return jsonify(user_settings.load_settings())
+
+
+@app.route('/api/settings', methods=['PUT'])
+def api_update_settings():
+    """Merge the posted keys into stored settings.
+
+    `update_settings` ignores unknown keys and replaces invalid values with the
+    default, so the worst a bad payload does is not change anything. The saved
+    settings come back so the client can re-render from what was actually
+    stored rather than from what it hoped it stored.
+    """
+    changes = request.get_json(silent=True)
+    if not isinstance(changes, dict):
+        return jsonify({'error': 'Expected a JSON object'}), 400
+
+    unknown = [key for key in changes if key not in user_settings.DEFAULTS]
+    if unknown:
+        return jsonify({'error': f'Unknown setting(s): {", ".join(sorted(unknown))}'}), 400
+
+    try:
+        saved = user_settings.update_settings(changes)
+    except OSError as exc:
+        logger.error(f'Could not save settings: {exc}')
+        return jsonify({'error': 'Could not write the settings file'}), 500
+
+    return jsonify(saved)
 
 
 REMOVED_CLIENT_LABEL = 'REMOVED'

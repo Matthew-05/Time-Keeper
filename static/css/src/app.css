@@ -16,8 +16,8 @@
 @source '../../../templates/**/*.html';
 @source '../../js/**/*.js';
 
-/* Class-based dark mode: driven by `.dark` on <html>, set before first paint
-   by the inline bootstrap script in base.html. */
+/* Class-based dark mode: driven by `.dark` on <html>, rendered onto the tag
+   server-side from settings.json (see base.html). */
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* --------------------------------------------------------------------------
@@ -476,6 +476,14 @@
     color: var(--text);
   }
 
+  /* For an icon button that navigates somewhere — marks the current page,
+     matching how .tk-nav-link-active reads in the same bar. */
+  .tk-btn-icon.is-active {
+    background-color: var(--surface-2);
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+
   .tk-btn-icon svg {
     height: 1.125rem;
     width: 1.125rem;
@@ -675,6 +683,13 @@
     width: 6.5rem;
   }
 
+  /* In dark mode --surface-2 is within a few shades of both the card
+     (--surface) and the detail-row cell (--surface-2, identical), so the
+     field disappears. Lift it well clear of both. */
+  .dark .tk-time-input {
+    background-color: #2a2e37;
+  }
+
   .tk-time-input:hover {
     border-color: var(--border-strong);
   }
@@ -684,6 +699,12 @@
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--ring);
     outline: none;
+  }
+
+  /* Base :focus drops to --surface, which would go darker than the resting
+     state in dark mode. Keep focus the lighter of the two. */
+  .dark .tk-time-input:focus {
+    background-color: #333846;
   }
 
   /* Expandable client row + its nested task table. */
