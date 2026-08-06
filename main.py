@@ -32,6 +32,7 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for
 from models import db, Client, Task_Item, TimeTracking, BreakTracking
 import threading
 import time
+import math
 from datetime import datetime, date, timedelta
 from sqlalchemy import text, inspect, desc, and_
 from flask_migrate import Migrate
@@ -829,50 +830,91 @@ def tasks_between(start, end):
     ).all()
 
 
+def round_to_quarter_hour(seconds):
+    """Seconds -> hours rounded to the nearest quarter.
+
+    Mirrors `totalTimeSpentToFractionalHours` in task_browser.js. Uses explicit
+    half-up rounding rather than Python's round(), which is banker's rounding
+    and would disagree with the JS on exact .125 boundaries (7.5 min).
+    """
+    quarters = seconds / 900.0
+    return math.floor(quarters + 0.5) / 4.0
+
+
+def bucket_by_client_and_day(start, end, now=None):
+    """Tracked seconds keyed by (client name, date).
+
+    Rounding has to happen at this granularity — one client, one day — because
+    that's the unit the History page rounds at, and it's what actually gets
+    billed. Rounding a whole week in one go would give a different (smaller)
+    number than the sum of the days it's made of.
+    """
+    now = now or datetime.now()
+
+    buckets = {}
+    for task in tasks_between(start, end):
+        key = (task_client_display_name(task), task.date)
+        buckets[key] = buckets.get(key, 0) + task_duration_seconds(task, now)
+    return buckets
+
+
 @app.route('/api/summary/custom/<start_date>/<end_date>', methods=['GET'])
 def get_custom_summary(start_date, end_date):
-    """Total tracked time per client across a date range.
+    """Billable hours per client across a date range.
 
-    Returns [{client_name, total_time}] with total_time in SECONDS — the
-    summary page divides by 3600 to plot hours.
+    `total_hours` is the billable figure: each client-day rounded up or down to
+    the nearest quarter hour, then summed. `tracked_hours` is the raw
+    unrounded time, so the UI can show what the rounding did.
     """
     try:
         start, end = _parse_range(start_date, end_date)
     except ValueError:
         return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD.'}), 400
 
-    now = datetime.now()
-    totals = {}
-    for task in tasks_between(start, end):
-        name = task_client_display_name(task)
-        totals[name] = totals.get(name, 0) + task_duration_seconds(task, now)
+    rounded = {}
+    tracked = {}
+    for (name, _day), seconds in bucket_by_client_and_day(start, end).items():
+        rounded[name] = rounded.get(name, 0) + round_to_quarter_hour(seconds)
+        tracked[name] = tracked.get(name, 0) + seconds
 
     return jsonify([
-        {'client_name': name, 'total_time': seconds}
-        for name, seconds in sorted(totals.items(), key=lambda kv: -kv[1])
+        {
+            'client_name': name,
+            'total_hours': round(hours, 2),
+            'tracked_hours': round(tracked[name] / 3600, 2),
+        }
+        for name, hours in sorted(rounded.items(), key=lambda kv: -kv[1])
     ])
 
 
 @app.route('/api/summary/daily/<start_date>/<end_date>', methods=['GET'])
 def get_daily_summary(start_date, end_date):
-    """Total tracked time per day across a date range.
+    """Billable hours per day across a date range.
 
-    Returns [{date, total_hours}] ordered by date. Only days that actually have
-    tasks are included, so days off don't drag the moving average down.
+    Same rounding rule as the per-client view: each client's time within a day
+    is rounded to the nearest quarter hour, then the day is the sum of those.
+
+    Ordered by date, and only days that actually have tasks are included so
+    days off don't drag the moving average down.
     """
     try:
         start, end = _parse_range(start_date, end_date)
     except ValueError:
         return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD.'}), 400
 
-    now = datetime.now()
-    totals = {}
-    for task in tasks_between(start, end):
-        totals[task.date] = totals.get(task.date, 0) + task_duration_seconds(task, now)
+    rounded = {}
+    tracked = {}
+    for (_name, day), seconds in bucket_by_client_and_day(start, end).items():
+        rounded[day] = rounded.get(day, 0) + round_to_quarter_hour(seconds)
+        tracked[day] = tracked.get(day, 0) + seconds
 
     return jsonify([
-        {'date': day.strftime('%Y-%m-%d'), 'total_hours': round(seconds / 3600, 2)}
-        for day, seconds in sorted(totals.items())
+        {
+            'date': day.strftime('%Y-%m-%d'),
+            'total_hours': round(hours, 2),
+            'tracked_hours': round(tracked[day] / 3600, 2),
+        }
+        for day, hours in sorted(rounded.items())
     ])
 
 
