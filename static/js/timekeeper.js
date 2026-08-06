@@ -7,6 +7,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.initializeTimePicker();
         this.bindEvents();
         this.descriptionDebounceTimer = null;
+        this.currentTaskClient = null;
 
     }
 
@@ -210,15 +211,6 @@ export class TimeKeeperIndex extends TimeKeeper {
         const tasks = await this.fetchFromAPI('/unfinished_tasks');
         if (tasks.length > 0) {
             const currentTask = tasks[0];
-
-            // Make sure we have the client name before setting it
-            if (currentTask && currentTask.client) {
-                // Set the client in the autocomplete dropdown
-                this.autocomplete.setChoiceByValue(currentTask.client);
-
-                // Also set the value directly in the input field as a backup
-                this.clientInput.value = currentTask.client;
-            }
 
             // Show the description input container for task completion
             document.getElementById('description-input-container').style.display = 'block';
@@ -439,6 +431,7 @@ export class TimeKeeperIndex extends TimeKeeper {
     clearInputs() {
         this.clientInput.value = '';
         this.descriptionInput.value = '';
+        this.currentTaskClient = null;
         // Clear the time picker
         this.timePickerInstance.clear();
     }
@@ -533,7 +526,7 @@ export class TimeKeeperIndex extends TimeKeeper {
     }
 
 
-    initializeAutocomplete() {
+    async initializeAutocomplete() {
         // Remove any existing event listeners first
         if (this.autocomplete) {
             this.autocomplete.passedElement.element.removeEventListener('addItem', this.handleClientChange);
@@ -543,7 +536,11 @@ export class TimeKeeperIndex extends TimeKeeper {
         // Create the handler as a class property so we can reference it for removal
         this.handleClientChange = (event) => {
             const selectedValue = event.detail.value;
-            if (selectedValue) {
+            // Ignore echoes from programmatic selection (e.g. autofilling the
+            // running task's client), which would otherwise fire a redundant
+            // /update_task_client POST and a bogus toast on every page load.
+            if (selectedValue && selectedValue !== this.currentTaskClient) {
+                this.currentTaskClient = selectedValue;
                 this.updateTaskClient(selectedValue);
             }
         };
@@ -575,7 +572,38 @@ export class TimeKeeperIndex extends TimeKeeper {
         // Add the single event listener
         this.autocomplete.passedElement.element.addEventListener('addItem', this.handleClientChange);
 
-        this.loadChoices();
+        // Must be awaited: callers select the running task's client immediately
+        // afterwards, and setChoiceByValue is a silent no-op until the options
+        // from /autocomplete have actually been loaded into Choices.
+        await this.loadChoices();
+    }
+
+
+    /**
+     * Select a client in the Choices dropdown.
+     * Safe to call before/without the client existing in the loaded list
+     * (e.g. the "removed client" placeholder), and does not trigger a
+     * redundant server update.
+     */
+    setClientValue(clientName) {
+        if (!clientName || !this.autocomplete) return;
+
+        this.currentTaskClient = clientName;
+
+        this.autocomplete.setChoiceByValue(clientName);
+
+        // setChoiceByValue is a silent no-op if the value isn't among the
+        // loaded choices (e.g. a client that has since been deleted). Detect
+        // that and inject the choice, then retry.
+        if (this.autocomplete.getValue(true) !== clientName) {
+            this.autocomplete.setChoices(
+                [{ value: clientName, label: clientName }],
+                'value',
+                'label',
+                false
+            );
+            this.autocomplete.setChoiceByValue(clientName);
+        }
     }
 
 
@@ -696,18 +724,13 @@ export class TimeKeeperIndex extends TimeKeeper {
 
         // Always ensure client is set if available
         if (task && task.client) {
-            // Set in autocomplete
-            this.autocomplete.setChoiceByValue(task.client);
-
-            // Also set directly in input as fallback
-            this.clientInput.value = task.client;
-
-            console.log("Setting client to:", task.client);
+            this.setClientValue(task.client);
         }
 
-        // Pre-populate the description if available
-        if (task && task.description) {
-            this.descriptionInput.value = task.description;
+        // Pre-populate the description (blank it out when the task has none,
+        // so a stale value from a previous task can't linger).
+        if (task) {
+            this.descriptionInput.value = task.description || '';
         }
 
         // Display the task start time if available
@@ -876,17 +899,20 @@ export class TimeKeeperIndex extends TimeKeeper {
             // Check for unfinished tasks
             const tasks = await this.fetchFromAPI('/unfinished_tasks');
 
+            // Autocomplete must exist (and have its choices loaded) before the
+            // completion form tries to select the running task's client.
+            if (!this.autocomplete) {
+                await this.initializeAutocomplete();
+            } else if (this.autocomplete.containerOuter) {
+                this.autocomplete.containerOuter.element.style.display = 'block';
+            }
+
             // Update the UI based on whether there are unfinished tasks
             if (tasks.length > 0) {
                 // If there are unfinished tasks, show the task completion form
                 this.handleOpenDayState(true);
                 this.showTaskCompletionForm(tasks[0]);
                 this.completeButton.dataset.taskId = tasks[0].id;
-
-                // Set the client in the autocomplete
-                if (this.autocomplete) {
-                    this.autocomplete.setChoiceByValue(tasks[0].client);
-                }
             } else {
                 // If there are no unfinished tasks, show the start task form
                 this.handleOpenDayState(false);
@@ -898,14 +924,6 @@ export class TimeKeeperIndex extends TimeKeeper {
 
                 // Show the time picker
                 document.getElementById('timepicker-container').style.display = 'block';
-            }
-
-            // Initialize autocomplete if needed
-            if (!this.autocomplete) {
-                await this.initializeAutocomplete();
-            } else if (this.autocomplete.containerOuter) {
-                // Make sure the autocomplete is visible
-                this.autocomplete.containerOuter.element.style.display = 'block';
             }
 
             // Update day status to reflect changes
