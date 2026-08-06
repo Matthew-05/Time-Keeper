@@ -49,9 +49,11 @@
           {% for client in clients %}
             <tr id="row_{{ client.id }}">
               <td class="hidden">{{ client.id }}</td>
-              <td id="name_{{ client.id }}" contenteditable="false" class="font-medium transition-colors">{{ client.name }}</td>
+              <td class="font-medium">
+                <span id="name_{{ client.id }}" class="tk-editable" contenteditable="false" spellcheck="false">{{ client.name }}</span>
+              </td>
               <td class="text-right">
-                <div class="flex justify-end gap-1.5">
+                <div class="flex min-h-8 items-center justify-end gap-1.5">
                   <button name="edit" class="tk-btn tk-btn-secondary tk-btn-sm">Edit</button>
                   <button name="delete" class="tk-btn tk-btn-danger tk-btn-sm">Delete</button>
                   <button name="save" style="display: none" class="tk-btn tk-btn-primary tk-btn-sm">Save</button>

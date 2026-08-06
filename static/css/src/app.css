@@ -702,11 +702,66 @@
 
   /* ---- Client manager row states (toggled from JS) ---- */
 
-  .tk-cell-editing {
-    background-color: var(--accent-soft);
-    border-radius: 6px;
-    box-shadow: inset 0 0 0 1px var(--accent);
+  /* Inline-editable text. The border/padding box is always present (just
+     transparent), and cancelled out with a matching negative margin, so
+     entering edit mode reads as the text turning into a field rather than
+     the row jumping. */
+  .tk-editable {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    display: inline-block;
+    margin: -0.3125rem -0.5rem;
+    max-width: 100%;
+    min-width: 10rem;
+    padding: 0.25rem 0.4375rem;
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+
+  /* Hint that the row's name is editable before the Edit button is pressed. */
+  tr:hover > td > .tk-editable:not(.is-editing) {
+    border-color: var(--border-strong);
+  }
+
+  .tk-editable.is-editing {
+    background-color: var(--surface);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--ring);
+    caret-color: var(--accent);
+    cursor: text;
+    font-weight: 400;
     outline: none;
+    white-space: pre-wrap;
+  }
+
+  .tk-editable.is-invalid {
+    animation: tk-nudge 0.3s ease;
+    border-color: var(--danger);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 30%, transparent);
+    caret-color: var(--danger);
+  }
+
+  @keyframes tk-nudge {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    25% {
+      transform: translateX(-3px);
+    }
+    75% {
+      transform: translateX(3px);
+    }
+  }
+
+  /* Tint the whole row being edited, and beat `.tk-table-hover`'s hover rule
+     so the tint doesn't disappear under the cursor. */
+  .tk-table tbody tr.tk-row-editing > td,
+  .tk-table-hover tbody tr.tk-row-editing:hover > td {
+    background-color: color-mix(in srgb, var(--accent-soft) 60%, var(--surface));
   }
 
   .tk-row-new > td {
@@ -984,13 +1039,49 @@
   border-radius: 6px;
   color: var(--text);
   font-size: 0.875rem;
-  padding: 0.5rem 0.625rem;
+  padding: 0.5rem 1.75rem 0.5rem 0.625rem;
+  position: relative;
 }
 
+/* The currently selected option, sitting there un-hovered.
+   Choices' own stylesheet gives both .is-selected and .is-highlighted a
+   hardcoded #f2f2f2, which reads as a near-white band in dark mode and as an
+   indistinct grey smear in light mode. Mark the current choice with accent
+   text and a tick instead, and leave background colour to mean "hovered". */
+.choices__list--dropdown .choices__item--selectable.is-selected,
+.choices__list[aria-expanded] .choices__item--selectable.is-selected {
+  background-color: transparent;
+  color: var(--accent-text);
+  font-weight: 500;
+}
+
+.choices__list--dropdown .choices__item--selectable.is-selected::before,
+.choices__list[aria-expanded] .choices__item--selectable.is-selected::before {
+  content: '';
+  position: absolute;
+  right: 0.625rem;
+  top: 50%;
+  width: 0.3125rem;
+  height: 0.5625rem;
+  margin-top: -0.34375rem;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+/* Hover / keyboard focus wins over the resting selected state — must stay
+   after the .is-selected rules, since specificity is identical. */
 .choices__list--dropdown .choices__item--selectable.is-highlighted,
 .choices__list[aria-expanded] .choices__item--selectable.is-highlighted {
   background-color: var(--accent-soft);
   color: var(--accent-text);
+}
+
+/* Choices pads highlighted rows out by 100px to make room for its
+   "Press to select" hint, which we hide below. Reclaim the space. */
+.choices__list--dropdown .choices__item--selectable.is-highlighted[data-select-text],
+.choices__list[aria-expanded] .choices__item--selectable.is-highlighted[data-select-text] {
+  padding-right: 1.75rem;
 }
 
 .choices__list--dropdown .choices__item--selectable::after,

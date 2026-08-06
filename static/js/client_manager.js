@@ -17,6 +17,17 @@ export class ClientManager extends TimeKeeper {
 
     bindEvents() {
         this.createForm.addEventListener('submit', (e) => this.createClient(e));
+        document.addEventListener('keydown', (e) => this.handleEditKeydown(e));
+
+        // contenteditable accepts pasted markup; strip it back to plain text.
+        document.addEventListener('paste', (e) => {
+            if (!e.target.closest?.('.tk-editable.is-editing')) return;
+            e.preventDefault();
+            const text = (e.clipboardData || window.clipboardData)
+                .getData('text/plain')
+                .replace(/\s+/g, ' ');
+            document.execCommand('insertText', false, text);
+        });
 
         // Add event listeners for edit, delete, save, and cancel buttons
         document.addEventListener('click', (e) => {
@@ -57,6 +68,18 @@ export class ClientManager extends TimeKeeper {
         });
     }
 
+    /* Flash a cell's background with a themed token. Reads the live variable so
+       the animation follows the current theme. */
+    flashCell(cell, token) {
+        const value = getComputedStyle(document.documentElement)
+            .getPropertyValue(token)
+            .trim();
+        cell.animate(
+            [{ backgroundColor: value }, { backgroundColor: 'transparent' }],
+            { duration: 600, easing: 'ease-out' }
+        );
+    }
+
     editClient(id) {
         // Hide edit and delete buttons, show save and cancel buttons for this row only
         const row = document.getElementById(`row_${id}`);
@@ -64,13 +87,13 @@ export class ClientManager extends TimeKeeper {
             .forEach((btn) => (btn.style.display = "none"));
         row.querySelector('[name="save"]').style.display = "inline-flex";
         row.querySelector('[name="cancel"]').style.display = "inline-flex";
+        row.classList.add('tk-row-editing');
 
-        // Enable content editing for the name field
+        // Turn the name into a field. .is-editing carries the input styling;
+        // the transition on .tk-editable animates the change.
         const nameCell = document.getElementById(`name_${id}`);
         nameCell.contentEditable = "true";
-
-        // Apply edit styling
-        nameCell.classList.add('tk-cell-editing');
+        nameCell.classList.add('is-editing');
 
         // Set focus and select all text
         nameCell.focus();
@@ -81,19 +104,32 @@ export class ClientManager extends TimeKeeper {
         const selection = window.getSelection();
         selection.removeAllRanges();
         selection.addRange(range);
+    }
 
-        // Add a highlight animation
-        nameCell.animate(
-            [
-                { backgroundColor: '#EFF6FF' }, // blue-50
-                { backgroundColor: '#DBEAFE' }, // blue-100
-                { backgroundColor: '#EFF6FF' }  // blue-50
-            ],
-            {
-                duration: 600,
-                easing: 'ease-in-out'
-            }
-        );
+    /* Enter commits, Escape reverts — matches what a real input would do. */
+    handleEditKeydown(event) {
+        const cell = event.target.closest?.('.tk-editable.is-editing');
+        if (!cell) return;
+
+        const id = cell.id.split('_')[1];
+
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            this.saveEdit(id);
+        } else if (event.key === 'Escape') {
+            event.preventDefault();
+            this.cancelEdit(id);
+        } else {
+            cell.classList.remove('is-invalid');
+        }
+    }
+
+    markInvalid(cell) {
+        cell.classList.remove('is-invalid');
+        // Force a reflow so the nudge animation restarts on repeat attempts.
+        void cell.offsetWidth;
+        cell.classList.add('is-invalid');
+        cell.focus();
     }
 
     async saveEdit(id) {
@@ -102,7 +138,7 @@ export class ClientManager extends TimeKeeper {
 
         if (!newName) {
             this.showToast('Client name cannot be empty', 'warning');
-            nameCell.focus();
+            this.markInvalid(nameCell);
             return;
         }
 
@@ -115,21 +151,9 @@ export class ClientManager extends TimeKeeper {
                 body: JSON.stringify({ name: newName }),
             });
 
-            // Success animation
-            nameCell.animate(
-                [
-                    { backgroundColor: '#EFF6FF' }, // blue-50
-                    { backgroundColor: '#DCFCE7' }, // green-50
-                    { backgroundColor: 'white' }
-                ],
-                {
-                    duration: 800,
-                    easing: 'ease-out'
-                }
-            );
-
             this.showToast('Client updated successfully');
             this.resetRow(id);
+            this.flashCell(nameCell, '--success-soft');
             // Update the original text with the new value
             this.originalText[`name_${id}`] = newName;
         } catch (error) {
@@ -143,18 +167,8 @@ export class ClientManager extends TimeKeeper {
         const nameCell = document.getElementById(`name_${id}`);
         nameCell.innerText = this.originalText[nameCell.id];
 
-        // Flash the cell to acknowledge the cancel. Reads the live token values
-        // so it tracks the current theme.
-        const css = getComputedStyle(document.documentElement);
-        nameCell.animate(
-            [
-                { backgroundColor: css.getPropertyValue('--danger-soft').trim() },
-                { backgroundColor: 'transparent' }
-            ],
-            { duration: 600, easing: 'ease-out' }
-        );
-
         this.resetRow(id);
+        this.flashCell(nameCell, '--danger-soft');
     }
 
     enterDeleteConfirmMode(button, id) {
@@ -194,10 +208,12 @@ export class ClientManager extends TimeKeeper {
         const nameCell = document.getElementById(`name_${id}`);
 
         // Remove editable styling from the name cell
-        nameCell.classList.remove('tk-cell-editing');
+        nameCell.classList.remove('is-editing', 'is-invalid');
+        row.classList.remove('tk-row-editing');
 
         // Disable content editing for the name field
         nameCell.contentEditable = "false";
+        nameCell.blur();
 
         // Reset button visibility
         row.querySelectorAll('[name="edit"], [name="delete"]')
@@ -302,9 +318,11 @@ export class ClientManager extends TimeKeeper {
 
         newRow.innerHTML = `
             <td class="hidden">${client.id}</td>
-            <td id="name_${client.id}" contenteditable="false" class="font-medium transition-colors">${this.escapeHtml(client.name)}</td>
+            <td class="font-medium">
+                <span id="name_${client.id}" class="tk-editable" contenteditable="false" spellcheck="false">${this.escapeHtml(client.name)}</span>
+            </td>
             <td class="text-right">
-                <div class="flex justify-end gap-1.5">
+                <div class="flex min-h-8 items-center justify-end gap-1.5">
                     <button name="edit" class="tk-btn tk-btn-secondary tk-btn-sm">Edit</button>
                     <button name="delete" class="tk-btn tk-btn-danger tk-btn-sm">Delete</button>
                     <button name="save" style="display: none" class="tk-btn tk-btn-primary tk-btn-sm">Save</button>
