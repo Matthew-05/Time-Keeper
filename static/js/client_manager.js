@@ -62,27 +62,15 @@ export class ClientManager extends TimeKeeper {
         const row = document.getElementById(`row_${id}`);
         row.querySelectorAll('[name="edit"], [name="delete"]')
             .forEach((btn) => (btn.style.display = "none"));
-        row.querySelector('[name="save"]').style.display = "inline-block";
-        row.querySelector('[name="cancel"]').style.display = "inline-block";
+        row.querySelector('[name="save"]').style.display = "inline-flex";
+        row.querySelector('[name="cancel"]').style.display = "inline-flex";
 
         // Enable content editing for the name field
         const nameCell = document.getElementById(`name_${id}`);
         nameCell.contentEditable = "true";
 
         // Apply edit styling
-        nameCell.classList.add(
-            'bg-blue-50',
-            'border-2',
-            'border-blue-300',
-            'rounded-md',
-            'shadow-inner',
-            'px-3',
-            'py-2',
-            'focus:outline-none',
-            'focus:ring-2',
-            'focus:ring-blue-300',
-            'focus:border-blue-400'
-        );
+        nameCell.classList.add('tk-cell-editing');
 
         // Set focus and select all text
         nameCell.focus();
@@ -155,17 +143,15 @@ export class ClientManager extends TimeKeeper {
         const nameCell = document.getElementById(`name_${id}`);
         nameCell.innerText = this.originalText[nameCell.id];
 
-        // Add a cancel animation
+        // Flash the cell to acknowledge the cancel. Reads the live token values
+        // so it tracks the current theme.
+        const css = getComputedStyle(document.documentElement);
         nameCell.animate(
             [
-                { backgroundColor: '#EFF6FF' }, // blue-50
-                { backgroundColor: '#FEF2F2' }, // red-50
-                { backgroundColor: 'white' }
+                { backgroundColor: css.getPropertyValue('--danger-soft').trim() },
+                { backgroundColor: 'transparent' }
             ],
-            {
-                duration: 600,
-                easing: 'ease-out'
-            }
+            { duration: 600, easing: 'ease-out' }
         );
 
         this.resetRow(id);
@@ -177,9 +163,9 @@ export class ClientManager extends TimeKeeper {
         button.dataset.confirmMode = 'true';
         
         // Change button appearance to confirm state
-        button.textContent = 'Confirm Delete?';
-        button.classList.remove('text-red-600', 'hover:text-red-900', 'bg-red-50', 'hover:bg-red-100');
-        button.classList.add('text-white', 'bg-red-600', 'hover:bg-red-700', 'font-semibold', 'animate-pulse');
+        button.textContent = 'Confirm?';
+        button.classList.remove('tk-btn-danger');
+        button.classList.add('tk-btn-danger-armed');
         
         // Clear any existing timer for this button
         if (this.deleteConfirmTimers[id]) {
@@ -199,8 +185,8 @@ export class ClientManager extends TimeKeeper {
         button.dataset.confirmMode = 'false';
         
         // Restore original styling
-        button.classList.remove('text-white', 'bg-red-600', 'hover:bg-red-700', 'font-semibold', 'animate-pulse');
-        button.classList.add('text-red-600', 'hover:text-red-900', 'bg-red-50', 'hover:bg-red-100');
+        button.classList.remove('tk-btn-danger-armed');
+        button.classList.add('tk-btn-danger');
     }
 
     resetRow(id) {
@@ -208,26 +194,14 @@ export class ClientManager extends TimeKeeper {
         const nameCell = document.getElementById(`name_${id}`);
 
         // Remove editable styling from the name cell
-        nameCell.classList.remove(
-            'bg-blue-50',
-            'border-2',
-            'border-blue-300',
-            'rounded-md',
-            'shadow-inner',
-            'px-3',
-            'py-2',
-            'focus:outline-none',
-            'focus:ring-2',
-            'focus:ring-blue-300',
-            'focus:border-blue-400'
-        );
+        nameCell.classList.remove('tk-cell-editing');
 
         // Disable content editing for the name field
         nameCell.contentEditable = "false";
 
         // Reset button visibility
         row.querySelectorAll('[name="edit"], [name="delete"]')
-            .forEach((btn) => (btn.style.display = "inline-block"));
+            .forEach((btn) => (btn.style.display = "inline-flex"));
         row.querySelector('[name="save"]').style.display = "none";
         row.querySelector('[name="cancel"]').style.display = "none";
     }
@@ -243,9 +217,7 @@ export class ClientManager extends TimeKeeper {
             const row = document.getElementById(`row_${id}`);
 
             // Add delete animation
-            row.style.transition = "all 0.5s ease";
-            row.style.backgroundColor = "#FEE2E2"; // red-100
-            row.style.opacity = "0.5";
+            row.classList.add('tk-row-removing');
 
             await this.fetchFromAPI(`/clients/${id}`, {
                 method: "DELETE",
@@ -266,9 +238,7 @@ export class ClientManager extends TimeKeeper {
                 if (remainingRows.length === 0) {
                     const emptyRow = document.createElement('tr');
                     emptyRow.innerHTML = `
-                        <td colspan="2" class="px-6 py-8 text-center text-gray-500">
-                            No clients found. Add your first client using the form above.
-                        </td>
+                        <td colspan="2" class="tk-empty">No clients yet. Add your first one above.</td>
                     `;
                     tbody.appendChild(emptyRow);
                 }
@@ -281,10 +251,7 @@ export class ClientManager extends TimeKeeper {
 
             // Reset the row if delete fails
             const row = document.getElementById(`row_${id}`);
-            if (row) {
-                row.style.backgroundColor = "";
-                row.style.opacity = "";
-            }
+            if (row) row.classList.remove('tk-row-removing');
         }
     }
 
@@ -331,26 +298,18 @@ export class ClientManager extends TimeKeeper {
         
         const newRow = document.createElement('tr');
         newRow.id = `row_${client.id}`;
-        newRow.className = 'bg-green-50';
+        newRow.className = 'tk-row-new';
 
         newRow.innerHTML = `
             <td class="hidden">${client.id}</td>
-            <td id="name_${client.id}" contenteditable="false" class="px-6 py-4 text-sm text-gray-900 transition-all duration-200">
-                ${client.name}
-            </td>
-            <td class="px-6 py-4 text-right text-sm font-medium space-x-2">
-                <button name="edit" class="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md transition-colors">
-                    Edit
-                </button>
-                <button name="delete" class="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-3 py-1 rounded-md transition-colors">
-                    Delete
-                </button>
-                <button name="save" style="display: none" class="text-green-600 hover:text-green-900 bg-green-50 hover:bg-green-100 px-3 py-1 rounded-md transition-colors">
-                    Save
-                </button>
-                <button name="cancel" style="display: none" class="text-gray-600 hover:text-gray-900 bg-gray-50 hover:bg-gray-100 px-3 py-1 rounded-md transition-colors">
-                    Cancel
-                </button>
+            <td id="name_${client.id}" contenteditable="false" class="font-medium transition-colors">${this.escapeHtml(client.name)}</td>
+            <td class="text-right">
+                <div class="flex justify-end gap-1.5">
+                    <button name="edit" class="tk-btn tk-btn-secondary tk-btn-sm">Edit</button>
+                    <button name="delete" class="tk-btn tk-btn-danger tk-btn-sm">Delete</button>
+                    <button name="save" style="display: none" class="tk-btn tk-btn-primary tk-btn-sm">Save</button>
+                    <button name="cancel" style="display: none" class="tk-btn tk-btn-secondary tk-btn-sm">Cancel</button>
+                </div>
             </td>
         `;
 
@@ -359,11 +318,9 @@ export class ClientManager extends TimeKeeper {
         // Store the original text
         this.originalText[`name_${client.id}`] = client.name;
 
-        // Add a highlight animation for the new row
-        setTimeout(() => {
-            newRow.style.transition = "background-color 1s ease";
-            newRow.style.backgroundColor = "white";
-        }, 100);
+        // .tk-row-new plays the highlight; drop it once it's finished so the
+        // row picks up normal hover styling again.
+        setTimeout(() => newRow.classList.remove('tk-row-new'), 1500);
     }
 }
 

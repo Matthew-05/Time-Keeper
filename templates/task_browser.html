@@ -1,441 +1,157 @@
 {% extends 'base.html' %}
 
 {% block title %}
-  Task History | Time Keeper
+  History | Time Keeper
 {% endblock %}
 
 {% block additional_styles %}
-  <style>
-    .timeline-container {
-      background: white;
-      border-radius: 0.75rem;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-      padding: 1rem;
-      margin-bottom: 1.5rem;
-    }
-    
-    .tooltip {
-      position: absolute;
-      display: none;
-      background-color: white;
-      border: 1px solid #e5e7eb;
-      padding: 0.75rem;
-      border-radius: 0.5rem;
-      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-      pointer-events: none;
-      z-index: 1000;
-    }
-    
-    .card {
-      background: white;
-      border-radius: 0.75rem;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-      overflow: hidden;
-    }
-    
-    .date-picker-wrapper {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      margin-bottom: 1.5rem;
-    }
-    
-    .date-picker-wrapper .date-nav-btn {
-      flex-shrink: 0;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 2.75rem;
-      height: 2.75rem;
-      padding: 0;
-      border: 1px solid #e5e7eb;
-      border-radius: 0.5rem;
-      background: white;
-      color: #4b5563;
-      cursor: pointer;
-      transition: all 0.2s;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-    }
-    
-    .date-picker-wrapper .date-nav-btn:hover {
-      background: #f9fafb;
-      border-color: #d1d5db;
-      color: #1f2937;
-    }
-    
-    .date-picker-wrapper .date-nav-btn:active {
-      transform: scale(0.98);
-    }
-    
-    .date-picker-wrapper .date-nav-btn svg {
-      width: 1.25rem;
-      height: 1.25rem;
-    }
-    
-    .date-picker-container {
-      position: relative;
-      flex: 1;
-      min-width: 0;
-    }
-    
-    .date-picker-container::before {
-      content: '📅';
-      position: absolute;
-      left: 1rem;
-      top: 50%;
-      transform: translateY(-50%);
-      pointer-events: none;
-    }
-    
-    #selected-date {
-      padding-left: 2.5rem;
-      background-color: white;
-      border-radius: 0.5rem;
-      border: 1px solid #e5e7eb;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-      height: 3rem;
-      font-size: 1rem;
-    }
-    
-    .task-row:hover {
-      background-color: #f9fafb;
-    }
-    
-    .detail-row {
-      background-color: #f3f4f6;
-      transition: all 0.3s ease;
-    }
-
-    .client-description-cell:hover,
-    .task-description-cell:hover {
-      background-color: #e0e7ff;
-      border-radius: 0.375rem;
-      transition: background-color 0.15s ease;
-    }
-
-    .edit-task-btn,
-    .save-task-btn {
-      background-color: #3b82f6;
-      transition: background-color 0.2s;
-    }
-    
-    .edit-task-btn:hover,
-    .save-task-btn:hover {
-      background-color: #2563eb;
-    }
-    
-    .delete-task-btn,
-    .cancel-task-btn {
-      background-color: #ef4444;
-      transition: background-color 0.2s;
-    }
-    
-    .delete-task-btn:hover,
-    .cancel-task-btn:hover {
-      background-color: #dc2626;
-    }
-    
-    .summary-card {
-      background: white;
-      border-radius: 0.75rem;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-      overflow: hidden;
-    }
-    
-    .summary-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 1rem 1.5rem;
-      border-bottom: 1px solid #e5e7eb;
-      min-height: 3.5rem;
-      overflow: visible;
-    }
-    
-    .summary-row:last-child {
-      border-bottom: none;
-    }
-    
-    .summary-label {
-      font-weight: 500;
-      color: #4b5563;
-      flex-shrink: 0;
-      margin-right: 1rem;
-    }
-    
-    .summary-value {
-      font-weight: 600;
-      text-align: right;
-    }
-    
-    .total-row {
-      background-color: #f3f4f6;
-      border-top: 2px solid #d1d5db;
-    }
-    
-    .time-input-container {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      justify-content: flex-end;
-      flex-shrink: 0;
-    }
-    
-    .day-time-input {
-      cursor: pointer;
-      text-align: center;
-      font-weight: 500;
-      transition: all 0.2s;
-    }
-    
-    .day-time-input:hover {
-      border-color: #9ca3af;
-    }
-    
-    .day-time-input:focus {
-      outline: none;
-      border-color: #3b82f6;
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-    }
-    
-    .time-action-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      border: none;
-      background: transparent;
-      width: 1.75rem;
-      height: 1.75rem;
-      flex-shrink: 0;
-      transition: all 0.2s;
-    }
-    
-    .time-action-btn:hover {
-      transform: scale(1.1);
-    }
-    
-    .time-action-btn:active {
-      transform: scale(0.95);
-    }
-    
-    .time-action-btn svg {
-      width: 1.125rem;
-      height: 1.125rem;
-    }
-    
-    .action-buttons-container {
-      display: flex;
-      gap: 0.125rem;
-      align-items: center;
-      width: 3.75rem;
-      flex-shrink: 0;
-    }
-    
-    .action-buttons-hidden {
-      visibility: hidden;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.2s;
-    }
-    
-    .action-buttons-visible {
-      visibility: visible;
-      pointer-events: auto;
-      opacity: 1;
-      transition: opacity 0.2s;
-    }
-    
-    /* Responsive styles for smaller screens */
-    @media (max-width: 1280px) {
-      .summary-row {
-        flex-direction: column;
-        align-items: flex-start;
-        padding: 0.75rem 1.5rem;
-        gap: 0.5rem;
-      }
-      
-      .summary-label {
-        margin-right: 0;
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        letter-spacing: 0.025em;
-        color: #6b7280;
-      }
-      
-      .time-input-container {
-        width: 100%;
-        justify-content: space-between;
-        flex-direction: row-reverse;
-      }
-      
-      .summary-value {
-        width: 100%;
-      }
-      
-      .day-time-input {
-        flex: 1;
-        max-width: 10rem;
-      }
-    }
-    
-    /* Even smaller screens */
-    @media (max-width: 640px) {
-      .summary-row {
-        padding: 0.5rem 1rem;
-      }
-      
-      .summary-label {
-        font-size: 0.7rem;
-      }
-      
-      .day-time-input {
-        max-width: 8rem;
-        font-size: 0.875rem;
-      }
-      
-      .time-action-btn {
-        width: 1.5rem;
-        height: 1.5rem;
-      }
-      
-      .time-action-btn svg {
-        width: 1rem;
-        height: 1rem;
-      }
-      
-      .action-buttons-container {
-        width: 3.125rem;
-      }
-      
-      #close-day-container {
-        padding: 0.75rem 1rem;
-      }
-      
-      #close-day-btn {
-        font-size: 0.875rem;
-        padding: 0.5rem 1rem;
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/vis-timeline/vis-timeline-graph2d.min.css') }}" />
 {% endblock %}
 
 {% block content %}
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-10">
-    <div class="mb-8">
-      <h1 class="text-3xl font-bold text-gray-800">Task History</h1>
+  <div class="tk-page">
+    <div class="tk-page-header">
+      <div>
+        <h1 class="tk-title">History</h1>
+        <p class="tk-subtitle">Review, edit and correct a day's tracked time.</p>
+      </div>
+
+      <!-- Date navigation lives in the header: it scopes the whole page. -->
+      <div class="flex items-center gap-1.5">
+        <button type="button" id="prev-day-btn" class="tk-btn-icon" title="Previous day" aria-label="Previous day">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
+
+        <div class="relative">
+          <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="5" width="18" height="16" rx="2" />
+            <path d="M16 3v4M8 3v4M3 11h18" />
+          </svg>
+          <input
+            type="text"
+            id="selected-date"
+            class="tk-input tabular w-52 cursor-pointer pl-9 text-sm"
+            placeholder="Select date…"
+            readonly
+          />
+        </div>
+
+        <button type="button" id="next-day-btn" class="tk-btn-icon" title="Next day" aria-label="Next day">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+        </button>
+      </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-      <div class="lg:col-span-3">
-        <div class="date-picker-wrapper">
-          <button type="button" id="prev-day-btn" class="date-nav-btn" title="Previous day" aria-label="Previous day">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-          </button>
-          <div class="date-picker-container">
-            <input type="text" id="selected-date" class="w-full cursor-pointer" placeholder="Select date..." />
+    <div class="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
+      <div class="min-w-0 space-y-5">
+        <!-- Timeline -->
+        <section class="tk-card">
+          <div class="tk-card-header">
+            <span class="tk-card-title">Timeline</span>
+            <span class="text-[0.6875rem] text-faint">Ctrl + scroll to zoom</span>
           </div>
-          <button type="button" id="next-day-btn" class="date-nav-btn" title="Next day" aria-label="Next day">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-          </button>
-        </div>
+          <div class="p-3">
+            <div id="timeline" class="h-[200px]"></div>
+            <div id="tooltip" class="tk-tooltip"></div>
+          </div>
+        </section>
 
-        <div class="timeline-container">
-          <h2 class="text-lg font-semibold mb-3 text-gray-700">Daily Timeline</h2>
-          <div id="timeline" class="h-[200px]"></div>
-          <div id="tooltip" class="tooltip"></div>
-        </div>
-
-        <div class="card">
+        <!-- Per-client roll-up; each row expands to the individual tasks -->
+        <section class="tk-card overflow-hidden">
+          <div class="tk-card-header">
+            <span class="tk-card-title">By client</span>
+          </div>
           <div class="overflow-x-auto">
-            <table class="w-full">
+            <table class="tk-table tk-table-hover">
               <thead>
-                <tr class="bg-gray-50 text-left text-gray-600 text-sm uppercase tracking-wider">
-                  <th class="px-6 py-4 font-medium">Client</th>
-                  <th class="px-6 py-4 font-medium">Description</th>
-                  <th class="px-6 py-4 font-medium">Total Time</th>
-                  <th class="px-6 py-4 font-medium">Qtr. Hr.</th>
-                  <th class="px-6 py-4 font-medium">Rounded Diff</th>
+                <tr>
+                  <th>Client</th>
+                  <th>Description</th>
+                  <th class="tk-num">Tracked</th>
+                  <th class="tk-num">Rounded</th>
+                  <th class="tk-num">Diff</th>
                 </tr>
               </thead>
-              <tbody id="tasks-tbody" class="divide-y divide-gray-200">
-                <!-- Task data will be inserted here -->
+              <tbody id="tasks-tbody">
+                <!-- Populated by task_browser.js -->
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
       </div>
 
-      <div class="lg:col-span-1">
-        <div class="summary-card">
-          <h2 class="text-lg font-semibold p-4 border-b border-gray-200 text-gray-700">Time Summary</h2>
+      <!-- Day summary -->
+      <aside class="tk-card xl:sticky xl:top-[calc(var(--nav-h)+1.75rem)]">
+        <div class="tk-card-header">
+          <span class="tk-card-title">Day summary</span>
+        </div>
 
-          <div class="summary-row">
-            <span class="summary-label">Day Start</span>
-            <div class="time-input-container">
-              <input type="text" id="day-start-time" class="day-time-input px-3 py-1.5 border rounded text-sm w-28" placeholder="--:-- --" readonly>
-              <div id="day-start-actions" class="action-buttons-container action-buttons-hidden">
-                <button id="save-start-time" class="time-action-btn save-btn rounded hover:bg-green-100" title="Save">
-                  <svg class="text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                  </svg>
-                </button>
-                <button id="cancel-start-time" class="time-action-btn cancel-btn rounded hover:bg-red-100" title="Cancel">
-                  <svg class="text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                  </svg>
-                </button>
-              </div>
+        <div class="tk-row">
+          <span class="tk-row-label">Day start</span>
+          <div class="flex flex-shrink-0 items-center gap-1.5">
+            <input type="text" id="day-start-time" class="tk-time-input" placeholder="--:-- --" readonly />
+            <div id="day-start-actions" class="tk-inline-actions action-buttons-hidden">
+              <button id="save-start-time" class="tk-btn-icon tk-btn-icon-sm is-success" title="Save">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              </button>
+              <button id="cancel-start-time" class="tk-btn-icon tk-btn-icon-sm is-danger" title="Cancel">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
             </div>
-          </div>
-
-          <div class="summary-row">
-            <span class="summary-label">Day End</span>
-            <div class="time-input-container">
-              <input type="text" id="day-end-time" class="day-time-input px-3 py-1.5 border rounded text-sm w-28" placeholder="--:-- --" readonly>
-              <div id="day-end-actions" class="action-buttons-container action-buttons-hidden">
-                <button id="save-end-time" class="time-action-btn save-btn rounded hover:bg-green-100" title="Save">
-                  <svg class="text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                  </svg>
-                </button>
-                <button id="cancel-end-time" class="time-action-btn cancel-btn rounded hover:bg-red-100" title="Cancel">
-                  <svg class="text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div id="close-day-container" class="p-4 border-b border-gray-200 hidden">
-            <button id="close-day-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition-colors">
-              Close Day
-            </button>
-          </div>
-
-          <div class="summary-row">
-            <span class="summary-label">Billable Time</span>
-            <span id="billable-value" class="summary-value">-</span>
-          </div>
-
-          <div class="summary-row">
-            <span class="summary-label">Non-Billable Time</span>
-            <span id="nonbillable-value" class="summary-value">-</span>
-          </div>
-
-          <div class="summary-row total-row">
-            <span class="summary-label">Total Time</span>
-            <span id="total-time-value" class="summary-value">-</span>
           </div>
         </div>
-      </div>
+
+        <div class="tk-row">
+          <span class="tk-row-label">Day end</span>
+          <div class="flex flex-shrink-0 items-center gap-1.5">
+            <input type="text" id="day-end-time" class="tk-time-input" placeholder="--:-- --" readonly />
+            <div id="day-end-actions" class="tk-inline-actions action-buttons-hidden">
+              <button id="save-end-time" class="tk-btn-icon tk-btn-icon-sm is-success" title="Save">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              </button>
+              <button id="cancel-end-time" class="tk-btn-icon tk-btn-icon-sm is-danger" title="Cancel">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div id="close-day-container" class="hidden border-b border-border p-3">
+          <button id="close-day-btn" class="tk-btn tk-btn-primary w-full">Close day</button>
+        </div>
+
+        <div class="tk-row">
+          <span class="tk-row-label">Billable</span>
+          <span id="billable-value" class="tk-row-value">–</span>
+        </div>
+
+        <div class="tk-row">
+          <span class="tk-row-label">Non-billable</span>
+          <span id="nonbillable-value" class="tk-row-value">–</span>
+        </div>
+
+        <div class="tk-row tk-row-total">
+          <span class="tk-row-label">Total</span>
+          <span id="total-time-value" class="tk-row-value">–</span>
+        </div>
+      </aside>
     </div>
   </div>
 {% endblock %}
 
 {% block page_scripts %}
-  <script src="https://unpkg.com/vis-timeline@latest/standalone/umd/vis-timeline-graph2d.min.js"></script>
-  <link href="https://unpkg.com/vis-timeline@latest/styles/vis-timeline-graph2d.min.css" rel="stylesheet" type="text/css" />
+  <script src="{{ url_for('static', filename='vendor/vis-timeline/vis-timeline-graph2d.min.js') }}"></script>
   <script src="{{ url_for('static', filename='js/task_browser.js') }}" type="module"></script>
 {% endblock %}

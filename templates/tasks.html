@@ -1,57 +1,119 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Task Items</title>
-    <link
-      rel="stylesheet"
-      type="text/css"
-      href="https://cdn.jsdelivr.net/npm/vanilla-datatables@1.6.2/dist/vanilla-dataTables.min.css"
-    />
-  </head>
-  <body>
-    <table id="taskTable" class="table">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Date</th>
-          <th>Start Time</th>
-          <th>End Time</th>
-          <th>Client</th>
-          <th>Type</th>
-          <th>Description</th>
-          <th>Time Spent</th>
-          <th>Adjust Entry</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
+{#
+  Standalone task list. Note: no route in main.py currently renders this
+  template — it's kept as a working reference/debug view. Wire it up with
+  something like:
 
-    <script src="https://cdn.jsdelivr.net/npm/vanilla-datatables@1.6.2/dist/vanilla-dataTables.min.js"></script>
-    <script>
-      document.addEventListener("DOMContentLoaded", function () {
-        fetch("/tasks")
-          .then((response) => response.json())
-          .then((data) => {
-            const table = new DataTable("#taskTable", {
-              data: data,
-              perPage: 10,
-              columns: [
-                { name: "ID" },
-                { name: "Date" },
-                { name: "Start Time" },
-                { name: "End Time" },
-                { name: "Client" },
-                { name: "Type" },
-                { name: "Description" },
-                { name: "Time Spent" },
-                { name: "Adjust Entry" },
-              ],
-            });
-          })
-          .catch((error) => console.error("Error fetching tasks:", error));
-      });
-    </script>
-  </body>
-</html>
+      @app.route('/tasks_table')
+      def tasks_table():
+          return render_template('tasks.html', version=APP_VERSION)
+#}
+{% extends 'base.html' %}
+
+{% block title %}
+  Tasks | Time Keeper
+{% endblock %}
+
+{% block content %}
+  <div class="tk-page">
+    <div class="tk-page-header">
+      <div>
+        <h1 class="tk-title">Tasks</h1>
+        <p class="tk-subtitle">Raw entries for a single day.</p>
+      </div>
+
+      <div class="relative">
+        <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="5" width="18" height="16" rx="2" />
+          <path d="M16 3v4M8 3v4M3 11h18" />
+        </svg>
+        <input type="text" id="task-date" class="tk-input tabular w-52 cursor-pointer pl-9 text-sm" readonly />
+      </div>
+    </div>
+
+    <section class="tk-card overflow-hidden">
+      <div class="overflow-x-auto">
+        <table id="taskTable" class="tk-table tk-table-hover">
+          <thead>
+            <tr>
+              <th class="tk-num">ID</th>
+              <th class="tk-num">Start</th>
+              <th class="tk-num">End</th>
+              <th>Client</th>
+              <th>Type</th>
+              <th>Description</th>
+              <th class="tk-num">Time spent</th>
+            </tr>
+          </thead>
+          <tbody id="task-table-body">
+            <tr>
+              <td colspan="7">
+                <div class="tk-loading"><span class="tk-spinner"></span> Loading tasks…</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block page_scripts %}
+  <script type="module">
+    import { TimeKeeper } from "{{ url_for('static', filename='js/base.js') }}"
+
+    const tk = new TimeKeeper()
+    const tbody = document.getElementById('task-table-body')
+
+    function to12Hour(value) {
+      if (!value) return '—'
+      const [h, m] = value.split(':')
+      const period = +h >= 12 ? 'PM' : 'AM'
+      return `${+h % 12 || 12}:${m} ${period}`
+    }
+
+    async function load(date) {
+      tbody.innerHTML =
+        '<tr><td colspan="7"><div class="tk-loading"><span class="tk-spinner"></span> Loading tasks…</div></td></tr>'
+
+      try {
+        const tasks = await tk.fetchFromAPI(`/tasks/${date}`)
+
+        if (!tasks.length) {
+          tbody.innerHTML = '<tr><td colspan="7" class="tk-empty">No tasks on this date.</td></tr>'
+          return
+        }
+
+        tbody.innerHTML = tasks
+          .map(
+            (task) => `
+              <tr class="${task.is_ongoing ? 'tk-row-ongoing' : ''}">
+                <td class="tk-num text-faint">${task.id}</td>
+                <td class="tk-num whitespace-nowrap">${to12Hour(task.start_time)}</td>
+                <td class="tk-num whitespace-nowrap">
+                  ${to12Hour(task.end_time)}
+                  ${task.is_ongoing ? '<span class="tk-badge tk-badge-warn ml-1.5">Ongoing</span>' : ''}
+                </td>
+                <td class="font-medium">${tk.escapeHtml(task.client_name)}</td>
+                <td class="text-muted">${tk.escapeHtml(task.type ?? '—')}</td>
+                <td class="max-w-md truncate text-muted" title="${tk.escapeHtml(task.description ?? '')}">
+                  ${task.description ? tk.escapeHtml(task.description) : '<span class="italic text-faint">No description</span>'}
+                </td>
+                <td class="tk-num whitespace-nowrap text-muted">${task.time_spent ?? '—'}</td>
+              </tr>`
+          )
+          .join('')
+      } catch (error) {
+        console.error('Error fetching tasks:', error)
+        tbody.innerHTML = '<tr><td colspan="7" class="tk-empty">Could not load tasks.</td></tr>'
+      }
+    }
+
+    const picker = flatpickr('#task-date', {
+      dateFormat: 'Y-m-d',
+      defaultDate: new Date(),
+      onChange: (_dates, dateStr) => load(dateStr),
+    })
+
+    load(picker.input.value)
+  </script>
+{% endblock %}

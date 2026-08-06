@@ -1,138 +1,140 @@
 {% extends 'base.html' %}
 
 {% block title %}
-  Time Keeper
+  Today | Time Keeper
 {% endblock %}
 
 {% block content %}
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-10">
-    <div class="mb-8">
-      <h1 class="text-3xl font-bold text-gray-800">Time Tracking Dashboard</h1>
-    </div>
-
-    <!-- Main Card -->
-    <div class="bg-white rounded-lg shadow-md overflow-hidden">
-      <!-- Header -->
-      <div class="px-8 py-6 bg-gradient-to-r from-blue-600 to-indigo-600">
-        <h2 class="text-2xl font-bold text-white flex items-center">
-          <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>Time Tracking
-        </h2>
-      </div>
-
-      <!-- Main Content -->
-      <div class="p-8 space-y-8">
-        <!-- Client Selection -->
-        <div class="space-y-3 z-50">
-          <label class="text-sm font-semibold text-gray-700 uppercase tracking-wider">Client</label>
-          <select id="autocomplete-input" class="w-full px-4 py-3 bg-white border-2 border-blue-100 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm hover:border-blue-200">
-          </select>
-        </div>
-
-        <!-- Task Details Grid -->
-        <div id="description-input-container" class="hidden space-y-3">
-          <label class="text-sm font-semibold text-gray-700 uppercase tracking-wider">Description</label>
-          <input type="text" id="description-input" class="w-full px-4 py-3 bg-gray-50 border-2 border-blue-100 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm hover:border-blue-200" />
-        </div>
-
-        <!-- Time Selection -->
-        <div class="text-center py-6" id="timepicker-container">
-          <div class="flex items-center justify-center space-x-3">
-            <div id="task-start-time" class="text-xl font-medium text-gray-700 hidden"></div>
-            <div id="recent-task-end-time" class="hidden cursor-pointer px-3 py-2 bg-blue-50 text-blue-700 rounded-xl hover:bg-blue-100 transition-all border border-blue-200" title="Click to use this time">
-              <div class="text-xs font-medium text-blue-600 uppercase tracking-wider">Previous</div>
-              <div class="text-lg font-bold leading-tight" id="recent-task-time-value"></div>
-            </div>
-            <input type="text" id="timepicker" class="text-2xl font-semibold text-center bg-gray-50 px-3 py-2 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-blue-500 transition-all w-36" />
-            <button id="current-time-button" class="px-4 py-3 bg-gray-100 text-gray-800 rounded-xl hover:bg-gray-200 transition-all font-medium shadow-sm flex items-center">
-              <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>Now
-            </button>
-          </div>
-          <div id="lowestTimeAllowed" class="text-sm text-gray-500 mt-3 font-medium"></div>
-        </div>
-      </div>
-
-      <!-- Action Buttons -->
-      <div class="px-8 py-6 bg-gray-50 border-t border-gray-100">
-        <div class="flex flex-wrap justify-between items-center gap-4">
-          <!-- Task Controls -->
-          <div class="flex flex-wrap gap-4">
-            <!-- Start Task Button -->
-            <button id="start-button" class="hidden action-btn group relative px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:from-blue-600 hover:to-blue-700 transition-all duration-300 font-medium shadow-md flex items-center overflow-hidden">
-              <span class="absolute inset-0 w-full h-full bg-gradient-to-r from-blue-600 to-blue-700 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
-              <span class="relative flex items-center">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                </svg>Start Task
-              </span>
-            </button>
-
-            <!-- Complete Task Button -->
-            <button id="complete-button" class="hidden action-btn group relative px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl hover:from-green-600 hover:to-green-700 transition-all duration-300 font-medium shadow-md flex items-center overflow-hidden">
-              <span class="absolute inset-0 w-full h-full bg-gradient-to-r from-green-600 to-green-700 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
-              <span class="relative flex items-center">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                </svg>Complete Task
-              </span>
-            </button>
-
-            <!-- Add Task Button -->
-            <button id="action-button" class="hidden action-btn group relative px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:from-blue-600 hover:to-blue-700 transition-all duration-300 font-medium shadow-md flex items-center overflow-hidden">
-              <span class="absolute inset-0 w-full h-full bg-gradient-to-r from-blue-600 to-blue-700 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
-              <span class="relative flex items-center">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                </svg>Add Task
-              </span>
-            </button>
-          </div>
-
-          <!-- Day Controls -->
-          <div class="flex flex-wrap gap-4">
-            <!-- Start Day Button -->
-            <button id="start-day-button" class="hidden action-btn group relative px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl hover:from-green-600 hover:to-green-700 transition-all duration-300 font-medium shadow-md flex items-center overflow-hidden">
-              <span class="absolute inset-0 w-full h-full bg-gradient-to-r from-green-600 to-green-700 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
-              <span class="relative flex items-center">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>Start Day
-              </span>
-            </button>
-
-            <!-- End Day Button -->
-            <button id="end-day-button" class="hidden action-btn group relative px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl hover:from-red-600 hover:to-red-700 transition-all duration-300 font-medium shadow-md flex items-center overflow-hidden">
-              <span class="absolute inset-0 w-full h-full bg-gradient-to-r from-red-600 to-red-700 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
-              <span class="relative flex items-center">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                </svg>End Day
-              </span>
-            </button>
-
-            <!-- Reopen Day Button -->
-            <button id="reopen-day-button" class="hidden action-btn group relative px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded-xl hover:from-amber-600 hover:to-amber-700 transition-all duration-300 font-medium shadow-md flex items-center overflow-hidden">
-              <span class="absolute inset-0 w-full h-full bg-gradient-to-r from-amber-600 to-amber-700 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
-              <span class="relative flex items-center">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>Re-open Day
-              </span>
-            </button>
-          </div>
-        </div>
+  <div class="tk-page max-w-3xl">
+    <div class="tk-page-header">
+      <div>
+        <h1 class="tk-title">Today</h1>
+        <p class="tk-subtitle" id="today-date"></p>
       </div>
     </div>
+
+    <section class="tk-card overflow-visible">
+      <div class="tk-card-header">
+        <span class="tk-card-title">Time tracking</span>
+      </div>
+
+      <div class="space-y-5 p-5">
+        <!-- Client -->
+        <div id="client-field">
+          <label class="tk-label" for="autocomplete-input">Client</label>
+          <select id="autocomplete-input"></select>
+        </div>
+
+        <!-- Description (only shown while a task is running) -->
+        <div id="description-input-container" class="hidden">
+          <label class="tk-label" for="description-input">Description</label>
+          <!-- The save-confirmation tick is appended to this wrapper by timekeeper.js -->
+          <div class="relative">
+            <input type="text" id="description-input" class="tk-input pr-10" placeholder="What are you working on?" />
+          </div>
+        </div>
+
+        <!-- Time -->
+        <div id="timepicker-container" class="rounded-lg border border-border bg-surface-2 px-4 py-5">
+          <div class="flex flex-wrap items-center justify-center gap-2.5">
+            <div id="task-start-time" class="tabular hidden text-lg font-medium text-muted"></div>
+
+            <button
+              type="button"
+              id="recent-task-end-time"
+              class="hidden rounded-lg border border-border bg-surface px-3 py-1.5 text-left transition-colors hover:border-accent hover:bg-accent-soft"
+              title="Click to use this time"
+            >
+              <div class="text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-faint">Previous end</div>
+              <div class="tabular text-sm font-semibold leading-tight text-text" id="recent-task-time-value"></div>
+            </button>
+
+            <input
+              type="text"
+              id="timepicker"
+              class="tk-input tk-time w-40 text-center text-2xl font-semibold tracking-[-0.01em]"
+              style="padding-top: 0.5rem; padding-bottom: 0.5rem;"
+            />
+
+            <button type="button" id="current-time-button" class="tk-btn tk-btn-secondary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+              Now
+            </button>
+          </div>
+          <div id="lowestTimeAllowed" class="tabular mt-3 text-center text-xs text-faint"></div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="tk-card-footer">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex flex-wrap gap-2">
+            <button id="start-button" class="tk-btn tk-btn-primary tk-btn-lg hidden">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="6 4 19 12 6 20 6 4" fill="currentColor" stroke="none" />
+              </svg>
+              Start task
+            </button>
+
+            <button id="complete-button" class="tk-btn tk-btn-primary tk-btn-lg hidden">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 6L9 17l-5-5" />
+              </svg>
+              Complete task
+            </button>
+
+            <button id="action-button" class="tk-btn tk-btn-primary tk-btn-lg hidden">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Add task
+            </button>
+          </div>
+
+          <div class="flex flex-wrap gap-2">
+            <button id="start-day-button" class="tk-btn tk-btn-primary tk-btn-lg hidden">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="5" width="18" height="16" rx="2" />
+                <path d="M16 3v4M8 3v4M3 11h18" />
+              </svg>
+              Start day
+            </button>
+
+            <button id="end-day-button" class="tk-btn tk-btn-secondary tk-btn-lg hidden">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
+              </svg>
+              End day
+            </button>
+
+            <button id="reopen-day-button" class="tk-btn tk-btn-warn tk-btn-lg hidden">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 109-9 9 9 0 00-6.36 2.64L3 8" />
+                <path d="M3 3v5h5" />
+              </svg>
+              Re-open day
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 {% endblock %}
 
 {% block page_scripts %}
   <script type="module">
     import { TimeKeeperIndex } from "{{ url_for('static', filename='js/timekeeper.js') }}"
+
     document.addEventListener('DOMContentLoaded', async () => {
+      document.getElementById('today-date').textContent = new Date().toLocaleDateString(undefined, {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+      })
+
       const timekeeper = new TimeKeeperIndex()
       await timekeeper.init()
     })

@@ -42,6 +42,23 @@ VSVersionInfo(
     with open('version_info.txt', 'w') as f:
         f.write(version_info)
 
+def build_frontend():
+    """Rebuild static/css/app.css and re-vendor static/vendor/ before packaging.
+
+    The desktop app loads zero assets from a CDN, so whatever is on disk at
+    package time is what ships. Skipped (with a warning) if npm isn't
+    available — the committed build output is still perfectly usable.
+    """
+    npm = shutil.which('npm')
+    if not npm:
+        print('WARNING: npm not found — shipping the committed static/css/app.css as-is.')
+        return
+
+    print('Building frontend assets ...')
+    subprocess.run([npm, 'install', '--no-audit', '--no-fund'], check=True, shell=os.name == 'nt')
+    subprocess.run([npm, 'run', 'build'], check=True, shell=os.name == 'nt')
+
+
 def build_application():
     if sys.version_info[:2] != (3, 12):
         raise SystemExit(
@@ -51,7 +68,8 @@ def build_application():
 
     input('Check you have updated the main.py version number and press enter to continue')
     input('Check you have updated the build.py version number and press enter to continue')
-    input('Check you have set DEV_MODE in .env to False and press enter to continue')
+    # DEV_MODE in main.py is derived from sys.frozen, so the packaged build turns
+    # devtools off on its own — nothing to toggle by hand.
 
     python_dll = os.path.join(
         sys.base_prefix,
@@ -59,6 +77,8 @@ def build_application():
     )
     if not os.path.isfile(python_dll):
         raise SystemExit(f"Python DLL not found at {python_dll!r}; install Python 3.12 or fix base_prefix.")
+
+    build_frontend()
 
     if os.path.exists('Build'):
         shutil.rmtree('Build')

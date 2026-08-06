@@ -9,78 +9,46 @@
       {% endblock %}
     </title>
 
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!--
+      Applied before first paint so a dark-mode user never sees a white flash.
+      Deliberately inline and blocking — it must run before the stylesheet
+      paints the body background.
+    -->
+    <script>
+      ;(function () {
+        try {
+          var saved = localStorage.getItem('tk-theme')
+          var dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches
+          if (dark) document.documentElement.classList.add('dark')
+        } catch (e) {
+          /* localStorage unavailable — fall back to light. */
+        }
+      })()
+    </script>
 
-    <!-- Time Picker -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css" />
-
-    <!-- Custom Styles -->
-    <style>
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-      
-      body {
-        font-family: 'Inter', sans-serif;
-      }
-      
-      .choices__inner {
-        background-color: rgb(249 250 251);
-        border-radius: 0.75rem !important;
-        min-height: 48px !important;
-        padding: 0.75rem 1rem !important;
-      }
-      
-      .choices__input {
-        background-color: transparent !important;
-      }
-      
-      .flatpickr-input {
-        background-color: rgb(249 250 251) !important;
-      }
-      .choices__list--dropdown {
-        border: 2px solid #e5e7eb !important;
-        border-radius: 0.75rem !important;
-        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1) !important;
-        margin-top: 4px !important;
-      }
-      
-      .choices__inner {
-        background-color: white !important;
-        border: 2px solid #dbeafe !important;
-        box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1) !important;
-      }
-      
-      .choices__inner:hover {
-        border-color: #bfdbfe !important;
-      }
-      .choices__list--dropdown {
-        z-index: 999 !important;
-      }
-      
-      .choices.is-open {
-        z-index: 999 !important;
-      }
-    </style>
+    <!-- All assets are vendored under static/vendor so the packaged app works offline. -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/flatpickr/flatpickr.min.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/choices/choices.min.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
 
     {% block additional_styles %}
 
     {% endblock %}
   </head>
-  <body class="h-full bg-gradient-to-br from-blue-50 to-indigo-50">
+
+  <body class="min-h-full">
     {% include 'navbar.html' %}
 
-    <main class="h-full">
+    <main>
       {% block content %}
 
       {% endblock %}
     </main>
 
-    <div id="version-display" class="fixed bottom-2 right-2 text-xs text-gray-500">v{{ app_version }}</div>
+    <div id="version-display" class="tabular fixed bottom-2 right-3 text-[0.6875rem] text-faint select-none">v{{ app_version }}</div>
 
-    <!-- Scripts -->
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-    <script src="https://cdn.jsdelivr.net/npm/choices.js/public/assets/scripts/choices.min.js"></script>
+    <script src="{{ url_for('static', filename='vendor/flatpickr/flatpickr.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/choices/choices.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/base.js') }}" type="module"></script>
 
     {% block page_scripts %}

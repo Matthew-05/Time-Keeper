@@ -1,0 +1,22 @@
+{
+  "name": "time-keeper",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Frontend asset pipeline for Time-Keeper. Builds the Tailwind stylesheet and vendors third-party assets so the packaged desktop app works offline.",
+  "scripts": {
+    "build:css": "tailwindcss -i ./static/css/src/app.css -o ./static/css/app.css --minify",
+    "watch:css": "tailwindcss -i ./static/css/src/app.css -o ./static/css/app.css --watch",
+    "vendor": "node scripts/vendor.mjs",
+    "build": "npm run vendor && npm run build:css"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "tailwindcss": "^4.3.3",
+    "@fontsource-variable/inter": "^5.2.6",
+    "flatpickr": "^4.6.13",
+    "choices.js": "^11.1.0",
+    "vis-timeline": "^7.7.3",
+    "vis-data": "^7.1.9",
+    "chart.js": "^4.4.7"
+  }
+}

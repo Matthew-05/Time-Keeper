@@ -8,7 +8,7 @@ export class TimeKeeper {
         if (!document.getElementById('toast-container')) {
             const toastContainer = document.createElement('div');
             toastContainer.id = 'toast-container';
-            toastContainer.className = 'fixed bottom-4 right-4 flex flex-col-reverse space-y-reverse space-y-2 z-50';
+            toastContainer.className = 'fixed bottom-9 right-4 z-50 flex flex-col-reverse gap-2';
             document.body.appendChild(toastContainer);
         }
     }
@@ -43,18 +43,49 @@ export class TimeKeeper {
 
         const toastContainer = document.getElementById('toast-container');
 
-        const toastClasses = {
-            success: 'bg-green-500',
-            error: 'bg-red-500',
-            warning: 'bg-yellow-500',
-            yellow: 'bg-yellow-500', // For backward compatibility
-            red: 'bg-red-500',       // For backward compatibility
-            green: 'bg-green-500'    // For backward compatibility
+        // Colour names are legacy call sites; map them onto the semantic variants.
+        const variants = {
+            success: 'success',
+            error: 'error',
+            warning: 'warning',
+            info: 'info',
+            green: 'success',
+            red: 'error',
+            yellow: 'warning',
+            blue: 'info'
+        };
+        const variant = variants[type] || 'info';
+
+        const icons = {
+            success: '<path d="M20 6L9 17l-5-5"/>',
+            error: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>',
+            warning: '<path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+            info: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>'
+        };
+
+        // Written out in full rather than interpolated so Tailwind's scanner
+        // can actually see these class names.
+        const iconColour = {
+            success: 'text-success',
+            error: 'text-danger',
+            warning: 'text-warn',
+            info: 'text-accent'
+        };
+        const toastClass = {
+            success: 'tk-toast tk-toast-success',
+            error: 'tk-toast tk-toast-error',
+            warning: 'tk-toast tk-toast-warning',
+            info: 'tk-toast tk-toast-info'
         };
 
         const toast = document.createElement('div');
-        toast.className = `px-6 py-3 rounded-lg text-white ${toastClasses[type] || 'bg-blue-500'} shadow-lg transition-all duration-300 mb-2`;
-        toast.textContent = message;
+        toast.className = toastClass[variant];
+        toast.setAttribute('role', variant === 'error' ? 'alert' : 'status');
+        toast.innerHTML =
+            `<svg class="mt-0.5 h-4 w-4 flex-shrink-0 ${iconColour[variant]}" viewBox="0 0 24 24"`
+            + ` fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"`
+            + ` stroke-linejoin="round">${icons[variant]}</svg><span></span>`;
+        toast.lastElementChild.textContent = message;
 
         // Add the toast to the container
         toastContainer.appendChild(toast);
@@ -62,7 +93,7 @@ export class TimeKeeper {
         // Set a timeout to remove the toast
         setTimeout(() => {
             toast.style.opacity = '0';
-            toast.style.transform = 'translateX(100%)';
+            toast.style.transform = 'translateX(0.75rem)';
             setTimeout(() => {
                 if (toast.parentNode) {
                     toast.parentNode.removeChild(toast);
@@ -76,6 +107,13 @@ export class TimeKeeper {
         }, 3000);
     }
 
+
+    /** Escape a string for safe interpolation into innerHTML. */
+    escapeHtml(value) {
+        const div = document.createElement('div');
+        div.textContent = value == null ? '' : String(value);
+        return div.innerHTML;
+    }
 
     timeStringToMinutes(timeString) {
         if (!timeString) return 0;

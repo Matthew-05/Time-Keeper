@@ -4,8 +4,16 @@ from pathlib import Path
 import httpx
 import getpass
 
+# True when running from source, False inside the PyInstaller bundle.
+# Drives the dev-only niceties — most visibly the webview devtools.
+DEV_MODE = not getattr(sys, 'frozen', False)
+
+# Escape hatch: force devtools on in a packaged build by setting
+# TIMEKEEPER_DEVTOOLS=1 before launching. Useful for debugging a real install.
+DEVTOOLS = DEV_MODE or os.environ.get('TIMEKEEPER_DEVTOOLS') == '1'
+
 # Set up temp directories FIRST if running as frozen executable
-if getattr(sys, 'frozen', False):
+if not DEV_MODE:
     user_data_dir = os.path.join(Path.home(), 'AppData', 'Local', 'TimeKeeper')
     os.makedirs(user_data_dir, exist_ok=True)
     
@@ -93,7 +101,7 @@ os.makedirs(user_data_dir, exist_ok=True)
 db_path = os.path.join(user_data_dir, 'clients.db')
 
 # Initialize Flask with correct configuration
-if getattr(sys, 'frozen', False):
+if not DEV_MODE:
     # We are running in a bundle - use _MEIPASS for onefile mode
     bundle_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
     template_folder = os.path.join(bundle_dir, 'templates')
@@ -130,6 +138,11 @@ else:
 app.config['SECRET_KEY'] = 'your_secret_key_here'
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+if DEV_MODE:
+    # Don't let the webview sit on a stale app.css / base.js between edits.
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+    app.config['TEMPLATES_AUTO_RELOAD'] = True
 
 # Tell SQLAlchemy to use the user directory for instance data
 app.instance_path = user_data_dir
@@ -943,7 +956,7 @@ def create_window():
     logger.debug(f"Creating window with URL: http://127.0.0.1:{app_port}")
     
     window = webview.create_window(
-        'Time Tracker', 
+        'Time Tracker',
         f'http://127.0.0.1:{app_port}',
         width=1200,
         height=800,
@@ -951,6 +964,20 @@ def create_window():
         min_size=(800, 650)
     )
     return window
+
+
+def start_webview():
+    """Hand control to pywebview.
+
+    `debug=True` is what enables the WebView2 context menu and its "Inspect"
+    entry (plus F12), so devtools are available whenever we're running from
+    source. It also stops WebView2 caching static assets, which otherwise
+    makes CSS/JS edits look like they did nothing until a hard reload.
+    """
+    if DEVTOOLS:
+        print('Devtools enabled — right-click anywhere or press F12 to inspect.')
+
+    webview.start(debug=DEVTOOLS)
 
 
 
@@ -975,5 +1002,5 @@ if __name__ == '__main__':
 
     # Create and start webview window
     window = create_window()
-    
-    webview.start()
+
+    start_webview()

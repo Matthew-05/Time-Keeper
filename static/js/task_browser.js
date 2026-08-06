@@ -448,11 +448,8 @@ export class TaskBrowser extends TimeKeeper {
 
         tbody.innerHTML = `
             <tr>
-                <td colspan="5" class="px-6 py-8 text-center">
-                    <div class="flex items-center justify-center">
-                        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-                        <span class="ml-3 text-gray-600">Loading tasks...</span>
-                    </div>
+                <td colspan="5">
+                    <div class="tk-loading"><span class="tk-spinner"></span> Loading tasks…</div>
                 </td>
             </tr>
         `;
@@ -601,13 +598,14 @@ export class TaskBrowser extends TimeKeeper {
     }
 
     formatTimeWithDifference(fractionalHours, totalMinutes, difference) {
-        const arrow = difference > 0 ? '▲' : '▼';
-        const colorClass = difference > 0 ? 'text-green-600' : 'text-red-600';
+        const colorClass = difference > 0 ? 'text-success' : 'text-danger';
         const diffDisplay = difference !== 0
-            ? `<span class="${colorClass}">${arrow}${Math.abs(difference)}</span>`
+            ? `<span class="${colorClass} ml-1 text-xs font-medium">${difference > 0 ? '+' : '−'}${Math.abs(difference)}m</span>`
             : '';
 
-        return `${fractionalHours} hrs. (${this.minutesToHoursMinutes(totalMinutes)}) ${diffDisplay}`;
+        return `${fractionalHours}<span class="text-faint font-normal"> hrs</span>`
+            + `<span class="text-faint font-normal text-xs"> · ${this.minutesToHoursMinutes(totalMinutes)}</span>`
+            + diffDisplay;
     }
 
     renderTasks(tasks) {
@@ -626,9 +624,7 @@ export class TaskBrowser extends TimeKeeper {
                 if (clientGroups.length === 0) {
                     tbody.innerHTML = `
                         <tr>
-                            <td colspan="5" class="px-6 py-8 text-center text-gray-500">
-                                No tasks found for this date
-                            </td>
+                            <td colspan="5" class="tk-empty">No time tracked on this date.</td>
                         </tr>
                     `;
                     // Still update summary values even with no tasks
@@ -655,14 +651,20 @@ export class TaskBrowser extends TimeKeeper {
 
                     // Add the summary row
                     const summaryRow = document.createElement('tr');
-                    summaryRow.className = 'task-row hover:bg-gray-50 cursor-pointer transition-colors';
+                    summaryRow.className = 'task-row';
+                    const roundingDiff = Math.round(fractionalHours * 60 - totalMinutes);
                     summaryRow.innerHTML = `
-                        <td class="px-6 py-4 font-medium">${client.name}</td>
-                        <td class="px-6 py-4 max-w-xs truncate client-description-cell cursor-pointer" title="${this.escapeHtmlAttr(fullDescriptionText) || 'Click to copy'}" data-copy-text="${this.escapeHtmlAttr(fullDescriptionText)}">${this.escapeHtml(truncatedDescription)}</td>
-                        <td class="px-6 py-4">${totalMinutes} minutes</td>
-                        <td class="px-6 py-4 font-semibold">${fractionalHours} hrs.</td>
-                        <td class="px-6 py-4 ${fractionalHours * 60 - totalMinutes > 0 ? 'text-green-600' : 'text-red-600'}">
-                            ${fractionalHours * 60 - totalMinutes} minutes
+                        <td class="font-medium">
+                            <span class="inline-flex items-center gap-2">
+                                <svg class="tk-chevron h-3.5 w-3.5 flex-shrink-0 text-faint transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                                ${this.escapeHtml(client.name)}
+                            </span>
+                        </td>
+                        <td class="max-w-xs truncate text-muted client-description-cell tk-copyable" title="${this.escapeHtmlAttr(fullDescriptionText) || 'Click to copy'}" data-copy-text="${this.escapeHtmlAttr(fullDescriptionText)}">${this.escapeHtml(truncatedDescription)}</td>
+                        <td class="tk-num text-muted">${this.minutesToHoursMinutes(totalMinutes)}</td>
+                        <td class="tk-num font-semibold">${fractionalHours}</td>
+                        <td class="tk-num ${roundingDiff === 0 ? 'text-faint' : roundingDiff > 0 ? 'text-success' : 'text-danger'}">
+                            ${roundingDiff === 0 ? '—' : (roundingDiff > 0 ? '+' : '−') + Math.abs(roundingDiff) + 'm'}
                         </td>
                     `;
                     summaryRow.addEventListener('click', (e) => {
@@ -714,49 +716,49 @@ export class TaskBrowser extends TimeKeeper {
         detailCell.className = 'p-0';
 
         const detailTable = document.createElement('table');
-        detailTable.className = 'w-full border-t border-gray-200';
+        detailTable.className = 'tk-table tk-table-nested tk-table-hover';
         detailTable.innerHTML = `
             <thead>
-                <tr class="bg-gray-100 text-xs uppercase tracking-wider text-gray-600">
-                    <th class="px-4 py-3 text-left">Start Time</th>
-                    <th class="px-4 py-3 text-left">End Time</th>
-                    <th class="px-4 py-3 text-left">Description</th>
-                    <th class="px-4 py-3 text-left">Time Spent</th>
-                    <th class="px-4 py-3 text-left">Actions</th>
+                <tr>
+                    <th>Start</th>
+                    <th>End</th>
+                    <th>Description</th>
+                    <th class="tk-num">Duration</th>
+                    <th class="w-px">Actions</th>
                 </tr>
             </thead>
             <tbody>
                 ${client.tasks.map(task => `
-                    <tr data-task-id="${task.id}" class="${task.is_ongoing ? 'bg-yellow-50' : ''} hover:bg-gray-50">
-                        <td class="px-4 py-3">
+                    <tr data-task-id="${task.id}" class="${task.is_ongoing ? 'tk-row-ongoing' : ''}">
+                        <td class="tk-num whitespace-nowrap">
                             <span class="time-display">${this.convertTo12HourFormat(task.start_time)}</span>
-                            <input type="text" class="task-time-picker start-time hidden w-24 p-1 border rounded" value="${task.start_time}">
+                            <input type="text" class="task-time-picker start-time tk-time-input hidden" value="${task.start_time}">
                         </td>
-                        <td class="px-4 py-3">
+                        <td class="tk-num whitespace-nowrap">
                             <span class="time-display">
                                 ${task.is_ongoing ?
-                `${this.convertTo12HourFormat(task.end_time)} <span class="text-yellow-600 text-xs font-medium ml-1">(Ongoing)</span>` :
+                `${this.convertTo12HourFormat(task.end_time)} <span class="tk-badge tk-badge-warn ml-1.5">Ongoing</span>` :
                 this.convertTo12HourFormat(task.end_time)}
                             </span>
-                            <input type="text" class="task-time-picker end-time hidden w-24 p-1 border rounded" value="${task.end_time || ''}">
+                            <input type="text" class="task-time-picker end-time tk-time-input hidden" value="${task.end_time || ''}">
                         </td>
-                        <td class="px-4 py-3 max-w-xs task-description-cell cursor-pointer" title="${this.escapeHtmlAttr(task.description || '') || 'Click to copy'}" data-copy-text="${this.escapeHtmlAttr(task.description || '')}">
-                            <span class="description-display truncate block">${task.description ? this.escapeHtml(task.description) : '<span class="text-gray-400 italic">No description</span>'}</span>
-                            <textarea class="task-description-input hidden w-full p-1 border rounded text-sm" rows="2">${task.description ? this.escapeHtml(task.description) : ''}</textarea>
+                        <td class="max-w-xs task-description-cell tk-copyable" title="${this.escapeHtmlAttr(task.description || '') || 'Click to copy'}" data-copy-text="${this.escapeHtmlAttr(task.description || '')}">
+                            <span class="description-display block truncate">${task.description ? this.escapeHtml(task.description) : '<span class="italic text-faint">No description</span>'}</span>
+                            <textarea class="task-description-input tk-input hidden text-sm" rows="2">${task.description ? this.escapeHtml(task.description) : ''}</textarea>
                         </td>
-                        <td class="px-4 py-3">${this.getMinuteDifference(task.end_time, task.start_time)} minutes</td>
-                        <td class="px-4 py-3">
-                            <div class="flex space-x-2">
-                                <button class="edit-task-btn text-white px-3 py-1 rounded text-sm">Edit</button>
-                                <button class="delete-task-btn text-white px-3 py-1 rounded text-sm">Delete</button>
+                        <td class="tk-num whitespace-nowrap text-muted">${this.getMinuteDifference(task.end_time, task.start_time)}m</td>
+                        <td>
+                            <div class="flex gap-1.5">
+                                <button class="edit-task-btn tk-btn tk-btn-secondary tk-btn-sm">Edit</button>
+                                <button class="delete-task-btn tk-btn tk-btn-danger tk-btn-sm">Delete</button>
                             </div>
                             <div class="edit-controls hidden mt-2 space-y-2">
-                                <select class="client-select w-full p-1 border rounded text-sm">
+                                <select class="client-select tk-select text-sm">
                                     ${this.getClientOptions(task.client_id)}
                                 </select>
-                                <div class="flex space-x-2">
-                                    <button class="save-task-btn text-white px-3 py-1 rounded text-sm">Save</button>
-                                    <button class="cancel-task-btn text-white px-3 py-1 rounded text-sm">Cancel</button>
+                                <div class="flex gap-1.5">
+                                    <button class="save-task-btn tk-btn tk-btn-primary tk-btn-sm">Save</button>
+                                    <button class="cancel-task-btn tk-btn tk-btn-secondary tk-btn-sm">Cancel</button>
                                 </div>
                             </div>
                         </td>
@@ -786,7 +788,11 @@ export class TaskBrowser extends TimeKeeper {
 
     toggleDetailTable(clientId) {
         const detailRow = document.getElementById(`detail-row-${clientId}`);
-        detailRow.classList.toggle('hidden');
+        const expanded = detailRow.classList.toggle('hidden') === false;
+
+        // The summary row immediately precedes its detail row.
+        const chevron = detailRow.previousElementSibling?.querySelector('.tk-chevron');
+        if (chevron) chevron.style.transform = expanded ? 'rotate(90deg)' : '';
     }
 
     convertTo12HourFormat(timeString) {
@@ -864,10 +870,7 @@ export class TaskBrowser extends TimeKeeper {
     renderTimeline(tasks, selectedDate) {
         const container = document.getElementById('timeline');
         container.innerHTML = `
-        <div class="flex items-center justify-center h-[200px]">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-            <span class="ml-2 text-gray-600">Loading timeline...</span>
-        </div>
+        <div class="tk-loading h-[200px]"><span class="tk-spinner"></span> Loading timeline…</div>
     `;
 
         // Create a color map for clients

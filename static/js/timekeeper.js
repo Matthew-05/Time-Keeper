@@ -49,8 +49,8 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.recentTaskTimeValue = document.getElementById('recent-task-time-value');
 
         this.saveIndicator = document.createElement('span');
-        this.saveIndicator.innerHTML = '<svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
-        this.saveIndicator.className = 'absolute right-3 top-1/2 transform -translate-y-1/2 hidden transition-opacity duration-300';
+        this.saveIndicator.innerHTML = '<svg class="h-4 w-4 text-success" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"></path></svg>';
+        this.saveIndicator.className = 'pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 transition-opacity duration-300';
         this.saveIndicator.id = 'description-save-indicator';
 
         // Make the description container relative for absolute positioning of the indicator
@@ -188,7 +188,7 @@ export class TimeKeeperIndex extends TimeKeeper {
             const formattedMinutes = minutes.toString().padStart(2, '0');
             const timeString = `${formattedHours}:${formattedMinutes} ${ampm}`;
 
-            document.getElementById('lowestTimeAllowed').innerHTML = `Min. time: ${timeString}`;
+            document.getElementById('lowestTimeAllowed').textContent = `Earliest allowed: ${timeString}`;
             return response.mostRecentEndTime;
         }
         return null;
@@ -472,7 +472,7 @@ export class TimeKeeperIndex extends TimeKeeper {
             this.clearInputs();
             if (this.autocomplete) this.autocomplete.removeActiveItems();
             this.completeButton.style.display = 'none';
-            this.startButton.style.display = 'block';
+            this.startButton.style.display = 'inline-flex';
 
             // Hide the task start time display
             this.taskStartTimeDisplay.classList.add('hidden');
@@ -697,8 +697,8 @@ export class TimeKeeperIndex extends TimeKeeper {
             this.showTaskCompletionForm();
         } else {
             // When day is started but no tasks are in progress, show both start task and end day options
-            this.startButton.style.display = 'block';
-            this.endDayButton.style.display = 'block';
+            this.startButton.style.display = 'inline-flex';
+            this.endDayButton.style.display = 'inline-flex';
             this.showStartTaskForm();
         }
     }
@@ -723,7 +723,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.hideInputFields();
 
         // Hide the client input container first (works even before autocomplete is initialized)
-        const clientContainer = this.clientInput.closest('.space-y-3');
+        const clientContainer = document.getElementById('client-field');
         if (clientContainer) clientContainer.style.display = 'none';
 
         // Hide the client selector specifically (if autocomplete is already initialized)
@@ -774,7 +774,7 @@ export class TimeKeeperIndex extends TimeKeeper {
 
     showStartTaskForm() {
         // Show the client input container
-        const clientContainer = this.clientInput.closest('.space-y-3');
+        const clientContainer = document.getElementById('client-field');
         if (clientContainer) clientContainer.style.display = 'block';
         this.clientInput.style.display = 'block';
 
@@ -788,7 +788,7 @@ export class TimeKeeperIndex extends TimeKeeper {
 
     hideInputFields() {
         // Hide the client input container entirely, not just the input
-        const clientContainer = this.clientInput.closest('.space-y-3');
+        const clientContainer = document.getElementById('client-field');
         if (clientContainer) clientContainer.style.display = 'none';
 
         // Hide other input
@@ -946,7 +946,7 @@ export class TimeKeeperIndex extends TimeKeeper {
                 this.showStartTaskForm();
 
                 // Make sure the client selector is visible
-                const clientContainer = this.clientInput.closest('.space-y-3');
+                const clientContainer = document.getElementById('client-field');
                 if (clientContainer) clientContainer.style.display = 'block';
 
                 // Show the time picker
