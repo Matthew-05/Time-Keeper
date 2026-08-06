@@ -93,7 +93,7 @@ class ReminderService:
 
         self._anchor = None  # Monotonic time of the last activity or fire.
         self._snooze_until = None
-        # The task "until next task" was pressed on. Held until probe() reports
+        # The task "till next" was pressed on. Held until probe() reports
         # a different one — see the module docstring.
         self._held_task_id = None
         self._eligible = False
@@ -248,7 +248,7 @@ class ReminderService:
         # these stay terse. Three is comfortable; five is the hard limit.
         actions = [
             (f'Snooze {snooze_minutes} min', 'timekeeper://snooze'),
-            ('Until next task', 'timekeeper://snooze-task'),
+            ('Snooze till next task', 'timekeeper://snooze-task'),
             ('Open Time Keeper', 'timekeeper://open'),
         ]
 
