@@ -873,6 +873,74 @@
     border-left-color: var(--accent);
   }
 
+  /* ---- Modal ---- */
+
+  /* Backdrop and panel are separate elements rather than a <dialog>: WebView2
+     supports ::backdrop, but styling it can't use our CSS variables through
+     Tailwind's @apply, and the app needs one modal that themes with everything
+     else. Visibility is toggled with `hidden` from JS. */
+  .tk-modal-backdrop {
+    align-items: center;
+    background-color: rgb(15 23 42 / 0.45);
+    display: flex;
+    inset: 0;
+    justify-content: center;
+    padding: 1.5rem;
+    position: fixed;
+    z-index: 60;
+  }
+
+  .tk-modal {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-pop);
+    display: flex;
+    flex-direction: column;
+    max-height: min(32rem, 100%);
+    max-width: 28rem;
+    width: 100%;
+  }
+
+  .tk-modal-header {
+    @apply flex items-center justify-between gap-3 border-b border-border px-5 py-3.5;
+  }
+
+  .tk-modal-body {
+    @apply flex-1 overflow-y-auto px-5 py-4;
+  }
+
+  .tk-modal-footer {
+    @apply border-t border-border bg-surface-2 px-5 py-3;
+  }
+
+  /* ---- Works ---- */
+
+  .tk-work-row {
+    @apply flex items-center gap-2 rounded-lg border border-transparent px-2 py-1.5;
+  }
+
+  .tk-work-row:hover {
+    background-color: var(--surface-2);
+    border-color: var(--border);
+  }
+
+  .tk-work-text {
+    @apply min-w-0 flex-1 break-words text-sm;
+  }
+
+  /* The per-row buttons only appear on hover/focus so a long list reads as
+     text rather than as a wall of controls. focus-within keeps them reachable
+     by keyboard, where there is no hover to trigger. */
+  .tk-work-actions {
+    @apply flex flex-shrink-0 gap-1 opacity-0 transition-opacity;
+  }
+
+  .tk-work-row:hover .tk-work-actions,
+  .tk-work-row:focus-within .tk-work-actions {
+    @apply opacity-100;
+  }
+
   /* ---- Loading ---- */
 
   .tk-spinner {

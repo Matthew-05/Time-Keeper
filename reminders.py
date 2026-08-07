@@ -1,14 +1,14 @@
 """The "describe what you're working on" reminder.
 
-A single background thread that watches one number: how long it's been since
-the active task's description was last saved. When that passes the configured
-interval it raises a Windows toast, and keeps doing so every interval until you
-either update the description, finish the task, or snooze.
+A single background thread that watches one number: how long it's been since a
+work was last recorded against the running task's client. When that passes the
+configured interval it raises a Windows toast, and keeps doing so every interval
+until you either add a work, finish the task, or snooze.
 
 Three decisions worth spelling out:
 
 **The clock measures inactivity, not wall time.** The anchor is reset by
-``mark_activity`` — called whenever a description is written — so a reminder
+``mark_activity`` — called on any works change for the running client — so a reminder
 only ever means "you haven't touched this in a while." Typing something at
 minute 29 buys you another full interval rather than a notification 60 seconds
 later, which is what a fixed cadence would do and is exactly the behaviour that
@@ -47,8 +47,8 @@ logger = logging.getLogger('timekeeper')
 TICK_SECONDS = 5
 
 TITLE = 'What are you working on?'
-BODY = "Time Keeper hasn't seen a description for your current task in {elapsed}."
-BODY_NEVER = "Your current task still doesn't have a description."
+BODY = "Time Keeper hasn't seen any works for your current client in {elapsed}."
+BODY_NEVER = "Your current client still has no works recorded today."
 
 
 def _humanise(seconds):
@@ -122,7 +122,7 @@ class ReminderService:
     # -- events from the app ----------------------------------------------
 
     def mark_activity(self):
-        """A description was saved (or a task started). Restart the countdown."""
+        """A work changed (or a task started). Restart the countdown."""
         with self._lock:
             self._anchor = self._clock()
             self._snooze_until = None

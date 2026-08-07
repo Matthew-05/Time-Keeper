@@ -25,13 +25,12 @@
           <select id="autocomplete-input"></select>
         </div>
 
-        <!-- Description (only shown while a task is running) -->
-        <div id="description-input-container" class="hidden">
-          <label class="tk-label" for="description-input">Description</label>
-          <!-- The save-confirmation tick is appended to this wrapper by timekeeper.js -->
-          <div class="relative">
-            <input type="text" id="description-input" class="tk-input pr-10" placeholder="Describe what you worked on..." />
-          </div>
+        <!-- Works (only shown while a task is running). Scoped to the running
+             task's client for today, so it persists across separate blocks of
+             time spent on the same client. -->
+        <div id="works-container" class="hidden">
+          <label class="tk-label">Works</label>
+          <div id="works-list"></div>
         </div>
 
         <!-- Time -->

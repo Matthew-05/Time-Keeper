@@ -111,7 +111,21 @@ export class TimeKeeper {
             try {
                 const response = await fetch(endpoint, { ...options, signal: controller.signal });
                 if (!response.ok) {
-                    throw new Error(`${response.status} ${response.statusText} — ${endpoint}`);
+                    // Prefer the server's own message. Routes reject with
+                    // {'error': '...'} and that text is written for the user —
+                    // "That work is already on the list" beats "409 CONFLICT".
+                    let serverMessage = null;
+                    try {
+                        const body = await response.json();
+                        if (body && typeof body.error === 'string') serverMessage = body.error;
+                    } catch {
+                        // Not JSON (a 500 HTML page, say) — fall back to the status.
+                    }
+                    const error = new Error(
+                        serverMessage || `${response.status} ${response.statusText} — ${endpoint}`
+                    );
+                    error.status = response.status;
+                    throw error;
                 }
                 return await response.json();
             } catch (error) {
@@ -121,6 +135,11 @@ export class TimeKeeper {
 
                 // Don't retry a request the caller deliberately cancelled.
                 if (options.signal?.aborted) throw lastError;
+
+                // Nor a 4xx: the server understood and refused. Retrying a
+                // bad parameter or a missing row 40 times just delays the
+                // error by a minute and hammers the app while it waits.
+                if (lastError.status >= 400 && lastError.status < 500) break;
 
                 if (attempt < retries) {
                     // Fast at first so a blip is invisible, then back off to a

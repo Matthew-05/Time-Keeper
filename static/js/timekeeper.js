@@ -1,4 +1,5 @@
 import { TimeKeeper, ready } from './base.js';
+import { WorksList } from './works.js';
 
 export class TimeKeeperIndex extends TimeKeeper {
     constructor() {
@@ -6,8 +7,8 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.initializeElements();
         this.initializeTimePicker();
         this.bindEvents();
-        this.descriptionDebounceTimer = null;
         this.currentTaskClient = null;
+        this.currentTaskClientId = null;
 
     }
 
@@ -34,8 +35,7 @@ export class TimeKeeperIndex extends TimeKeeper {
 
     initializeElements() {
         this.clientInput = document.getElementById('autocomplete-input');
-        this.descriptionInput = document.getElementById('description-input');
-        this.descriptionContainer = document.getElementById('description-input-container');
+        this.worksContainer = document.getElementById('works-container');
         this.actionButton = document.getElementById('action-button');
         this.completeButton = document.getElementById('complete-button');
         this.startButton = document.getElementById('start-button');
@@ -48,20 +48,49 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.recentTaskEndTime = document.getElementById('recent-task-end-time');
         this.recentTaskTimeValue = document.getElementById('recent-task-time-value');
 
-        this.saveIndicator = document.createElement('span');
-        this.saveIndicator.innerHTML = '<svg class="h-4 w-4 text-success" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"></path></svg>';
-        this.saveIndicator.className = 'pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 transition-opacity duration-300';
-        this.saveIndicator.id = 'description-save-indicator';
+        // Works replace the old description box. There's no save button and no
+        // debounce because each work is its own row — adding one is the save.
+        this.works = new WorksList({
+            container: document.getElementById('works-list'),
+            api: this,
+            date: this.todayISO(),
+            clientId: null,
+            autoFocus: true,
+        });
+    }
 
-        // Make the description container relative for absolute positioning of the indicator
-        if (this.descriptionContainer) {
-            this.descriptionContainer.style.position = 'relative';
 
-            // Find the input wrapper div and append the save indicator
-            const inputWrapper = this.descriptionContainer.querySelector('input').parentElement;
-            inputWrapper.appendChild(this.saveIndicator);
+    /** Today as YYYY-MM-DD in local time — the key half of a work's identity. */
+    todayISO() {
+        const now = new Date();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        return `${now.getFullYear()}-${month}-${day}`;
+    }
+
+
+    /** Show or hide the works list, pointing it at a client when shown. */
+    setWorksVisible(visible, clientId = null) {
+        if (!this.worksContainer) return;
+
+        this.worksContainer.style.display = visible ? 'block' : 'none';
+        this.worksContainer.classList.toggle('hidden', !visible);
+
+        if (!visible) return;
+
+        this.currentTaskClientId = clientId ?? this.currentTaskClientId;
+
+        if (this.currentTaskClientId == null) {
+            // Shown before the running task has been fetched — checkDayStatus
+            // reveals the form, checkUnfinishedTasks supplies the client a
+            // moment later. Hold a loading state rather than flashing "Nothing
+            // recorded yet" at someone whose list isn't empty.
+            this.works.loading = true;
+            this.works.render();
+            return;
         }
 
+        this.works.setTarget(this.todayISO(), this.currentTaskClientId);
     }
 
 
@@ -85,58 +114,9 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.completeButton.addEventListener('click', () => this.completeTask());
         this.reopenDayButton.addEventListener('click', () => this.handleReopenDay());
         this.currentTimeButton.addEventListener('click', () => this.setCurrentTime());
-        this.descriptionInput.addEventListener('input', () => this.handleDescriptionChange());
         this.recentTaskEndTime.addEventListener('click', () => this.useRecentTaskEndTime());
 
     }
-
-    handleDescriptionChange() {
-        // Hide the checkmark when user starts typing
-        this.saveIndicator.classList.add('hidden');
-
-        // Clear any existing timer
-        if (this.descriptionDebounceTimer) {
-            clearTimeout(this.descriptionDebounceTimer);
-        }
-
-        // Set a new timer for 1 second
-        this.descriptionDebounceTimer = setTimeout(() => {
-            this.updateTaskDescription(this.descriptionInput.value);
-        }, 300);
-    }
-
-
-    async updateTaskDescription(description) {
-        // First check if there's an active task
-        const tasks = await this.fetchFromAPI('/unfinished_tasks');
-        if (tasks.length === 0) {
-            return; // Exit early if no task is running
-        }
-
-        try {
-            const response = await this.fetchFromAPI('/update_task_description', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    description: description
-                })
-            });
-
-            if (response.success) {
-                // Show the checkmark
-                this.saveIndicator.classList.remove('hidden');
-
-                // Hide the checkmark after 3 seconds
-                setTimeout(() => {
-                    this.saveIndicator.classList.add('hidden');
-                }, 3000);
-            }
-        } catch (error) {
-            console.error('Failed to update description:', error);
-        }
-    }
-
-
 
 
     setCurrentTime() {
@@ -212,17 +192,14 @@ export class TimeKeeperIndex extends TimeKeeper {
         if (tasks.length > 0) {
             const currentTask = tasks[0];
 
-            // Show the description input container for task completion
-            document.getElementById('description-input-container').style.display = 'block';
-
             this.showTaskCompletionForm(currentTask);
             this.completeButton.dataset.taskId = currentTask.id;
-            
+
             // Hide recent task end time when a task is in progress
             this.recentTaskEndTime.classList.add('hidden');
         } else {
-            // Hide the description input container for starting a new task
-            document.getElementById('description-input-container').style.display = 'none';
+            // Nothing running, so there's no client to record works against.
+            this.setWorksVisible(false);
 
             this.showStartTaskForm();
             
@@ -434,8 +411,8 @@ export class TimeKeeperIndex extends TimeKeeper {
 
     clearInputs() {
         this.clientInput.value = '';
-        this.descriptionInput.value = '';
         this.currentTaskClient = null;
+        this.currentTaskClientId = null;
         // Clear the time picker
         this.timePickerInstance.clear();
     }
@@ -462,7 +439,6 @@ export class TimeKeeperIndex extends TimeKeeper {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 client: this.clientInput.value,
-                description: this.descriptionInput.value,
                 endTime: this.timePicker.value
             })
         });
@@ -637,6 +613,11 @@ export class TimeKeeperIndex extends TimeKeeper {
 
         if (response.success) {
             this.showToast(`Client updated to: ${newClientName}`, 'green');
+            // Works belong to the client, so the list follows the change —
+            // but only now that it's saved, not on the dropdown event itself.
+            // Anything already recorded stays with the client it was recorded
+            // against rather than moving across.
+            this.setWorksVisible(true, response.client_id);
         }
     }
 
@@ -709,7 +690,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.hideInputFields();
 
         // Make sure task-related elements are hidden
-        document.getElementById('description-input-container').style.display = 'none';
+        this.setWorksVisible(false);
 
         // Show the time picker for selecting start time
         document.getElementById('timepicker-container').style.display = 'block';
@@ -743,22 +724,17 @@ export class TimeKeeperIndex extends TimeKeeper {
 
     showTaskCompletionForm(task) {
         // Display the form fields
-        this.descriptionInput.style.display = 'block';
         this.clientInput.style.display = 'block';
-
-        // Make sure type and description containers are visible
-        document.getElementById('description-input-container').style.display = 'block';
 
         // Always ensure client is set if available
         if (task && task.client) {
             this.setClientValue(task.client);
         }
 
-        // Pre-populate the description (blank it out when the task has none,
-        // so a stale value from a previous task can't linger).
-        if (task) {
-            this.descriptionInput.value = task.description || '';
-        }
+        // Point the works list at the running task's client. Called without a
+        // task (handleOpenDayState does that), the previously known client id
+        // stands — it's the same running task either way.
+        this.setWorksVisible(true, task ? task.client_id : null);
 
         // Display the task start time if available
         if (task && task.start_time) {
@@ -778,8 +754,8 @@ export class TimeKeeperIndex extends TimeKeeper {
         if (clientContainer) clientContainer.style.display = 'block';
         this.clientInput.style.display = 'block';
 
-        // Hide the description input container since we're starting a new task
-        document.getElementById('description-input-container').style.display = 'none';
+        // No running task means no client to record works against.
+        this.setWorksVisible(false);
 
         // Hide the task start time display
         this.taskStartTimeDisplay.classList.add('hidden');
@@ -792,7 +768,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         if (clientContainer) clientContainer.style.display = 'none';
 
         // Hide other input
-        document.getElementById('description-input-container').style.display = 'none';
+        this.setWorksVisible(false);
     }
 
     updateButtonVisibility(state) {

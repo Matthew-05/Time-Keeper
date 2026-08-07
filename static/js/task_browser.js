@@ -1,10 +1,12 @@
 import { TimeKeeper, ready, clientColor } from './base.js';
+import { WorksList, fetchWorks, joinWorks } from './works.js';
 
 export class TaskBrowser extends TimeKeeper {
     constructor() {
         super();
         this.isLoading = false;
         this.initializeElements();
+        this.initializeWorksModal();
         this.initializeTimePicker();
         this.initializeDayTimePickers();
         // Floating this promise un-caught meant any failure during startup
@@ -215,21 +217,6 @@ export class TaskBrowser extends TimeKeeper {
 
     initializeTaskEditing() {
         document.addEventListener('click', e => {
-            // Don't intercept clicks inside the description textarea while editing
-            if (e.target.classList.contains('task-description-input')) {
-                return;
-            }
-
-            // Click to copy description (unfolded row or summary description cell)
-            const descCell = e.target.closest('.task-description-cell');
-            if (descCell) {
-                e.preventDefault();
-                e.stopPropagation();
-                const text = descCell.dataset.copyText || '';
-                this.copyToClipboard(text);
-                return;
-            }
-
             // Handle delete button clicks separately
             if (e.target.classList.contains('delete-task-btn')) {
                 if (confirm('Are you sure you want to delete this task?')) {
@@ -247,14 +234,94 @@ export class TaskBrowser extends TimeKeeper {
                 this.handleTaskUpdate(e.target.closest('tr'));
             }
             if (e.target.classList.contains('cancel-task-btn')) {
-                const row = e.target.closest('tr');
-                const descCell = row.querySelector('.task-description-cell');
-                const input = row.querySelector('.task-description-input');
-                if (descCell && input) {
-                    input.value = descCell.dataset.copyText || '';
-                }
-                this.disableEditMode(row);
+                this.disableEditMode(e.target.closest('tr'));
             }
+        });
+    }
+
+    // ---- Works -------------------------------------------------------------
+
+    initializeWorksModal() {
+        this.worksModal = document.getElementById('works-modal');
+        this.worksModalTitle = document.getElementById('works-modal-title');
+        this.worksModalSubtitle = document.getElementById('works-modal-subtitle');
+        if (!this.worksModal) return;
+
+        this.worksModalClient = null;
+        this.worksList = new WorksList({
+            container: document.getElementById('works-modal-list'),
+            api: this,
+        });
+
+        document.getElementById('works-modal-close')
+            .addEventListener('click', () => this.closeWorksModal());
+        document.getElementById('works-modal-done')
+            .addEventListener('click', () => this.closeWorksModal());
+        document.getElementById('works-modal-copy')
+            .addEventListener('click', () => this.copyWorks(this.worksModalClient));
+
+        // Click the backdrop, not the panel, to dismiss.
+        this.worksModal.addEventListener('click', (e) => {
+            if (e.target === this.worksModal) this.closeWorksModal();
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !this.worksModal.classList.contains('hidden')) {
+                this.closeWorksModal();
+            }
+        });
+    }
+
+    async openWorksModal(client) {
+        if (!this.worksModal || client.id == null) return;
+
+        const dateStr = this.selectedDate.value;
+        this.worksModalClient = client;
+        this.worksModalTitle.textContent = client.name;
+        this.worksModalSubtitle.textContent = this.formatDateLong(dateStr);
+
+        this.worksModal.classList.remove('hidden');
+        // force: the same client can be reopened after an edit elsewhere, and
+        // setTarget would otherwise treat an unchanged target as a no-op and
+        // show a stale list.
+        await this.worksList.setTarget(dateStr, client.id, { force: true });
+
+        const input = this.worksModal.querySelector('.works-add-input');
+        if (input) input.focus();
+    }
+
+    closeWorksModal() {
+        if (!this.worksModal) return;
+        this.worksModal.classList.add('hidden');
+        this.worksModalClient = null;
+    }
+
+    /** Copy one client's works for the browsed day, comma-separated. */
+    async copyWorks(client) {
+        if (!client || client.id == null) return;
+
+        try {
+            const works = await fetchWorks(this, this.selectedDate.value, client.id);
+            if (!works.length) {
+                this.showToast(`No works recorded for ${client.name}`, 'warning');
+                return;
+            }
+            await this.copyToClipboard(joinWorks(works));
+        } catch (error) {
+            console.error('Failed to copy works:', error);
+            this.showToast('Could not load works to copy', 'error');
+        }
+    }
+
+    formatDateLong(dateStr) {
+        if (!dateStr) return '';
+        // Parsed as local parts rather than via Date(dateStr), which reads a
+        // bare YYYY-MM-DD as UTC and can render as the previous day.
+        const [year, month, day] = dateStr.split('-').map(Number);
+        return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+            weekday: 'long',
+            month: 'long',
+            day: 'numeric',
         });
     }
 
@@ -274,8 +341,6 @@ export class TaskBrowser extends TimeKeeper {
     enableEditMode(row) {
         row.querySelectorAll('.time-display').forEach(span => span.classList.add('hidden'));
         row.querySelectorAll('.task-time-picker').forEach(input => input.classList.remove('hidden'));
-        row.querySelectorAll('.description-display').forEach(span => span.classList.add('hidden'));
-        row.querySelectorAll('.task-description-input').forEach(input => input.classList.remove('hidden'));
         row.querySelector('.edit-task-btn').classList.add('hidden');
         row.querySelector('.edit-controls').classList.remove('hidden');
     }
@@ -283,8 +348,6 @@ export class TaskBrowser extends TimeKeeper {
     disableEditMode(row) {
         row.querySelectorAll('.time-display').forEach(span => span.classList.remove('hidden'));
         row.querySelectorAll('.task-time-picker').forEach(input => input.classList.add('hidden'));
-        row.querySelectorAll('.description-display').forEach(span => span.classList.remove('hidden'));
-        row.querySelectorAll('.task-description-input').forEach(input => input.classList.add('hidden'));
         row.querySelector('.edit-task-btn').classList.remove('hidden');
         row.querySelector('.edit-controls').classList.add('hidden');
     }
@@ -295,7 +358,6 @@ export class TaskBrowser extends TimeKeeper {
         const endTime = row.querySelector('.end-time').value;
         const rawClientId = row.querySelector('.client-select').value;
         const clientId = parseInt(rawClientId, 10);
-        const description = row.querySelector('.task-description-input').value;
         if (rawClientId === '' || Number.isNaN(clientId)) {
             this.showToast('Please select a client', 'error');
             return;
@@ -308,8 +370,7 @@ export class TaskBrowser extends TimeKeeper {
                 body: JSON.stringify({
                     start_time: startTime,
                     end_time: endTime,
-                    client_id: clientId,
-                    description: description
+                    client_id: clientId
                 })
             });
 
@@ -675,17 +736,6 @@ export class TaskBrowser extends TimeKeeper {
             const fractionalHours = this.totalTimeSpentToFractionalHours(totalMinutes);
             totalFractionalHours += fractionalHours;
 
-            // Combined descriptions for this client's tasks (for copy + display)
-            const fullDescriptions = client.tasks
-                .map(t => (t.description || '').trim())
-                .filter(Boolean);
-            const fullDescriptionText = fullDescriptions.length
-                ? fullDescriptions.join(', ')
-                : '';
-            const truncatedDescription = fullDescriptionText.length > 60
-                ? fullDescriptionText.slice(0, 60) + '…'
-                : (fullDescriptionText || '—');
-
             // Add the summary row
             const summaryRow = document.createElement('tr');
             summaryRow.className = 'task-row';
@@ -697,7 +747,14 @@ export class TaskBrowser extends TimeKeeper {
                         ${this.escapeHtml(client.name)}
                     </span>
                 </td>
-                <td class="max-w-xs truncate text-muted client-description-cell tk-copyable" title="${this.escapeHtmlAttr(fullDescriptionText) || 'Click to copy'}" data-copy-text="${this.escapeHtmlAttr(fullDescriptionText)}">${this.escapeHtml(truncatedDescription)}</td>
+                <td>
+                    ${client.id == null
+                ? '<span class="text-faint">—</span>'
+                : `<div class="tk-inline-actions">
+                            <button type="button" class="works-open-btn tk-btn tk-btn-secondary tk-btn-sm">Works</button>
+                            <button type="button" class="works-copy-btn tk-btn tk-btn-secondary tk-btn-sm">Copy</button>
+                        </div>`}
+                </td>
                 <td class="tk-num text-muted">${this.minutesToHoursMinutes(totalMinutes)}</td>
                 <td class="tk-num font-semibold">${fractionalHours}</td>
                 <td class="tk-num ${roundingDiff === 0 ? 'text-faint' : roundingDiff > 0 ? 'text-success' : 'text-danger'}">
@@ -705,10 +762,16 @@ export class TaskBrowser extends TimeKeeper {
                 </td>
             `;
             summaryRow.addEventListener('click', (e) => {
-                if (e.target.closest('.client-description-cell')) {
+                // The works buttons sit inside the row, which is itself the
+                // fold/unfold target — so they have to swallow their own clicks.
+                if (e.target.closest('.works-open-btn')) {
                     e.stopPropagation();
-                    const copyText = e.target.closest('.client-description-cell').dataset.copyText || '';
-                    if (copyText) this.copyToClipboard(copyText);
+                    this.openWorksModal(client);
+                    return;
+                }
+                if (e.target.closest('.works-copy-btn')) {
+                    e.stopPropagation();
+                    this.copyWorks(client);
                     return;
                 }
                 this.toggleDetailTable(client.detailKey);
@@ -758,7 +821,6 @@ export class TaskBrowser extends TimeKeeper {
                 <tr>
                     <th>Start</th>
                     <th>End</th>
-                    <th>Description</th>
                     <th class="tk-num">Duration</th>
                     <th class="w-px">Actions</th>
                 </tr>
@@ -777,10 +839,6 @@ export class TaskBrowser extends TimeKeeper {
                 this.convertTo12HourFormat(task.end_time)}
                             </span>
                             <input type="text" class="task-time-picker end-time tk-time-input hidden" value="${task.end_time || ''}">
-                        </td>
-                        <td class="max-w-xs task-description-cell tk-copyable" title="${this.escapeHtmlAttr(task.description || '') || 'Click to copy'}" data-copy-text="${this.escapeHtmlAttr(task.description || '')}">
-                            <span class="description-display block truncate">${task.description ? this.escapeHtml(task.description) : '<span class="italic text-faint">No description</span>'}</span>
-                            <textarea class="task-description-input tk-input hidden text-sm" rows="2">${task.description ? this.escapeHtml(task.description) : ''}</textarea>
                         </td>
                         <td class="tk-num whitespace-nowrap text-muted">${this.getMinuteDifference(task.end_time, task.start_time)}m</td>
                         <td>

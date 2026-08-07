@@ -42,7 +42,7 @@ if not DEV_MODE:
     os.environ['WEBVIEW2_USER_DATA_FOLDER'] = webview_dir
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for
-from models import db, Client, Task_Item, TimeTracking, BreakTracking
+from models import db, Client, Task_Item, TimeTracking, BreakTracking, Work
 import settings as user_settings
 import notifications
 import ipc
@@ -423,9 +423,70 @@ def _ensure_task_client_id_nullable():
         conn.execute(text(f'ALTER TABLE {tmp} RENAME TO {table}'))
 
 
+def _backfill_works_from_descriptions():
+    """Seed `work` from the superseded `task__item.description` column.
+
+    Only ever called when the `work` table did not exist a moment ago, so it
+    runs exactly once per database. That matters: re-running it every launch
+    would resurrect works the user had deliberately deleted.
+
+    Kept in step with the identical backfill in the Alembic revision
+    e5a9c7d1f2b3 — whichever path creates the table does the backfill, and the
+    other then finds the table already present and does nothing.
+    """
+    rows = db.session.execute(
+        text(
+            """
+            SELECT date, client_id, description, start_time
+            FROM task__item
+            WHERE client_id IS NOT NULL
+              AND description IS NOT NULL
+              AND TRIM(description) != ''
+            ORDER BY date, client_id, start_time
+            """
+        )
+    ).fetchall()
+
+    seen = set()
+    payload = []
+    for row in rows:
+        work_text = (row[2] or '').strip()
+        if not work_text:
+            continue
+        key = (str(row[0]), row[1], work_text.casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        payload.append(
+            {
+                'date': row[0],
+                'client_id': row[1],
+                'text': work_text,
+                'created_at': f'{row[0]} 00:00:00.000000',
+            }
+        )
+
+    if not payload:
+        return
+
+    db.session.execute(
+        text(
+            'INSERT INTO work (date, client_id, text, created_at) '
+            'VALUES (:date, :client_id, :text, :created_at)'
+        ),
+        payload,
+    )
+    db.session.commit()
+    print(f'Backfilled {len(payload)} work(s) from task descriptions')
+
+
 with app.app_context():
+    # Has to be sampled *before* create_all, which is what creates the table.
+    _work_table_is_new = not inspect(db.engine).has_table(Work.__table__.name)
     db.create_all()
     _ensure_task_client_id_nullable()
+    if _work_table_is_new:
+        _backfill_works_from_descriptions()
 
 
 #: Sorts above every real timestamp, so an in-progress task ranks as "right now".
@@ -507,8 +568,10 @@ def update_task_client():
     if task:
         task.client_id = client.id
         db.session.commit()
-        return jsonify({'success': True}), 200
-    
+        # The id comes back so the dashboard can re-point its works list at the
+        # new client without a second round trip to look the name up.
+        return jsonify({'success': True, 'client_id': client.id}), 200
+
     return jsonify({'error': 'No active task found'}), 404
 
 @app.route('/clients', methods=['POST'])
@@ -545,6 +608,12 @@ def delete_client(id):
         {Task_Item.client_id: None},
         synchronize_session=False,
     )
+    # Works go with the client rather than being orphaned like tasks: tracked
+    # time still means something under a "removed client" heading, a list of
+    # what you did for a client that no longer exists does not. Deleted here by
+    # hand because SQLite runs with foreign_keys OFF, which makes the model's
+    # ondelete='CASCADE' documentation rather than enforcement.
+    Work.query.filter(Work.client_id == id).delete(synchronize_session=False)
     db.session.delete(client)
     db.session.commit()
     return jsonify({'success': True})
@@ -645,7 +714,10 @@ def get_unfinished_tasks():
     tasks_data = [{
         'id': task.id,
         'client': task_client_display_name(task),
-        'description': task.description,
+        # client_id, not just the display name: the dashboard's works list is
+        # keyed on it, and the name round-trip can't distinguish a real client
+        # called "Removed client" from a deleted one.
+        'client_id': task.client_id,
         'start_time': task.start_time.strftime('%H:%M:%S')
     } for task in unfinished_tasks]
     return jsonify(tasks_data)
@@ -683,7 +755,6 @@ def complete_task():
     data = request.json
     client_name = data.get('client')
     end_time = data.get('endTime')
-    description = data.get('description')
     type = data.get('type')
     print("submitted end time", end_time)
     datetime_obj = datetime.strptime(end_time, '%I:%M %p').time()
@@ -706,7 +777,6 @@ def complete_task():
         print("updating new entry")
         print("time to save", datetime_obj)
         existing_entry.client_id = client.id
-        existing_entry.description = description
         existing_entry.type = type
         existing_entry.end_time = datetime_obj
         db.session.commit()
@@ -750,8 +820,8 @@ def add_unfinished_task():
     print(new_task)
     db.session.add(new_task)
     db.session.commit()
-    # A new task starts with no description, so the countdown starts here: you
-    # get a full interval to write one before the first nudge.
+    # A new task starts with nothing recorded against it, so the countdown
+    # starts here: you get a full interval to add a work before the first nudge.
     reminder_service.mark_activity()
     return jsonify({'success': True}), 201
 
@@ -1182,39 +1252,138 @@ def update_task(task_id):
         return jsonify({'error': 'Client not found'}), 404
     task.client_id = new_client_id
 
-    if 'description' in data:
-        description = data.get('description')
-        task.description = description.strip() if isinstance(description, str) else description
-        if task.description == '':
-            task.description = None
-
     db.session.commit()
-    # Editing a description in the task browser counts as activity too, even
-    # though this route is mostly used on already-finished tasks. If nothing is
-    # running the timer is dormant and the reset is harmless.
-    if 'description' in data:
-        reminder_service.mark_activity()
     return jsonify({'success': True})
 
-@app.route('/update_task_description', methods=['POST'])
-def update_task_description():
-    data = request.json
-    description = data.get('description')
-    
-    # Find the most recent unfinished task
-    unfinished_task = Task_Item.query.filter_by(end_time=None).order_by(Task_Item.id.desc()).first()
-    
-    if unfinished_task:
-        unfinished_task.description = description
-        db.session.commit()
-        # This is the debounced save behind the description box on the dashboard
-        # — the single clearest signal that the user is on top of their notes.
-        # It restarts the reminder countdown.
+def _work_json(work):
+    return {
+        'id': work.id,
+        'date': work.date.strftime('%Y-%m-%d'),
+        'client_id': work.client_id,
+        'text': work.text,
+    }
+
+
+def _mark_activity_if_current_client(client_id):
+    """Restart the reminder countdown if this client is the one being tracked.
+
+    Any works CRUD counts as activity — writing, correcting and deleting are all
+    evidence that the user is on top of their notes. It's scoped to the running
+    task's client so that tidying up *yesterday's* Acme list in the task browser
+    doesn't silence a nudge about the Globex task running right now.
+
+    Note there is deliberately no suppression rule: having works already doesn't
+    mute the reminder, exactly as a filled-in description never did. Only the
+    countdown moves.
+    """
+    today = date.today()
+    active = Task_Item.query.filter_by(date=today, end_time=None).first()
+    if active and active.client_id == client_id:
         reminder_service.mark_activity()
-        return jsonify({'success': True}), 200
-    else:
-        return jsonify({'success': False, 'error': 'No unfinished task found'}), 404
-    
+
+
+@app.route('/api/works', methods=['GET'])
+def get_works():
+    """Works for one client on one day, oldest first.
+
+    id is the tiebreaker rather than created_at alone because the backfill gives
+    every migrated row the same synthetic midnight timestamp; insertion order is
+    the real ordering and id preserves it.
+    """
+    date_str = request.args.get('date')
+    client_id = request.args.get('client_id')
+
+    if not date_str or not client_id:
+        return jsonify({'error': 'date and client_id are required'}), 400
+
+    try:
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+        client_id = int(client_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Invalid date or client_id'}), 400
+
+    works = (
+        Work.query.filter_by(date=date_obj, client_id=client_id)
+        .order_by(Work.created_at, Work.id)
+        .all()
+    )
+    return jsonify([_work_json(w) for w in works])
+
+
+@app.route('/api/works', methods=['POST'])
+def create_work():
+    data = request.get_json(silent=True) or {}
+    work_text = (data.get('text') or '').strip()
+    date_str = data.get('date')
+    client_id = data.get('client_id')
+
+    if not work_text:
+        return jsonify({'error': 'Work text is required'}), 400
+
+    try:
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+        client_id = int(client_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'A valid date and client are required'}), 400
+
+    if Client.query.get(client_id) is None:
+        return jsonify({'error': 'Client not found'}), 404
+
+    if _find_duplicate_work(date_obj, client_id, work_text) is not None:
+        return jsonify({'error': 'That work is already on the list'}), 409
+
+    work = Work(date=date_obj, client_id=client_id, text=work_text)
+    db.session.add(work)
+    db.session.commit()
+    _mark_activity_if_current_client(client_id)
+    return jsonify(_work_json(work)), 201
+
+
+@app.route('/api/works/<int:work_id>', methods=['PUT'])
+def update_work(work_id):
+    work = Work.query.get_or_404(work_id)
+    data = request.get_json(silent=True) or {}
+    work_text = (data.get('text') or '').strip()
+
+    if not work_text:
+        return jsonify({'error': 'Work text is required'}), 400
+
+    duplicate = _find_duplicate_work(work.date, work.client_id, work_text)
+    if duplicate is not None and duplicate.id != work.id:
+        return jsonify({'error': 'That work is already on the list'}), 409
+
+    work.text = work_text
+    db.session.commit()
+    _mark_activity_if_current_client(work.client_id)
+    return jsonify(_work_json(work))
+
+
+@app.route('/api/works/<int:work_id>', methods=['DELETE'])
+def delete_work(work_id):
+    work = Work.query.get_or_404(work_id)
+    client_id = work.client_id
+    db.session.delete(work)
+    db.session.commit()
+    _mark_activity_if_current_client(client_id)
+    return jsonify({'success': True})
+
+
+def _find_duplicate_work(date_obj, client_id, work_text):
+    """Case-insensitive match within a client's day, or None.
+
+    The table's unique constraint is exact-match only; catching "Triage" against
+    an existing "triage" here is what stops the copied list reading as though
+    the same thing was done twice.
+    """
+    return (
+        Work.query.filter(
+            Work.date == date_obj,
+            Work.client_id == client_id,
+            func.lower(Work.text) == work_text.lower(),
+        ).first()
+    )
+
+
 
 @app.route('/task/<int:task_id>', methods=['DELETE'])
 def delete_task(task_id):
@@ -1373,6 +1542,7 @@ admin.add_view(ModelView(Task_Item, db.session))
 admin.add_view(ModelView(TimeTracking, db.session))
 admin.add_view(ModelView(Client, db.session))
 admin.add_view(ModelView(BreakTracking, db.session))
+admin.add_view(ModelView(Work, db.session))
 
 if __name__ == '__main__':
     # Publish the port before the server is up: a toast button click can only
