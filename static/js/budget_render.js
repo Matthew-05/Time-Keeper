@@ -97,9 +97,9 @@ export function headline(budget) {
 
     const overshoot = budget.projected_overage
     if (overshoot > 0.05) {
-        return `On pace for ${hours(budget.projected_hours)} hrs — ${hours(overshoot)} over`
+        return `Projecting over budget at ${hours(budget.projected_hours)} hrs — ${hours(overshoot)} over`
     }
-    return `On pace for ${hours(budget.projected_hours)} hrs — ${hours(-overshoot)} to spare`
+    return `Projecting on pace for ${hours(budget.projected_hours)} hrs — ${hours(-overshoot)} to spare`
 }
 
 /**
