@@ -42,7 +42,9 @@ if not DEV_MODE:
     os.environ['WEBVIEW2_USER_DATA_FOLDER'] = webview_dir
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for
-from models import db, Client, Task_Item, TimeTracking, BreakTracking, Work, Budget
+from models import (
+    db, Client, Task_Item, TimeTracking, BreakTracking, Work, Budget, BudgetHold
+)
 import settings as user_settings
 # Aliased: `budgets` is also the name of the page's view function and of half
 # the local variables in this file, and shadowing the module was a real bug
@@ -678,6 +680,13 @@ def delete_client(id):
             {Task_Item.budget_id: None},
             synchronize_session=False,
         )
+        # Holds too, and explicitly: this is a *bulk* delete, which doesn't run
+        # the ORM's delete-orphan cascade the way session.delete() does. Unlike
+        # time entries there's nothing to preserve — a hold describes a budget
+        # that's going, so it goes with it.
+        BudgetHold.query.filter(BudgetHold.budget_id.in_(doomed)).delete(
+            synchronize_session=False
+        )
         Budget.query.filter(Budget.client_id == id).delete(synchronize_session=False)
     db.session.delete(client)
     db.session.commit()
@@ -1286,7 +1295,12 @@ def _work_hours_per_month():
 
 
 def _client_allocation(client_id, now=None, every_task=False):
-    """Run the allocator over one client. Returns (budgets, used, split, unbudgeted).
+    """Run the allocator over one client.
+
+    Returns ``(budgets, used, split, unbudgeted, tasks)``. The tasks come back
+    because callers need dates to fold the per-task ``split`` into per-day
+    figures, and re-querying for them would be a second pass over rows this
+    function has already loaded.
 
     By default the task query is the union of two sets: everything falling
     inside the client's overall budgeted window, plus anything pinned to one of
@@ -1305,12 +1319,12 @@ def _client_allocation(client_id, now=None, every_task=False):
     budgets = Budget.query.filter(Budget.client_id == client_id).all()
     if not budgets:
         if not every_task:
-            return [], {}, {}, 0.0
+            return [], {}, {}, 0.0, []
         # No budgets at all: every recorded hour is unbudgeted by definition,
         # and there's nothing for the allocator to pour into.
         tasks = Task_Item.query.filter(Task_Item.client_id == client_id).all()
         loose = sum(budget_allocation.billable_hours_by_task(tasks, now).values())
-        return [], {}, {}, loose
+        return [], {}, {}, loose, tasks
 
     query = Task_Item.query.filter(Task_Item.client_id == client_id)
     if not every_task:
@@ -1324,16 +1338,70 @@ def _client_allocation(client_id, now=None, every_task=False):
             )
         )
 
-    used, split, unbudgeted = budget_allocation.allocate(budgets, query.all(), now)
-    return budgets, used, split, unbudgeted
+    tasks = query.all()
+    used, split, unbudgeted = budget_allocation.allocate(budgets, tasks, now)
+    return budgets, used, split, unbudgeted, tasks
+
+
+def _day_hours_by_budget(split, tasks):
+    """Fold the per-task allocation into ``{budget_id: {date: hours}}``.
+
+    Both the burn chart and the held-hours warning are per-day questions, and
+    `allocate` answers per-task; this is the one place that bridges them, so
+    the two features can't drift into disagreeing about which day an entry
+    landed on. A task that spilled contributes to more than one budget and
+    appears under each with only the hours that landed there.
+    """
+    dates = {t.id: t.date for t in tasks}
+    per_budget = {}
+    for task_id, allocations in split.items():
+        day = dates.get(task_id)
+        if day is None:
+            continue
+        for budget_id, hours, _pinned in allocations:
+            if budget_id is None or hours <= 0:
+                continue
+            days = per_budget.setdefault(budget_id, {})
+            days[day] = days.get(day, 0.0) + hours
+    return per_budget
+
+
+def _summarise_one(budget, now=None, today=None):
+    """One budget's live figures, after re-allocating its whole client.
+
+    There is no cheaper correct version of this — a budget's fill depends on
+    what its overlapping neighbours absorbed — so the write endpoints all come
+    back through here rather than trying to patch a single row's numbers.
+    """
+    budgets, used, split, _unbudgeted, tasks = _client_allocation(budget.client_id, now)
+    day_hours = _day_hours_by_budget(split, tasks)
+    return budget_allocation.summarise(
+        budget,
+        used.get(budget.id, 0.0),
+        _work_hours_per_month(),
+        today,
+        holds=budget.holds,
+        day_hours=day_hours.get(budget.id, {}),
+    )
 
 
 def _summarise_client(client_id, now=None, today=None):
     """Every budget for one client, summarised. Cheapest correct unit of work."""
-    budgets, used, _split, _unbudgeted = _client_allocation(client_id, now)
+    budgets, used, split, _unbudgeted, tasks = _client_allocation(client_id, now)
     hours_per_month = _work_hours_per_month()
+    day_hours = _day_hours_by_budget(split, tasks)
     return [
-        budget_allocation.summarise(b, used.get(b.id, 0.0), hours_per_month, today)
+        budget_allocation.summarise(
+            b,
+            used.get(b.id, 0.0),
+            hours_per_month,
+            today,
+            # `holds` is a relationship on the budget rows already in memory,
+            # so this is one small query per budget rather than a new round of
+            # allocation work.
+            holds=b.holds,
+            day_hours=day_hours.get(b.id, {}),
+        )
         for b in budgets
     ]
 
@@ -1397,17 +1465,24 @@ def api_get_budget(budget_id):
         return jsonify({'error': 'Budget not found'}), 404
 
     now = datetime.now()
-    budgets, used, split, _unbudgeted = _client_allocation(budget.client_id, now)
+    budgets, used, split, _unbudgeted, task_rows = _client_allocation(budget.client_id, now)
     hours_per_month = _work_hours_per_month()
 
-    summary = budget_allocation.summarise(budget, used.get(budget.id, 0.0), hours_per_month)
+    day_hours = _day_hours_by_budget(split, task_rows).get(budget.id, {})
+    summary = budget_allocation.summarise(
+        budget,
+        used.get(budget.id, 0.0),
+        hours_per_month,
+        holds=budget.holds,
+        day_hours=day_hours,
+    )
 
     # Rebuild the per-task view of this budget's slice. A task that spilled
     # contributes to two budgets, so it appears in both lists with only the
     # hours that actually landed here.
-    tasks = {t.id: t for t in Task_Item.query.filter(Task_Item.client_id == budget.client_id).all()}
+    tasks = {t.id: t for t in task_rows}
+    held = budget_allocation.hold_days(budget.holds)
     entries = []
-    day_hours = {}
     for task_id, allocations in split.items():
         for allocated_budget_id, hours, pinned in allocations:
             if allocated_budget_id != budget.id or hours <= 0:
@@ -1415,7 +1490,6 @@ def api_get_budget(budget_id):
             task = tasks.get(task_id)
             if task is None:
                 continue
-            day_hours[task.date] = day_hours.get(task.date, 0.0) + hours
             entries.append({
                 'task_id': task.id,
                 'date': task.date.isoformat(),
@@ -1427,13 +1501,19 @@ def api_get_budget(budget_id):
                 # allocator does, so it gets said out loud in the UI.
                 'split': len([a for a in allocations if a[1] > 0]) > 1,
                 'running': task.end_time is None,
+                # Time recorded on a day the project was supposedly on hold.
+                # Still counted — the hours have to reconcile — but flagged,
+                # because it nearly always means the hold dates are wrong.
+                'held': task.date in held,
             })
 
     entries.sort(key=lambda e: (e['date'], e['start_time'] or ''), reverse=True)
 
     return jsonify({
         **summary,
-        'burn': budget_allocation.burn_series(budget, day_hours, hours_per_month),
+        'burn': budget_allocation.burn_series(
+            budget, day_hours, hours_per_month, holds=budget.holds
+        ),
         'entries': entries,
         # Everything covering this client, so the re-pin dropdown can offer the
         # alternatives without a second request.
@@ -1508,11 +1588,7 @@ def api_create_budget():
     db.session.add(budget)
     db.session.commit()
 
-    hours_per_month = _work_hours_per_month()
-    _budgets, used, _split, _unbudgeted = _client_allocation(budget.client_id)
-    return jsonify(
-        budget_allocation.summarise(budget, used.get(budget.id, 0.0), hours_per_month)
-    ), 201
+    return jsonify(_summarise_one(budget)), 201
 
 
 @app.route('/api/budgets/<int:budget_id>', methods=['PUT'])
@@ -1548,11 +1624,7 @@ def api_update_budget(budget_id):
 
     db.session.commit()
 
-    hours_per_month = _work_hours_per_month()
-    _budgets, used, _split, _unbudgeted = _client_allocation(budget.client_id)
-    return jsonify(
-        budget_allocation.summarise(budget, used.get(budget.id, 0.0), hours_per_month)
-    )
+    return jsonify(_summarise_one(budget))
 
 
 @app.route('/api/budgets/<int:budget_id>', methods=['DELETE'])
@@ -1569,9 +1641,184 @@ def api_delete_budget(budget_id):
     Task_Item.query.filter(Task_Item.budget_id == budget.id).update(
         {Task_Item.budget_id: None}, synchronize_session=False
     )
+    # Holds go with the budget, via the relationship's delete-orphan cascade —
+    # session.delete() runs it, unlike the bulk delete in delete_client().
     db.session.delete(budget)
     db.session.commit()
     return jsonify({'success': True})
+
+
+# --------------------------------------------------------------------------
+# Holds
+#
+# A hold is a stretch of a budget's range during which the project was paused.
+# The arithmetic is entirely in budgets.py — held days are zero-capacity days,
+# like weekends — so these endpoints only have to store honest intervals.
+#
+# Deliberately separate rows rather than fields on the budget: a project can be
+# paused more than once, and a hold is very often recorded after the fact,
+# neither of which a pair of columns can express.
+# --------------------------------------------------------------------------
+
+
+def _hold_json(hold):
+    return {
+        'id': hold.id,
+        'budget_id': hold.budget_id,
+        'start_date': hold.start_date.isoformat(),
+        'end_date': hold.end_date.isoformat() if hold.end_date else None,
+        'reason': hold.reason,
+    }
+
+
+def _parse_hold_payload(data, partial=False):
+    """Validate a hold body. Returns (fields, error_message).
+
+    ``end_date`` is explicitly three-valued: absent means "don't change it",
+    ``null`` means "this hold is still running", and a date means it ended.
+    Collapsing the first two would make resuming a project impossible to
+    distinguish from editing its start date.
+    """
+    fields = {}
+
+    if not partial or 'start_date' in data:
+        try:
+            fields['start_date'] = datetime.strptime(
+                data.get('start_date'), '%Y-%m-%d'
+            ).date()
+        except (TypeError, ValueError):
+            return None, 'Dates must be YYYY-MM-DD.'
+
+    if 'end_date' in data:
+        raw = data.get('end_date')
+        if raw is None or raw == '':
+            fields['end_date'] = None
+        else:
+            try:
+                fields['end_date'] = datetime.strptime(raw, '%Y-%m-%d').date()
+            except (TypeError, ValueError):
+                return None, 'Dates must be YYYY-MM-DD.'
+
+    if 'reason' in data:
+        reason = (data.get('reason') or '').strip()
+        if len(reason) > 200:
+            return None, 'That reason is too long (200 characters max).'
+        fields['reason'] = reason or None
+
+    return fields, None
+
+
+def _overlapping_hold(budget, start, end, ignore_id=None):
+    """An existing hold on this budget that overlaps [start, end].
+
+    Rejected rather than merged. Overlaps don't break the maths —
+    ``hold_days`` is a set, so a doubly-held day is held once — but they're
+    almost always a mis-click, and silently absorbing one would leave the user
+    with a hold list that doesn't match what they thought they entered.
+    """
+    open_end = date.max
+    for hold in budget.holds:
+        if ignore_id is not None and hold.id == ignore_id:
+            continue
+        other_end = hold.end_date or open_end
+        if hold.start_date <= (end or open_end) and start <= other_end:
+            return hold
+    return None
+
+
+@app.route('/api/budgets/<int:budget_id>/holds', methods=['POST'])
+def api_create_hold(budget_id):
+    """Put a budget on hold, or record a past pause.
+
+    ``end_date: null`` (or omitted) means the project is on hold right now and
+    the resumption date isn't known yet. That's the common case — you pause
+    when the work stops, not when you've been told when it restarts.
+    """
+    budget = _budget_or_404(budget_id)
+    if budget is None:
+        return jsonify({'error': 'Budget not found'}), 404
+
+    fields, error = _parse_hold_payload(request.get_json(silent=True) or {})
+    if error:
+        return jsonify({'error': error}), 400
+
+    start = fields['start_date']
+    end = fields.get('end_date')
+    if end is not None and end < start:
+        return jsonify({'error': 'The hold ends before it starts.'}), 400
+
+    # A hold entirely outside the budget's range would silently do nothing,
+    # which reads as the feature being broken. Partial overlap is fine and
+    # common — a pause that ran past the end date is a real thing.
+    if start > budget.end_date or (end is not None and end < budget.start_date):
+        return jsonify({
+            'error': "That hold falls outside this budget's dates, so it wouldn't change anything."
+        }), 400
+
+    clash = _overlapping_hold(budget, start, end)
+    if clash is not None:
+        return jsonify({
+            'error': f'That overlaps an existing hold starting {clash.start_date.isoformat()}.'
+        }), 400
+
+    hold = BudgetHold(budget_id=budget.id, **fields)
+    db.session.add(hold)
+    db.session.commit()
+
+    return jsonify({'hold': _hold_json(hold), 'budget': _summarise_one(budget)}), 201
+
+
+@app.route('/api/budgets/<int:budget_id>/holds/<int:hold_id>', methods=['PUT'])
+def api_update_hold(budget_id, hold_id):
+    """Edit a hold — most often to end an open one, which is "resume"."""
+    budget = _budget_or_404(budget_id)
+    if budget is None:
+        return jsonify({'error': 'Budget not found'}), 404
+
+    hold = BudgetHold.query.get(hold_id)
+    if hold is None or hold.budget_id != budget.id:
+        return jsonify({'error': 'Hold not found'}), 404
+
+    fields, error = _parse_hold_payload(request.get_json(silent=True) or {}, partial=True)
+    if error:
+        return jsonify({'error': error}), 400
+
+    start = fields.get('start_date', hold.start_date)
+    end = fields['end_date'] if 'end_date' in fields else hold.end_date
+    if end is not None and end < start:
+        return jsonify({'error': 'The hold ends before it starts.'}), 400
+
+    clash = _overlapping_hold(budget, start, end, ignore_id=hold.id)
+    if clash is not None:
+        return jsonify({
+            'error': f'That overlaps an existing hold starting {clash.start_date.isoformat()}.'
+        }), 400
+
+    for key, value in fields.items():
+        setattr(hold, key, value)
+    db.session.commit()
+
+    return jsonify({'hold': _hold_json(hold), 'budget': _summarise_one(budget)})
+
+
+@app.route('/api/budgets/<int:budget_id>/holds/<int:hold_id>', methods=['DELETE'])
+def api_delete_hold(budget_id, hold_id):
+    """Remove a hold entirely — the undo for having recorded one by mistake.
+
+    Distinct from ending a hold: resuming keeps the dead days out of the
+    capacity, deleting says they were never dead at all.
+    """
+    budget = _budget_or_404(budget_id)
+    if budget is None:
+        return jsonify({'error': 'Budget not found'}), 404
+
+    hold = BudgetHold.query.get(hold_id)
+    if hold is None or hold.budget_id != budget.id:
+        return jsonify({'error': 'Hold not found'}), 404
+
+    db.session.delete(hold)
+    db.session.commit()
+    return jsonify({'success': True, 'budget': _summarise_one(budget)})
 
 
 @app.route('/api/tasks/<int:task_id>/budget', methods=['PUT'])
@@ -1630,7 +1877,7 @@ def api_unbudgeted_hours(client_id):
     exactly the kind of gap worth knowing about, and it's the kind the scoped
     query is blind to by construction.
     """
-    _budgets, _used, _split, unbudgeted = _client_allocation(client_id, every_task=True)
+    _b, _used, _split, unbudgeted, _tasks = _client_allocation(client_id, every_task=True)
     return jsonify({'client_id': client_id, 'unbudgeted_hours': round(unbudgeted, 2)})
 
 

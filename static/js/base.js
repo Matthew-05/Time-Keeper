@@ -72,11 +72,22 @@ export class TimeKeeper {
 
     }
 
+    /**
+     * The one place toasts are mounted, on every page.
+     *
+     * Appended to <body> rather than to whatever triggered the toast, and
+     * stacked above everything via `.tk-toast-container` — see the z-index
+     * scale in app.css. A toast is the app's only channel for "that failed",
+     * and the actions most likely to fail are the ones inside a modal or
+     * behind an open date picker. A toast that renders underneath the thing
+     * that caused it is the same as no toast at all.
+     */
     ensureToastContainer() {
         if (!document.getElementById('toast-container')) {
             const toastContainer = document.createElement('div');
             toastContainer.id = 'toast-container';
-            toastContainer.className = 'fixed bottom-9 right-4 z-50 flex flex-col-reverse gap-2';
+            toastContainer.className =
+                'tk-toast-container fixed bottom-9 right-4 flex flex-col-reverse gap-2';
             document.body.appendChild(toastContainer);
         }
     }

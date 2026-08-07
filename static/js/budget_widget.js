@@ -117,7 +117,14 @@ export class BudgetWidget {
                 ${
                     budget.status === 'on_track'
                         ? this.escape(`${hours(budget.remaining_hours)} hrs left`)
-                        : this.escape(headline(budget))
+                        // The full paused headline carries dates and a resume
+                        // date and is far too long for one line here. On this
+                        // screen the useful fact is just that you're about to
+                        // record time against a project that's supposed to be
+                        // stopped; the Budgets page has the rest.
+                        : budget.status === 'paused'
+                          ? this.escape(`On hold · ${hours(budget.remaining_hours)} hrs left`)
+                          : this.escape(headline(budget))
                 }
               </span>
             </div>

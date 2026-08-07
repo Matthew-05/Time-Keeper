@@ -57,6 +57,72 @@ class Budget(db.Model):
         return f'<Budget {self.name!r} {self.start_date}..{self.end_date} {self.budgeted_hours}h>'
 
 
+class BudgetHold(db.Model):
+    """A stretch of a budget's range during which the project was on hold.
+
+    Projects get paused — the client goes quiet, an approval is outstanding,
+    the work is blocked on somebody else. Those days are inside the budget's
+    range but nobody was ever going to work them, and counting them as working
+    time is what makes every statistic wrong: the projection sags, the pace
+    reads low, and the burn chart's ideal line climbs against an actual that
+    can't move.
+
+    So a hold is modelled as **days that contribute no capacity**, which is
+    exactly what a weekend already is. `budgets.day_capacity()` returns 0.0 for
+    both, and every figure downstream — projection, pace, capacity share, the
+    ideal line — corrects itself without knowing holds exist.
+
+    Stored as intervals rather than a flag on `Budget` deliberately. A flag can
+    only describe *now*; it can't say which days were dead, so it can't fix any
+    of the arithmetic, and it has no answer for a project paused twice or for a
+    hold entered after the fact. Intervals handle all three.
+
+    ``end_date IS NULL`` means the hold is still running. Its future is
+    unknowable, so it counts as held **up to today and no further** — see
+    `budgets.hold_days()`. Assuming the pause continues to the budget's end
+    would wipe out the remaining capacity and make `required_hours_per_day`
+    read as impossible while the project is merely waiting on a phone call.
+
+    Holds do **not** change allocation. Time recorded on a held day still pours
+    into the budget exactly as before, because "a client's hours always
+    reconcile" is load-bearing in `budgets.allocate()`. It is instead reported
+    as `held_hours`, which is usually the signal that the hold dates are wrong.
+    """
+    __tablename__ = 'budget_hold'
+
+    id = db.Column(db.Integer, primary_key=True)
+    budget_id = db.Column(
+        db.Integer,
+        db.ForeignKey('budget.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    budget = db.relationship(
+        'Budget',
+        # No passive_deletes: SQLite runs with foreign_keys OFF, so the CASCADE
+        # above is documentation and SQLAlchemy has to issue the DELETEs. A
+        # hold has no meaning without its budget, so delete-orphan is right —
+        # unlike time entries, which must always survive.
+        backref=db.backref('holds', lazy=True, cascade='all, delete-orphan'),
+    )
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=True)  # Inclusive. NULL = still held.
+    reason = db.Column(db.String(200), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+
+    __table_args__ = (
+        # Every read is "this budget's holds", and they're applied in date order.
+        db.Index('ix_budget_hold_budget_dates', 'budget_id', 'start_date'),
+        db.CheckConstraint(
+            'end_date IS NULL OR end_date >= start_date',
+            name='ck_budget_hold_dates_ordered',
+        ),
+    )
+
+    def __repr__(self):
+        end = self.end_date or 'open'
+        return f'<BudgetHold budget={self.budget_id} {self.start_date}..{end}>'
+
+
 class Task_Item(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     date = db.Column(db.Date, nullable=False)  # Start date is required

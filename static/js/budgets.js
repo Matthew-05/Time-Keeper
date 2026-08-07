@@ -25,6 +25,10 @@ import {
  */
 
 const FILTERS = {
+    // Paused budgets stay under "active" rather than getting a tab of their
+    // own. A held engagement is still live work you've committed to — filing it
+    // somewhere you don't look is how a two-week pause quietly becomes two
+    // months. The dashed card and the badge are what mark it out.
     active: (b) => b.is_active,
     upcoming: (b) => b.status === 'upcoming',
     closed: (b) => b.status === 'closed',
@@ -190,6 +194,16 @@ class Budgets extends TimeKeeper {
                       budget.remaining_business_days === 1 ? '' : 's'
                   }`
 
+        // Said on the card rather than buried in the detail view, because it's
+        // the number that explains why the rest of the card looks the way it
+        // does — a projection built on eight working days instead of twenty.
+        const holdNote =
+            budget.held_business_days > 0
+                ? `${budget.held_business_days} work day${
+                      budget.held_business_days === 1 ? '' : 's'
+                  } on hold, excluded from every figure here`
+                : null
+
         return `
           <article class="tk-budget-card is-clickable p-4" data-status="${budget.status}"
                    data-budget-id="${budget.id}" tabindex="0" role="button"
@@ -235,6 +249,7 @@ class Budgets extends TimeKeeper {
             </div>
 
             ${pace ? `<p class="mt-2 text-xs text-faint">${this.escapeHtml(pace)}</p>` : ''}
+            ${holdNote ? `<p class="mt-2 text-xs text-faint">${this.escapeHtml(holdNote)}</p>` : ''}
           </article>
         `
     }
@@ -561,6 +576,8 @@ class Budgets extends TimeKeeper {
             }
           </p>
 
+          ${this.holdsSection(detail)}
+
           <div class="mt-5">
             <h3 class="tk-card-title mb-2">Burn</h3>
             <div class="h-52"><canvas id="burn-chart"></canvas></div>
@@ -577,6 +594,402 @@ class Budgets extends TimeKeeper {
 
         this.drawBurnChart(detail)
         this.bindEntryPins(detail)
+        this.bindHolds(detail)
+    }
+
+    /**
+     * Holds — the periods this project was paused.
+     *
+     * Lives above the burn chart rather than below the entries because it's
+     * the explanation for the shape of everything under it. Somebody looking
+     * at a flat fortnight in the middle of the chart should find the reason
+     * before they find the data.
+     *
+     * Two ways in, because there are two genuinely different situations:
+     *
+     * - **"Pause from today"** takes no dates. You pause on the day the work
+     *   stops, and the day it restarts isn't something you know yet.
+     * - **"Record a past hold"** takes a range, because pauses are very often
+     *   noticed weeks later — the projection looks wrong, and the reason is
+     *   that nobody touched the project for a fortnight in March. Without this
+     *   the feature only helps people who remembered to press a button at the
+     *   time, which is nobody.
+     *
+     * Both land in the same table, and any row can be edited or removed.
+     */
+    holdsSection(detail) {
+        const holds = detail.holds ?? []
+
+        const rows = holds
+            .map(
+                (hold) => `
+          <tr>
+            <td class="tk-num whitespace-nowrap">${shortDate(hold.start_date)}</td>
+            <td class="tk-num whitespace-nowrap">
+              ${
+                  hold.end_date
+                      ? shortDate(hold.end_date)
+                      : '<span class="text-muted">still on hold</span>'
+              }
+            </td>
+            <td class="text-muted">${this.escapeHtml(hold.reason ?? '—')}</td>
+            <td class="w-px whitespace-nowrap">
+              <button type="button" class="tk-btn tk-btn-ghost tk-btn-sm"
+                      data-edit-hold="${hold.id}"
+                      title="Change these dates">Edit</button>
+              <button type="button" class="tk-btn tk-btn-ghost tk-btn-sm"
+                      data-remove-hold="${hold.id}"
+                      title="Remove this hold — the days count as worked again">Remove</button>
+            </td>
+          </tr>
+        `
+            )
+            .join('')
+
+        const table = holds.length
+            ? `
+          <div class="overflow-hidden rounded-lg border border-border">
+            <table class="tk-table tk-table-hover">
+              <thead>
+                <tr><th>From</th><th>Until</th><th>Reason</th><th></th></tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`
+            : '<div class="tk-empty py-4">This project has never been on hold.</div>'
+
+        // Time recorded during a hold isn't hidden or subtracted — it's in
+        // used_hours like everything else, because the client's hours have to
+        // reconcile. It's called out here because it almost always means the
+        // hold dates are wrong rather than that the rule is.
+        const heldWarning =
+            detail.held_hours > 0.05
+                ? `<p class="mt-2 text-xs" style="color: var(--warn)">
+                     ${hours(detail.held_hours)} hrs were recorded on days this project was on hold.
+                     They still count — check the dates below.
+                   </p>`
+                : ''
+
+        return `
+          <div class="mt-5">
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <h3 class="tk-card-title">Holds</h3>
+              <div class="flex gap-2">
+                <button type="button" id="add-hold" class="tk-btn tk-btn-ghost tk-btn-sm">Record a past hold</button>
+                <button type="button" id="toggle-hold" class="tk-btn tk-btn-sm ${
+                    detail.is_paused ? 'tk-btn-primary' : 'tk-btn-ghost'
+                }">${detail.is_paused ? 'Resume now' : 'Pause from today'}</button>
+              </div>
+            </div>
+            <p class="mb-2 text-xs text-faint">
+              Held days are removed from this budget's capacity, so pace, projection and the
+              ideal line below all ignore them.
+              ${
+                  detail.held_business_days > 0
+                      ? `<span class="tabular font-semibold text-muted">${detail.held_business_days}</span> work day${
+                            detail.held_business_days === 1 ? '' : 's'
+                        } excluded so far.`
+                      : ''
+              }
+            </p>
+
+            <!-- Inline rather than a second modal. The holds table, the burn
+                 chart and the entry list are the context you need while
+                 picking the dates, and stacking a modal on the detail view
+                 would hide all three. -->
+            <!-- No panel fill: .tk-input is already --surface-2, so tinting
+                 the panel the same way would make the fields disappear into
+                 it. The border alone is enough to group them. -->
+            <div id="hold-form" class="mb-2 hidden rounded-lg border border-border p-3">
+              <div class="flex flex-wrap items-end gap-3">
+                <div class="min-w-52 flex-1">
+                  <label class="tk-label" for="hold-range">Paused between</label>
+                  <input type="text" id="hold-range" class="tk-input tabular cursor-pointer"
+                         placeholder="Select date range…" autocomplete="off" readonly />
+                </div>
+                <div class="min-w-52 flex-1">
+                  <label class="tk-label" for="hold-reason">Reason <span class="normal-case tracking-normal text-faint">(optional)</span></label>
+                  <input type="text" id="hold-reason" class="tk-input" maxlength="200"
+                         placeholder="Awaiting client sign-off" autocomplete="off" />
+                </div>
+                <div class="flex gap-2">
+                  <button type="button" id="hold-cancel" class="tk-btn tk-btn-secondary tk-btn-sm">Cancel</button>
+                  <button type="button" id="hold-save" class="tk-btn tk-btn-primary tk-btn-sm">Save hold</button>
+                </div>
+              </div>
+              <p class="mt-2 text-xs text-faint">
+                Both ends are included. A hold may run past the budget's own dates — only the
+                days inside the budget affect its figures.
+              </p>
+            </div>
+
+            ${table}
+            ${heldWarning}
+          </div>
+        `
+    }
+
+    bindHolds(detail) {
+        const toggle = this.detailBody.querySelector('#toggle-hold')
+        if (toggle) {
+            toggle.addEventListener('click', () => {
+                this.toggleHold(detail).catch((e) => console.error(e))
+            })
+        }
+
+        this.detailBody.querySelectorAll('[data-remove-hold]').forEach((button) => {
+            button.addEventListener('click', () => {
+                this.removeHold(detail, Number(button.dataset.removeHold)).catch((e) =>
+                    console.error(e)
+                )
+            })
+        })
+
+        // The detail body is re-rendered wholesale on every refresh, so the
+        // previous picker's input no longer exists. Tear it down explicitly —
+        // flatpickr leaves its calendar attached to <body>, and an orphaned
+        // one would sit over the page with nothing to close it.
+        if (this.holdPicker) {
+            this.holdPicker.destroy()
+            this.holdPicker = null
+        }
+
+        const form = this.detailBody.querySelector('#hold-form')
+        if (!form) return
+
+        this.editingHold = null
+        this.holdRange = { start: '', end: '' }
+
+        this.holdPicker = flatpickr(this.detailBody.querySelector('#hold-range'), {
+            mode: 'range',
+            dateFormat: 'Y-m-d',
+            showMonths: 2,
+            // Opens on the budget's own months rather than today's. A hold
+            // being recorded after the fact is nearly always inside the
+            // budget, which may have started well before now.
+            defaultDate: null,
+            onOpen: () => {
+                this.holdPicker.jumpToDate(this.holdRange.start || detail.start_date)
+            },
+            onChange: (dates) => {
+                this.holdRange.start = dates[0] ? this.toISO(dates[0]) : ''
+                this.holdRange.end = dates[1] ? this.toISO(dates[1]) : ''
+            },
+        })
+
+        this.detailBody
+            .querySelector('#add-hold')
+            .addEventListener('click', () => this.openHoldForm(detail))
+
+        this.detailBody
+            .querySelector('#hold-cancel')
+            .addEventListener('click', () => this.closeHoldForm())
+
+        this.detailBody.querySelector('#hold-save').addEventListener('click', () => {
+            this.saveHold(detail).catch((e) => console.error(e))
+        })
+
+        this.detailBody.querySelectorAll('[data-edit-hold]').forEach((button) => {
+            button.addEventListener('click', () => {
+                const hold = (detail.holds ?? []).find(
+                    (h) => h.id === Number(button.dataset.editHold)
+                )
+                if (hold) this.openHoldForm(detail, hold)
+            })
+        })
+    }
+
+    /**
+     * Reveal the hold form, either empty or loaded with an existing hold.
+     *
+     * Editing an open-ended hold prefills only its start, so the range you
+     * then pick is "when it actually ran" — which is exactly what you're doing
+     * when you come back to close off a pause you started weeks ago. Going the
+     * other way, turning a closed hold back into an open one, isn't offered:
+     * it's "Remove" followed by "Pause from today", and it's rare enough not
+     * to be worth a third control.
+     */
+    openHoldForm(detail, hold = null) {
+        const form = this.detailBody.querySelector('#hold-form')
+        const reason = this.detailBody.querySelector('#hold-reason')
+
+        this.editingHold = hold?.id ?? null
+        this.detailBody.querySelector('#hold-save').textContent = hold
+            ? 'Save changes'
+            : 'Save hold'
+
+        reason.value = hold?.reason ?? ''
+
+        if (hold?.start_date && hold?.end_date) {
+            this.holdRange = { start: hold.start_date, end: hold.end_date }
+            this.holdPicker.setDate([hold.start_date, hold.end_date], false)
+        } else if (hold?.start_date) {
+            this.holdRange = { start: hold.start_date, end: '' }
+            this.holdPicker.setDate([hold.start_date], false)
+        } else {
+            this.holdRange = { start: '', end: '' }
+            this.holdPicker.clear()
+        }
+
+        form.classList.remove('hidden')
+        this.holdPicker.open()
+    }
+
+    closeHoldForm() {
+        this.editingHold = null
+        this.holdRange = { start: '', end: '' }
+        if (this.holdPicker) {
+            this.holdPicker.clear()
+            this.holdPicker.close()
+        }
+        this.detailBody.querySelector('#hold-reason').value = ''
+        this.detailBody.querySelector('#hold-form').classList.add('hidden')
+    }
+
+    async saveHold(detail) {
+        const { start, end } = this.holdRange
+        if (!start || !end) {
+            // Checked here rather than left to the server: a range with one end
+            // missing is a half-finished click, not a request worth sending.
+            this.showToast('Pick the first and last day of the hold.', 'error')
+            this.holdPicker.open()
+            return
+        }
+
+        const reason = this.detailBody.querySelector('#hold-reason').value.trim()
+        const body = JSON.stringify({ start_date: start, end_date: end, reason })
+        const editing = this.editingHold
+
+        try {
+            await this.fetchFromAPI(
+                editing
+                    ? `/api/budgets/${detail.id}/holds/${editing}`
+                    : `/api/budgets/${detail.id}/holds`,
+                {
+                    method: editing ? 'PUT' : 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body,
+                },
+                { quiet: true }
+            )
+            this.showToast(editing ? 'Hold updated' : 'Hold recorded', 'success')
+        } catch (error) {
+            // Left open with the dates still in it — an overlap or an
+            // out-of-range message is something you fix by nudging a date, not
+            // by starting again.
+            this.showToast(error.message, 'error')
+            return
+        }
+
+        this.closeHoldForm()
+        await this.refreshAfterHoldChange(detail.id)
+    }
+
+    /** Today's date as YYYY-MM-DD, local. `toISOString()` would be UTC. */
+    static today() {
+        const now = new Date()
+        const pad = (n) => String(n).padStart(2, '0')
+        return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+    }
+
+    /**
+     * Pause from today, or close the running hold as of yesterday.
+     *
+     * Resuming ends the hold *yesterday*, not today: you're pressing the button
+     * because work is starting again now, so today is a working day. Ending it
+     * today would throw away the day you're about to record against.
+     *
+     * Which means pausing and resuming on the same day would produce a hold
+     * ending before it started — no day held at all. That one is deleted
+     * instead, because it's a mis-click and leaving a same-day row that
+     * excludes nothing just gives the user something to tidy up.
+     */
+    async toggleHold(detail) {
+        const today = Budgets.today()
+        const open = (detail.holds ?? []).find((h) => h.end_date == null)
+
+        try {
+            if (open) {
+                const yesterday = new Date(`${today}T00:00:00`)
+                yesterday.setDate(yesterday.getDate() - 1)
+                const pad = (n) => String(n).padStart(2, '0')
+                const end = `${yesterday.getFullYear()}-${pad(yesterday.getMonth() + 1)}-${pad(yesterday.getDate())}`
+
+                if (end < open.start_date) {
+                    // Paused and resumed on the same day: the hold would end
+                    // before it began, meaning no day was ever held. That's a
+                    // mis-click, not a pause, so it's deleted rather than
+                    // clamped into a same-day row that excludes nothing and
+                    // has to be tidied up by hand.
+                    //
+                    // Note this is *only* the zero-day case. Pausing yesterday
+                    // and resuming today also lands on end == start, but that
+                    // hold really did cover yesterday, so it's kept.
+                    await this.fetchFromAPI(
+                        `/api/budgets/${detail.id}/holds/${open.id}`,
+                        { method: 'DELETE' },
+                        { quiet: true }
+                    )
+                    this.showToast('Hold cancelled — no days were held', 'success')
+                } else {
+                    await this.fetchFromAPI(
+                        `/api/budgets/${detail.id}/holds/${open.id}`,
+                        {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ end_date: end }),
+                        },
+                        { quiet: true }
+                    )
+                    this.showToast('Project resumed', 'success')
+                }
+            } else {
+                await this.fetchFromAPI(
+                    `/api/budgets/${detail.id}/holds`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ start_date: today, end_date: null }),
+                    },
+                    { quiet: true }
+                )
+                this.showToast('Project put on hold', 'success')
+            }
+        } catch (error) {
+            this.showToast(error.message, 'error')
+            return
+        }
+
+        await this.refreshAfterHoldChange(detail.id)
+    }
+
+    async removeHold(detail, holdId) {
+        try {
+            await this.fetchFromAPI(
+                `/api/budgets/${detail.id}/holds/${holdId}`,
+                { method: 'DELETE' },
+                { quiet: true }
+            )
+            this.showToast('Hold removed', 'success')
+        } catch (error) {
+            this.showToast(error.message, 'error')
+            return
+        }
+
+        await this.refreshAfterHoldChange(detail.id)
+    }
+
+    /**
+     * Reload the open detail view and the page behind it.
+     *
+     * Wholesale, like every other reload here. A hold changes the capacity this
+     * budget consumes, and the overview totals and the client's other cards are
+     * all computed from the same allocation — patching one card would leave the
+     * rest quietly stale.
+     */
+    async refreshAfterHoldChange(budgetId) {
+        await this.load()
+        if (this.detailId === budgetId) await this.openDetail(budgetId)
     }
 
     detailStat(label, value, sub) {
@@ -624,6 +1037,7 @@ class Budgets extends TimeKeeper {
             <td class="tk-num text-right font-medium">
               ${hours(entry.hours)}
               ${entry.split ? '<span class="tk-badge tk-badge-neutral ml-1.5" title="This entry was split across more than one budget">split</span>' : ''}
+              ${entry.held ? '<span class="tk-badge tk-badge-warn ml-1.5" title="Recorded on a day this project was on hold. It still counts — the hold dates may need correcting.">on hold</span>' : ''}
             </td>
             <td class="w-px">
               <select class="tk-select tk-select-sm w-44" data-task-id="${entry.task_id}"
@@ -701,6 +1115,11 @@ class Budgets extends TimeKeeper {
      * ahead on Friday. Colours are read from the live CSS variables and the
      * chart is rebuilt on `themeChanged`, since Chart.js bakes them in at
      * construction.
+     *
+     * Held days are flat for the same reason and are shaded behind the lines.
+     * Without the shading a three-week pause shows as a long flat stretch in
+     * both series and reads as a rendering fault; with it, it reads as the
+     * fact it is.
      */
     drawBurnChart(detail) {
         const canvas = document.getElementById('burn-chart')
@@ -713,8 +1132,46 @@ class Budgets extends TimeKeeper {
 
         const overBudget = detail.status === 'over'
 
+        // A tiny inline plugin rather than an annotation library: the whole job
+        // is painting grey rectangles between two x positions, and adding a
+        // dependency to the bundle for that would be a poor trade.
+        const holdBands = {
+            id: 'holdBands',
+            beforeDatasetsDraw(chart) {
+                const spans = []
+                detail.burn.forEach((point, index) => {
+                    if (!point.held) return
+                    const last = spans[spans.length - 1]
+                    if (last && last.end === index - 1) last.end = index
+                    else spans.push({ start: index, end: index })
+                })
+                if (!spans.length) return
+
+                const { ctx, chartArea, scales } = chart
+                // Half the gap between two adjacent days, measured off the
+                // scale rather than assumed, so the band covers the days
+                // themselves rather than stopping on their gridlines.
+                const half =
+                    detail.burn.length > 1
+                        ? (scales.x.getPixelForValue(1) - scales.x.getPixelForValue(0)) / 2
+                        : 0
+
+                ctx.save()
+                ctx.fillStyle = token('--surface-3')
+                spans.forEach(({ start, end }) => {
+                    const left = Math.max(chartArea.left, scales.x.getPixelForValue(start) - half)
+                    const right = Math.min(chartArea.right, scales.x.getPixelForValue(end) + half)
+                    if (right > left) {
+                        ctx.fillRect(left, chartArea.top, right - left, chartArea.bottom - chartArea.top)
+                    }
+                })
+                ctx.restore()
+            },
+        }
+
         this.chart = new Chart(canvas.getContext('2d'), {
             type: 'line',
+            plugins: [holdBands],
             data: {
                 labels: detail.burn.map((p) => shortDate(p.date)),
                 datasets: [
@@ -760,6 +1217,11 @@ class Budgets extends TimeKeeper {
                                 ctx.parsed.y == null
                                     ? undefined
                                     : `${ctx.dataset.label}: ${hours(ctx.parsed.y)} hrs`,
+                            // Said in the tooltip as well as the shading: the
+                            // bands are readable at a glance but ambiguous at
+                            // the edges, and the edges are what people check.
+                            afterBody: (items) =>
+                                detail.burn[items[0]?.dataIndex]?.held ? 'On hold' : undefined,
                         },
                     },
                 },
@@ -834,6 +1296,14 @@ class Budgets extends TimeKeeper {
             if (this.chart) {
                 this.chart.destroy()
                 this.chart = null
+            }
+            // flatpickr mounts its calendar on <body>, not next to the input,
+            // so closing the modal isn't enough to take it away — an open
+            // picker would be left floating over the page with nothing left to
+            // close it.
+            if (this.holdPicker) {
+                this.holdPicker.destroy()
+                this.holdPicker = null
             }
         }
     }

@@ -15,6 +15,7 @@ export const STATUS_LABEL = {
     over: 'Over budget',
     upcoming: 'Upcoming',
     closed: 'Closed',
+    paused: 'On hold',
 }
 
 /**
@@ -71,6 +72,18 @@ export function headline(budget) {
         return `${hours(budget.over_by)} hrs over budget`
     }
 
+    // Deliberately says nothing about pace. A paused project has no pace, and
+    // a projection built from a run rate nobody is running is exactly the
+    // false comfort the hold feature exists to remove. What's useful instead
+    // is what's left in the pot and when it starts moving again.
+    if (budget.status === 'paused') {
+        const since = budget.paused_since ? ` since ${shortDate(budget.paused_since)}` : ''
+        const back = budget.resumes_on
+            ? `resumes ${shortDate(budget.resumes_on)}`
+            : 'no resume date set'
+        return `On hold${since} · ${hours(budget.remaining_hours)} hrs left · ${back}`
+    }
+
     if (budget.status === 'closed') {
         const left = budget.remaining_hours
         return left >= 0
@@ -123,6 +136,10 @@ export function meter(budget, { large = false } = {}) {
  */
 export function paceNote(budget) {
     if (budget.status === 'upcoming' || budget.status === 'closed') return null
+    // Same reason the paused headline omits the projection: "you need 4
+    // hrs/day" is advice about a period nobody is working. The held-days count
+    // is the honest thing to say instead, and the card says it.
+    if (budget.status === 'paused') return null
     if (budget.required_hours_per_day == null) return null
 
     if (budget.required_hours_per_day < 0) {

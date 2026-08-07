@@ -848,7 +848,25 @@
       background-color 0.3s ease;
   }
 
-  /* ---- Toasts ---- */
+  /* ---- Toasts ----
+
+     The app's z-index scale, in one place so it can be reasoned about:
+
+       40  nav bar
+       50  dropdowns (Choices)
+       60  modal backdrops, tooltips
+       70  flatpickr calendars (vendor ships 99999; clamped in the overrides)
+       80  toasts
+
+     Toasts sit on top of all of it deliberately. They're the only channel for
+     "that didn't work", and the actions most likely to fail happen inside a
+     modal or with a date picker open — exactly the layers that would otherwise
+     cover the message. Nothing should be added above 80 without moving toasts
+     with it. */
+
+  .tk-toast-container {
+    z-index: 80;
+  }
 
   .tk-toast {
     align-items: flex-start;
@@ -1167,12 +1185,28 @@
     --status-text: var(--danger);
   }
 
+  /* Paused reads as grey rather than amber on purpose. Amber is the "you are
+     about to blow this budget" colour, and a project on hold is not in
+     trouble — it's not moving. Making the two look alike would train the eye
+     to ignore both. */
   .tk-budget-card[data-status='upcoming'],
+  .tk-budget-card[data-status='paused'],
   .tk-budget-card[data-status='closed'] {
     --status: var(--faint);
     --status-soft: var(--surface-3);
     --status-text: var(--muted);
   }
+
+  /* A dashed border says "deliberately stopped" at a glance across a grid of
+     cards, without spending a colour on it. */
+  .tk-budget-card[data-status='paused'] {
+    border-style: dashed;
+    border-color: var(--border-strong);
+  }
+
+  /* Held stretches on the burn chart are painted by an inline Chart.js plugin
+     in budgets.js, not by a class — it fills `--surface-3` between two x
+     positions, so there's no element here to style. */
 
   /* Closed budgets stay legible but stop competing for attention with the
      ones you can still do something about. */
@@ -1281,6 +1315,15 @@
     --status: var(--danger);
     --status-soft: var(--danger-soft);
     --status-text: var(--danger);
+  }
+
+  /* A paused budget still appears on the Today strip — it's the client you'd
+     be recording against, and that's exactly when you want to be told the
+     project is supposed to be on hold. */
+  .tk-budget-strip[data-status='paused'] {
+    --status: var(--faint);
+    --status-soft: var(--surface-3);
+    --status-text: var(--muted);
   }
 }
 
@@ -1460,7 +1503,8 @@
 }
 
 /* Vendor puts the open calendar at z-index 99999, way outside the app's own
-   scale (nav 40, dropdowns 50, tooltips 60). */
+   scale (nav 40, dropdowns 50, tooltips and modals 60, toasts 80) — which
+   would put it over the toasts as well. Clamped back into the scale. */
 .flatpickr-calendar.open {
   z-index: 70;
 }

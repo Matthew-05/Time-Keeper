@@ -23,6 +23,8 @@
            for tk-badge-accent while a task is running. -->
       <div id="timer-pill" class="tk-badge tk-badge-neutral tabular normal-case tracking-normal px-[0.6875rem] py-[0.3125rem] text-xs">
         <span id="timer-dot" class="tk-dot"></span>
+        <span id="timer-client" class="hidden truncate font-medium" style="max-width: 10rem"></span>
+        <span id="timer-separator" class="hidden" style="opacity: 0.6" aria-hidden="true">&middot;</span>
         <span id="timer">Loading…</span>
       </div>
 
@@ -50,6 +52,7 @@
 
   // Store task start time as an absolute timestamp
   let taskStartTimestamp = null
+  let currentTimerClient = null
   let timerUpdateInterval = null
 
   document.addEventListener('DOMContentLoaded', function () {
@@ -74,13 +77,14 @@
 
   document.addEventListener('taskStarted', function (event) {
     if (event.detail && event.detail.startTime) {
-      startTimerWithTime(event.detail.startTime)
+      startTimerWithTime(event.detail.startTime, event.detail.client)
     } else {
       checkForUnfinishedTask()
     }
   })
 
-  function startTimerWithTime(timeString) {
+  function startTimerWithTime(timeString, clientName) {
+    currentTimerClient = clientName || currentTimerClient
     // Handle different time formats
     let taskStartTime
 
@@ -169,6 +173,7 @@
   function stopAndResetTimer() {
     stopTimer()
     taskStartTimestamp = null
+    currentTimerClient = null
     updateTimerDisplay('No timer running')
   }
 
@@ -194,8 +199,9 @@
       const tasks = await response.json()
 
       if (tasks.length > 0) {
-        startTimerWithTime(tasks[0].start_time)
+        startTimerWithTime(tasks[0].start_time, tasks[0].client)
       } else {
+        currentTimerClient = null
         updateTimerDisplay('No timer running')
       }
     } catch (error) {
@@ -221,13 +227,28 @@
 
   function updateTimerDisplay(status) {
     const timerEl = document.getElementById('timer')
+    const clientEl = document.getElementById('timer-client')
+    const separatorEl = document.getElementById('timer-separator')
     if (!timerEl) return
 
     if (status === 'No timer running' || taskStartTimestamp === null) {
       timerEl.innerText = 'No task running'
+      if (clientEl) {
+        clientEl.innerText = ''
+        clientEl.title = ''
+        clientEl.classList.add('hidden')
+      }
+      if (separatorEl) separatorEl.classList.add('hidden')
       setTimerRunning(false)
       return
     }
+
+    if (clientEl) {
+      clientEl.innerText = currentTimerClient || ''
+      clientEl.title = currentTimerClient || ''
+      clientEl.classList.toggle('hidden', !currentTimerClient)
+    }
+    if (separatorEl) separatorEl.classList.toggle('hidden', !currentTimerClient)
 
     // Calculate elapsed time based on the absolute start timestamp
     const elapsedMilliseconds = Date.now() - taskStartTimestamp
@@ -242,5 +263,6 @@
   }
 
   // Make the function available globally so it can be called from other scripts
+  window.startTimerWithTime = startTimerWithTime
   window.stopAndResetTimer = stopAndResetTimer
 </script>

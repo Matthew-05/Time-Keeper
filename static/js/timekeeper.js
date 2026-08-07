@@ -465,12 +465,12 @@ export class TimeKeeperIndex extends TimeKeeper {
 
             // Directly call the global startTimerWithTime function with the selected time
             if (window.startTimerWithTime) {
-                window.startTimerWithTime(selectedTime);
+                window.startTimerWithTime(selectedTime, clientName);
             } else {
                 console.error('startTimerWithTime function not found in global scope');
                 // Fallback to the event-based approach
                 document.dispatchEvent(new CustomEvent('taskStarted', {
-                    detail: { startTime: selectedTime }
+                    detail: { startTime: selectedTime, client: clientName }
                 }));
             }
 

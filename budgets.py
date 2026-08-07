@@ -14,6 +14,12 @@ user's ``work_hours_per_month`` setting. This is what turns "18 of 40 hours
 used" into "you're on pace for 47", which is the number that's actually
 actionable.
 
+**Holds** live inside capacity rather than beside it. A paused project's days
+are simply days that contribute nothing, which is what a weekend already is, so
+the whole feature is one extra clause in ``day_capacity`` and everything
+downstream — projection, pace, capacity share, the ideal line — corrects itself
+without knowing holds exist.
+
 Nothing here touches Flask or the request context; it takes rows and returns
 dicts, so it can be exercised directly.
 """
@@ -78,7 +84,42 @@ def business_days_in_month(year, month):
     )
 
 
-def day_capacity(day, hours_per_month):
+def hold_days(holds, today=None):
+    """The set of dates a budget was on hold. Empty set for no holds.
+
+    Returned as a set of ``date`` so ``day_capacity`` can test membership in
+    constant time inside its day-by-day walk. Budgets are months, not decades,
+    so materialising the days costs nothing and keeps every caller identical.
+
+    **An open hold (``end_date is None``) counts only up to today.** It's still
+    running and its end is genuinely unknown, so the honest reading is "these
+    days are gone, and tomorrow is available until proven otherwise". Extending
+    an open hold to the budget's end instead would erase all remaining capacity
+    and make ``required_hours_per_day`` report an impossible figure for a
+    project that's merely waiting on somebody to reply — a paused project would
+    look identical to a doomed one.
+
+    Overlapping holds are fine and need no special handling: two intervals
+    covering the same day put that day in the set once.
+    """
+    today = today or date.today()
+
+    days = set()
+    for hold in holds:
+        end = hold.end_date if hold.end_date is not None else today
+        day = hold.start_date
+        while day <= end:
+            days.add(day)
+            day += timedelta(days=1)
+    return days
+
+
+def is_held(holds, day, today=None):
+    """Whether `day` falls inside any hold. Convenience over ``hold_days``."""
+    return day in hold_days(holds, today)
+
+
+def day_capacity(day, hours_per_month, held=frozenset()):
     """Working hours available on `day`.
 
     The user tells us hours per *month*; months have different numbers of
@@ -90,13 +131,20 @@ def day_capacity(day, hours_per_month):
     Weekends are zero. That's the whole reason this isn't a plain calendar-day
     run rate: checking a budget on a Friday afternoon shouldn't show a pace
     that's about to be diluted by two days nobody works.
+
+    **Held days are zero for exactly the same reason.** A project on hold has
+    days in its range that nobody was ever going to work, and diluting the pace
+    with them is the same mistake as diluting it with a weekend — just larger,
+    because a hold can run for weeks. `held` is a set of dates from
+    ``hold_days``; passing it is what makes every figure in this module
+    hold-aware, and passing nothing gives the pre-holds behaviour exactly.
     """
-    if day.weekday() >= 5:
+    if day.weekday() >= 5 or day in held:
         return 0.0
     return hours_per_month / business_days_in_month(day.year, day.month)
 
 
-def capacity_between(start, end, hours_per_month):
+def capacity_between(start, end, hours_per_month, held=frozenset()):
     """Total working hours in the inclusive range, or 0.0 if it's empty."""
     if end < start:
         return 0.0
@@ -107,19 +155,19 @@ def capacity_between(start, end, hours_per_month):
     # partial-month edges honest.
     day = start
     while day <= end:
-        total += day_capacity(day, hours_per_month)
+        total += day_capacity(day, hours_per_month, held)
         day += timedelta(days=1)
     return total
 
 
-def business_days_between(start, end):
-    """Mon–Fri count across the inclusive range."""
+def business_days_between(start, end, held=frozenset()):
+    """Mon–Fri count across the inclusive range, excluding held days."""
     if end < start:
         return 0
     total = 0
     day = start
     while day <= end:
-        if day.weekday() < 5:
+        if day.weekday() < 5 and day not in held:
             total += 1
         day += timedelta(days=1)
     return total
@@ -278,13 +326,27 @@ def _safe_divide(numerator, denominator):
     return None if not denominator else numerator / denominator
 
 
-def status_for(percent_used, projected_percent, started, ended):
+def status_for(percent_used, projected_percent, started, ended, paused=False):
     """One word for where a budget stands. Drives colour everywhere in the UI.
 
     ``over`` is about what has already happened; ``at_risk`` is about where the
     current pace lands. Keeping them separate matters — a budget at 40% on day
     three of a month is fine, and the same 40% on day twenty-five is not, and
     only the projection can tell them apart.
+
+    ``paused`` sits between the calendar facts and the pace verdict, and the
+    order is the design:
+
+    - **``over`` still wins.** An overspent budget doesn't stop being overspent
+      because the project went quiet; that's the one thing you can't fix by
+      resuming.
+    - **``upcoming`` and ``closed`` still win**, because for a budget that
+      hasn't started or has already ended the hold isn't the interesting fact
+      about it.
+    - **``paused`` outranks ``at_risk`` and ``on_track``**, because both of
+      those are statements about pace, and a paused project has no pace. Saying
+      "on track" about work that isn't happening is precisely the false comfort
+      this whole feature exists to remove.
     """
     if percent_used is not None and percent_used > 100:
         return 'over'
@@ -292,12 +354,14 @@ def status_for(percent_used, projected_percent, started, ended):
         return 'upcoming'
     if ended:
         return 'closed'
+    if paused:
+        return 'paused'
     if projected_percent is not None and projected_percent > 105:
         return 'at_risk'
     return 'on_track'
 
 
-def summarise(budget, used_hours, hours_per_month, today=None):
+def summarise(budget, used_hours, hours_per_month, today=None, holds=(), day_hours=None):
     """Everything the UI shows about one budget, from its consumed hours.
 
     The projection is a capacity-weighted run rate: hours used, scaled by the
@@ -310,8 +374,25 @@ def summarise(budget, used_hours, hours_per_month, today=None):
     Today counts as fully elapsed. Time recorded this morning is already in
     ``used_hours``, so treating today as still ahead would inflate every
     projection until midnight.
+
+    ``holds`` are periods the project was paused. They're subtracted from both
+    total and elapsed capacity, which is what keeps every derived figure honest
+    across a pause and, crucially, after it: a budget resumed last week reads
+    against the days actually worked, not against the fortnight nobody touched
+    it. It also means this function stays agnostic about whether the deadline
+    slipped. Extend ``end_date`` and the remaining capacity comes back; leave it
+    and ``required_hours_per_day`` climbs, because the work really did get
+    compressed. Both are correct answers to different situations, and neither
+    needs a special case here.
+
+    ``day_hours`` (``{date: hours}`` for this budget) is optional and only
+    feeds ``held_hours`` — time recorded on days the project was supposedly on
+    hold. It's never suppressed from ``used_hours``, because "a client's hours
+    always reconcile" is load-bearing in ``allocate``; it's surfaced instead,
+    since it almost always means the hold dates need correcting.
     """
     today = today or date.today()
+    held = hold_days(holds, today)
 
     budgeted = float(budget.budgeted_hours)
     used = round(used_hours, 2)
@@ -321,20 +402,25 @@ def summarise(budget, used_hours, hours_per_month, today=None):
     started = today >= budget.start_date
     ended = today > budget.end_date
     elapsed_end = min(today, budget.end_date)
+    paused = started and not ended and today in held
 
-    total_capacity = capacity_between(budget.start_date, budget.end_date, hours_per_month)
+    total_capacity = capacity_between(
+        budget.start_date, budget.end_date, hours_per_month, held
+    )
     elapsed_capacity = (
-        capacity_between(budget.start_date, elapsed_end, hours_per_month)
+        capacity_between(budget.start_date, elapsed_end, hours_per_month, held)
         if started
         else 0.0
     )
     remaining_capacity = max(0.0, total_capacity - elapsed_capacity)
 
-    total_days = business_days_between(budget.start_date, budget.end_date)
-    elapsed_days = business_days_between(budget.start_date, elapsed_end) if started else 0
+    total_days = business_days_between(budget.start_date, budget.end_date, held)
+    elapsed_days = (
+        business_days_between(budget.start_date, elapsed_end, held) if started else 0
+    )
     # Today is spent, so tomorrow is the first day still available.
     remaining_days = business_days_between(
-        max(budget.start_date, today + timedelta(days=1)), budget.end_date
+        max(budget.start_date, today + timedelta(days=1)), budget.end_date, held
     )
 
     ratio = _safe_divide(total_capacity, elapsed_capacity)
@@ -348,6 +434,44 @@ def summarise(budget, used_hours, hours_per_month, today=None):
     pace = _safe_divide(used, elapsed_days)
     # What you can average from tomorrow and still land exactly on budget.
     required_pace = _safe_divide(remaining, remaining_days) if remaining_days else None
+
+    # Working days the holds removed from this budget's own range. Weekends
+    # aren't counted — they were never capacity, so claiming a hold "cost" them
+    # would overstate what the pause actually took.
+    held_working_days = sum(
+        1
+        for day in held
+        if budget.start_date <= day <= budget.end_date and day.weekday() < 5
+    )
+    held_hours = (
+        round(sum(h for d, h in day_hours.items() if d in held), 2)
+        if day_hours is not None
+        else None
+    )
+
+    # The hold covering today, if any — what the UI needs to say "paused since
+    # the 3rd, resumes Monday" rather than just "paused".
+    current = next(
+        (
+            h
+            for h in holds
+            if h.start_date <= today and (h.end_date is None or today <= h.end_date)
+        ),
+        None,
+    ) if paused else None
+
+    resumes_on = None
+    if current is not None and current.end_date is not None:
+        # The next day with capacity, not the next day on the calendar. A hold
+        # ending on a Friday resumes on the Monday, and telling somebody their
+        # project restarts on Saturday is the kind of small wrongness that
+        # makes people stop trusting the rest of the numbers. Also steps over a
+        # hold that starts the moment this one ends.
+        resumes_on = current.end_date + timedelta(days=1)
+        while resumes_on <= budget.end_date and (
+            resumes_on.weekday() >= 5 or resumes_on in held
+        ):
+            resumes_on += timedelta(days=1)
 
     return {
         'id': budget.id,
@@ -393,12 +517,34 @@ def summarise(budget, used_hours, hours_per_month, today=None):
 
         'started': started,
         'ended': ended,
+        # Deliberately *not* narrowed by `paused`. "In force right now" is what
+        # the Today widget filters on, and a paused engagement is still the one
+        # you'd be recording against — seeing it there with a paused badge is
+        # the point. Pausing shouldn't make a budget vanish from the screen you
+        # log time on.
         'is_active': started and not ended,
-        'status': status_for(percent_used, projected_percent, started, ended),
+        'status': status_for(percent_used, projected_percent, started, ended, paused),
+
+        'is_paused': paused,
+        'paused_since': current.start_date.isoformat() if current else None,
+        # None while an open-ended hold is running: the resumption date is
+        # genuinely unknown, and inventing one would be worse than saying so.
+        'resumes_on': resumes_on.isoformat() if resumes_on else None,
+        'held_business_days': held_working_days,
+        'held_hours': held_hours,
+        'holds': [
+            {
+                'id': h.id,
+                'start_date': h.start_date.isoformat(),
+                'end_date': h.end_date.isoformat() if h.end_date else None,
+                'reason': h.reason,
+            }
+            for h in sorted(holds, key=lambda h: h.start_date)
+        ],
     }
 
 
-def burn_series(budget, day_hours, hours_per_month, today=None):
+def burn_series(budget, day_hours, hours_per_month, today=None, holds=()):
     """Cumulative actual vs. the capacity-paced ideal, one point per day.
 
     The ideal line isn't a straight diagonal: it tracks capacity, so it's flat
@@ -406,12 +552,24 @@ def burn_series(budget, day_hours, hours_per_month, today=None):
     budget looks behind on a Monday and ahead on a Friday, which is noise
     rather than signal.
 
+    Held days are flat for the same reason, and this is the most visible payoff
+    of the whole holds design: without it the ideal line climbs across a
+    three-week pause while actual can't move, inventing a huge underrun that
+    then vanishes in a cliff on the day work resumes.
+
+    ``held`` is reported per point so the chart can shade those spans. A flat
+    stretch in the middle of the ideal line looks like a rendering fault unless
+    the reason is drawn.
+
     Actual stops at today — drawing it flat into the future would read as "no
     work planned" rather than "hasn't happened yet".
     """
     today = today or date.today()
+    held = hold_days(holds, today)
 
-    total_capacity = capacity_between(budget.start_date, budget.end_date, hours_per_month)
+    total_capacity = capacity_between(
+        budget.start_date, budget.end_date, hours_per_month, held
+    )
     budgeted = float(budget.budgeted_hours)
 
     points = []
@@ -420,7 +578,7 @@ def burn_series(budget, day_hours, hours_per_month, today=None):
 
     day = budget.start_date
     while day <= budget.end_date:
-        spent_capacity += day_capacity(day, hours_per_month)
+        spent_capacity += day_capacity(day, hours_per_month, held)
         cumulative += day_hours.get(day, 0.0)
 
         points.append({
@@ -430,6 +588,7 @@ def burn_series(budget, day_hours, hours_per_month, today=None):
                 budgeted * (spent_capacity / total_capacity) if total_capacity else 0.0,
                 2,
             ),
+            'held': day in held,
         })
         day += timedelta(days=1)
 
