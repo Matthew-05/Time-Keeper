@@ -271,6 +271,9 @@ def allocate(budgets, tasks, now=None):
     now = now or datetime.now()
 
     hours = billable_hours_by_task(tasks, now)
+    # Explicitly excluded entries remain client-associated, but never consume
+    # a budget and are not reported as accidental coverage gaps.
+    tasks = [t for t in tasks if not getattr(t, 'budget_excluded', False)]
     by_id = {b.id: b for b in budgets}
 
     used = {b.id: 0.0 for b in budgets}

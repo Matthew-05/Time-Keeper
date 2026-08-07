@@ -151,7 +151,7 @@ class Budgets extends TimeKeeper {
 
         const budgeted = active.reduce((sum, b) => sum + b.budgeted_hours, 0)
         const used = active.reduce((sum, b) => sum + b.used_hours, 0)
-        const risk = active.filter((b) => b.status === 'over' || b.status === 'at_risk')
+        const risk = active.filter((b) => b.status === 'over')
 
         document.getElementById('overview-count').textContent = active.length
         document.getElementById('overview-budgeted').textContent = hours(budgeted)
@@ -655,6 +655,14 @@ class Budgets extends TimeKeeper {
             </div>
             ${this.entriesTable(detail)}
           </div>
+
+          <div class="mt-5">
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <h3 class="tk-card-title">Not associated with a budget</h3>
+              <span class="text-xs text-faint">${detail.unassigned_entries.length} entr${detail.unassigned_entries.length === 1 ? 'y' : 'ies'}</span>
+            </div>
+            ${this.unassignedEntriesTable(detail)}
+          </div>
         `
 
         this.drawBurnChart(detail)
@@ -1098,6 +1106,7 @@ class Budgets extends TimeKeeper {
         const options = (selected) =>
             [
                 `<option value="">Auto (bucket fill)</option>`,
+                `<option value="none">No budget</option>`,
                 ...detail.sibling_budgets.map(
                     (b) =>
                         `<option value="${b.id}"${b.id === selected ? ' selected' : ''}>${this.escapeHtml(b.name)}</option>`
@@ -1146,11 +1155,51 @@ class Budgets extends TimeKeeper {
         `
     }
 
+    unassignedEntriesTable(detail) {
+        if (!detail.unassigned_entries.length) {
+            return '<div class="tk-empty py-6">No client time has been explicitly left without a budget.</div>'
+        }
+
+        const options = () => [
+            '<option value="">Auto (bucket fill)</option>',
+            '<option value="none" selected>No budget</option>',
+            ...detail.sibling_budgets.map(
+                (b) => `<option value="${b.id}">${this.escapeHtml(b.name)}</option>`
+            ),
+        ].join('')
+
+        const rows = detail.unassigned_entries.map((entry) => `
+          <tr>
+            <td class="tk-num whitespace-nowrap">${shortDate(entry.date)}</td>
+            <td class="tk-num whitespace-nowrap text-muted">
+              ${entry.start_time ?? '—'}${entry.end_time ? `–${entry.end_time}` : ''}
+              ${entry.running ? '<span class="tk-badge tk-badge-accent ml-1.5">running</span>' : ''}
+            </td>
+            <td class="tk-num text-right font-medium">${hours(entry.hours)}</td>
+            <td class="w-px">
+              <select class="tk-select tk-select-sm w-44" data-task-id="${entry.task_id}"
+                      aria-label="Budget for this entry">${options()}</select>
+            </td>
+          </tr>
+        `).join('')
+
+        return `
+          <div class="overflow-hidden rounded-lg border border-border">
+            <table class="tk-table tk-table-hover">
+              <thead><tr><th>Date</th><th>Time</th><th class="text-right">Hours</th><th>Assigned to</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `
+    }
+
     bindEntryPins(detail) {
         this.detailBody.querySelectorAll('[data-task-id]').forEach((select) => {
             select.addEventListener('change', async () => {
                 const taskId = Number(select.dataset.taskId)
-                const value = select.value ? Number(select.value) : null
+                const value = select.value === 'none'
+                    ? 'none'
+                    : (select.value ? Number(select.value) : null)
                 const previous = select.dataset.previous ?? ''
 
                 select.disabled = true
@@ -1166,7 +1215,9 @@ class Budgets extends TimeKeeper {
                     )
 
                     this.showToast(
-                        value ? 'Entry pinned to that budget' : 'Entry released to the allocator',
+                        value === 'none'
+                            ? 'Entry left without a budget'
+                            : (value ? 'Entry pinned to that budget' : 'Entry released to the allocator'),
                         'success'
                     )
 

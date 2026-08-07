@@ -153,6 +153,9 @@ class Task_Item(db.Model):
         index=True,
     )
     budget = db.relationship('Budget', backref=db.backref('pinned_tasks', lazy=True))
+    # Distinguishes an explicit "No budget" choice from budget_id=NULL, which
+    # means the entry should continue through the automatic allocator.
+    budget_excluded = db.Column(db.Boolean, nullable=False, default=False)
 
 class Work(db.Model):
     """One thing you did for a client on a day.

@@ -750,6 +750,56 @@
     outline: none;
   }
 
+  /* Editing a history entry stays a single, stable table row. The previous
+     layout stacked Delete, a full-width select, then Save/Cancel, making the
+     row jump to several times its normal height. */
+  .tk-task-actions-heading,
+  .tk-task-actions-cell {
+    width: 20rem;
+  }
+
+  .tk-task-view-actions,
+  .tk-task-edit-controls {
+    align-items: center;
+    display: flex;
+    gap: 0.375rem;
+    justify-content: flex-end;
+  }
+
+  .tk-task-edit-controls {
+    min-width: 18rem;
+  }
+
+  .tk-task-client-field {
+    align-items: center;
+    display: flex;
+    flex: 1 1 auto;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+
+  .tk-task-client-field > span {
+    color: var(--faint);
+    flex-shrink: 0;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .tk-task-client-field .tk-select {
+    min-width: 0;
+  }
+
+  .tk-table-nested .task-time-picker {
+    display: block;
+    margin-inline: auto 0;
+  }
+
+  .tk-table-nested .task-time-picker.hidden {
+    display: none;
+  }
+
   /* Expandable client row + its nested task table. */
   .task-row {
     @apply cursor-pointer transition-colors;

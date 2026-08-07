@@ -465,6 +465,20 @@ def _ensure_task_budget_id_column():
     print('Added task__item.budget_id')
 
 
+def _ensure_task_budget_excluded_column():
+    """Add the explicit no-budget marker to databases upgraded in place."""
+    table = Task_Item.__table__.name
+    insp = inspect(db.engine)
+    if any(c['name'] == 'budget_excluded' for c in insp.get_columns(table)):
+        return
+    with db.engine.begin() as connection:
+        connection.execute(text(
+            f'ALTER TABLE {table} ADD COLUMN budget_excluded BOOLEAN '
+            'NOT NULL DEFAULT 0'
+        ))
+    print('Added task__item.budget_excluded')
+
+
 def _ensure_budget_closed_at_column():
     """Add the nullable manual-close marker to pre-existing SQLite databases."""
     eng = db.engine
@@ -547,6 +561,7 @@ with app.app_context():
     # After the rebuild above, which recreates task__item from a fixed column
     # list and would otherwise drop the column straight back off again.
     _ensure_task_budget_id_column()
+    _ensure_task_budget_excluded_column()
     _ensure_budget_closed_at_column()
     if _work_table_is_new:
         _backfill_works_from_descriptions()
@@ -1340,7 +1355,10 @@ def _client_allocation(client_id, now=None, every_task=False):
             return [], {}, {}, 0.0, []
         # No budgets at all: every recorded hour is unbudgeted by definition,
         # and there's nothing for the allocator to pour into.
-        tasks = Task_Item.query.filter(Task_Item.client_id == client_id).all()
+        tasks = Task_Item.query.filter(
+            Task_Item.client_id == client_id,
+            Task_Item.budget_excluded.is_(False),
+        ).all()
         loose = sum(budget_allocation.billable_hours_by_task(tasks, now).values())
         return [], {}, {}, loose, tasks
 
@@ -1527,12 +1545,32 @@ def api_get_budget(budget_id):
 
     entries.sort(key=lambda e: (e['date'], e['start_time'] or ''), reverse=True)
 
+    excluded_tasks = (
+        Task_Item.query
+        .filter(
+            Task_Item.client_id == budget.client_id,
+            Task_Item.budget_excluded.is_(True),
+        )
+        .order_by(Task_Item.date.desc(), Task_Item.start_time.desc())
+        .all()
+    )
+    excluded_hours = budget_allocation.billable_hours_by_task(excluded_tasks, now)
+    unassigned_entries = [{
+        'task_id': task.id,
+        'date': task.date.isoformat(),
+        'start_time': task.start_time.strftime('%H:%M') if task.start_time else None,
+        'end_time': task.end_time.strftime('%H:%M') if task.end_time else None,
+        'hours': round(excluded_hours.get(task.id, 0.0), 2),
+        'running': task.end_time is None,
+    } for task in excluded_tasks]
+
     return jsonify({
         **summary,
         'burn': budget_allocation.burn_series(
             budget, day_hours, hours_per_month, holds=budget.holds
         ),
         'entries': entries,
+        'unassigned_entries': unassigned_entries,
         # Everything covering this client, so the re-pin dropdown can offer the
         # alternatives without a second request.
         'sibling_budgets': [
@@ -1861,7 +1899,7 @@ def api_delete_hold(budget_id, hold_id):
 
 @app.route('/api/tasks/<int:task_id>/budget', methods=['PUT'])
 def api_assign_task_budget(task_id):
-    """Pin one time entry to a budget, or release it back to the allocator.
+    """Pin an entry, release it to the allocator, or exclude it from budgets.
 
     `{"budget_id": null}` is the release, and it's the important half — a pin
     the user can't undo would be worse than no pin at all.
@@ -1875,13 +1913,17 @@ def api_assign_task_budget(task_id):
         return jsonify({'error': 'Expected a budget_id (null to unpin).'}), 400
 
     raw = data['budget_id']
-    if raw is None:
+    if raw == 'none':
         task.budget_id = None
+        task.budget_excluded = True
+    elif raw is None:
+        task.budget_id = None
+        task.budget_excluded = False
     else:
         try:
             budget_id = int(raw)
         except (TypeError, ValueError):
-            return jsonify({'error': 'budget_id must be a number or null.'}), 400
+            return jsonify({'error': 'budget_id must be a number, null, or "none".'}), 400
 
         budget = Budget.query.get(budget_id)
         if budget is None:
@@ -1891,6 +1933,7 @@ def api_assign_task_budget(task_id):
                 'error': "That budget belongs to a different client."
             }), 400
         task.budget_id = budget_id
+        task.budget_excluded = False
 
     db.session.commit()
 

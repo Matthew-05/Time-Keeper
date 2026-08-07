@@ -343,16 +343,23 @@ export class TaskBrowser extends TimeKeeper {
     }
 
     enableEditMode(row) {
+        document.querySelectorAll('#tasks-tbody .tk-row-editing').forEach(editingRow => {
+            if (editingRow !== row) this.disableEditMode(editingRow);
+        });
+
+        row.classList.add('tk-row-editing');
         row.querySelectorAll('.time-display').forEach(span => span.classList.add('hidden'));
         row.querySelectorAll('.task-time-picker').forEach(input => input.classList.remove('hidden'));
-        row.querySelector('.edit-task-btn').classList.add('hidden');
+        row.querySelector('.task-view-actions').classList.add('hidden');
         row.querySelector('.edit-controls').classList.remove('hidden');
+        row.querySelector('.start-time')?.focus();
     }
 
     disableEditMode(row) {
+        row.classList.remove('tk-row-editing');
         row.querySelectorAll('.time-display').forEach(span => span.classList.remove('hidden'));
         row.querySelectorAll('.task-time-picker').forEach(input => input.classList.add('hidden'));
-        row.querySelector('.edit-task-btn').classList.remove('hidden');
+        row.querySelector('.task-view-actions').classList.remove('hidden');
         row.querySelector('.edit-controls').classList.add('hidden');
     }
 
@@ -819,7 +826,7 @@ export class TaskBrowser extends TimeKeeper {
                     <th>Start</th>
                     <th>End</th>
                     <th class="tk-num">Duration</th>
-                    <th class="w-px">Actions</th>
+                    <th class="tk-task-actions-heading">Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -838,19 +845,20 @@ export class TaskBrowser extends TimeKeeper {
                             <input type="text" class="task-time-picker end-time tk-time-input hidden" value="${task.end_time || ''}">
                         </td>
                         <td class="tk-num whitespace-nowrap text-muted">${this.getMinuteDifference(task.end_time, task.start_time)}m</td>
-                        <td>
-                            <div class="flex gap-1.5">
-                                <button class="edit-task-btn tk-btn tk-btn-secondary tk-btn-sm">Edit</button>
-                                <button class="delete-task-btn tk-btn tk-btn-danger tk-btn-sm">Delete</button>
+                        <td class="tk-task-actions-cell">
+                            <div class="task-view-actions tk-task-view-actions">
+                                <button type="button" class="edit-task-btn tk-btn tk-btn-secondary tk-btn-sm">Edit</button>
+                                <button type="button" class="delete-task-btn tk-btn tk-btn-danger tk-btn-sm">Delete</button>
                             </div>
-                            <div class="edit-controls hidden mt-2 space-y-2">
-                                <select class="client-select tk-select text-sm">
+                            <div class="edit-controls tk-task-edit-controls hidden">
+                                <label class="tk-task-client-field">
+                                    <span>Client</span>
+                                    <select class="client-select tk-select tk-select-sm">
                                     ${this.getClientOptions(task.client_id)}
-                                </select>
-                                <div class="flex gap-1.5">
-                                    <button class="save-task-btn tk-btn tk-btn-primary tk-btn-sm">Save</button>
-                                    <button class="cancel-task-btn tk-btn tk-btn-secondary tk-btn-sm">Cancel</button>
-                                </div>
+                                    </select>
+                                </label>
+                                <button type="button" class="save-task-btn tk-btn tk-btn-primary tk-btn-sm">Save</button>
+                                <button type="button" class="cancel-task-btn tk-btn tk-btn-secondary tk-btn-sm">Cancel</button>
                             </div>
                         </td>
                     </tr>
