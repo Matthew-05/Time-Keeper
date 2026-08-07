@@ -41,6 +41,38 @@
 
     <section class="tk-card mt-4">
       <div class="tk-card-header">
+        <h2 class="tk-card-title">Capacity</h2>
+      </div>
+
+      <div class="p-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <span class="tk-label mb-0.5 block">Working hours per month</span>
+            <p class="text-sm text-muted">
+              Spread across each month's weekdays to work out how much of a budget's
+              period has really gone. Everything a budget projects is measured against it.
+            </p>
+          </div>
+
+          <label class="flex flex-shrink-0 items-center gap-1.5">
+            <input
+              type="number"
+              id="work-hours-input"
+              class="tk-input tabular w-24 text-center"
+              min="1"
+              max="744"
+              step="1"
+              value="{{ settings.work_hours_per_month }}"
+              aria-label="Working hours per month"
+            />
+            <span class="text-sm text-muted">hrs</span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <section class="tk-card mt-4">
+      <div class="tk-card-header">
         <h2 class="tk-card-title">Reminders</h2>
       </div>
 

@@ -341,6 +341,18 @@
     cursor: not-allowed;
   }
 
+  .tk-select:disabled {
+    color: var(--faint);
+    cursor: progress;
+  }
+
+  /* Table-cell sized: a full-height select in every row of the budget entries
+     table would make each row twice as tall as the figure it carries. */
+  .tk-select-sm {
+    font-size: 0.8125rem;
+    padding: 0.3125rem 0.5rem;
+  }
+
   /* For a field sitting on a --surface-2 panel rather than on a card, where
      .tk-input's own --surface-2 fill would be the exact same colour as its
      container (#timepicker inside #timepicker-container, both themes). */
@@ -902,6 +914,13 @@
     width: 100%;
   }
 
+  /* The budget detail view carries a chart and a table of contributing
+     entries; 28rem would put both in a column two words wide. */
+  .tk-modal-wide {
+    max-height: min(46rem, 100%);
+    max-width: 52rem;
+  }
+
   .tk-modal-header {
     @apply flex items-center justify-between gap-3 border-b border-border px-5 py-3.5;
   }
@@ -1096,6 +1115,159 @@
     pointer-events: none;
     position: absolute;
     z-index: 60;
+  }
+
+  /* ---- Budgets ----
+     A budget's whole story is "how full, how fast, how much time left", so the
+     meter is the primary object on the page rather than a decoration next to a
+     number. Status colour is set once on the card via data-status and inherited
+     by the fill, the badge and the projection marker, so a card can never show
+     an amber bar above a green label. */
+
+  .tk-budget-card {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-sm);
+    /* Fallback; every real card sets one of the data-status rules below. */
+    --status: var(--accent);
+    --status-soft: var(--accent-soft);
+    --status-text: var(--accent-text);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  }
+
+  .tk-budget-card[data-status='on_track'] {
+    --status: var(--success);
+    --status-soft: var(--success-soft);
+    --status-text: var(--success);
+  }
+
+  .tk-budget-card[data-status='at_risk'] {
+    --status: var(--warn);
+    --status-soft: var(--warn-soft);
+    --status-text: var(--warn);
+  }
+
+  .tk-budget-card[data-status='over'] {
+    --status: var(--danger);
+    --status-soft: var(--danger-soft);
+    --status-text: var(--danger);
+  }
+
+  .tk-budget-card[data-status='upcoming'],
+  .tk-budget-card[data-status='closed'] {
+    --status: var(--faint);
+    --status-soft: var(--surface-3);
+    --status-text: var(--muted);
+  }
+
+  /* Closed budgets stay legible but stop competing for attention with the
+     ones you can still do something about. */
+  .tk-budget-card[data-status='closed'] {
+    opacity: 0.72;
+  }
+
+  .tk-budget-card[data-status='closed']:hover {
+    opacity: 1;
+  }
+
+  .tk-budget-card.is-clickable {
+    cursor: pointer;
+  }
+
+  .tk-budget-card.is-clickable:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
+  }
+
+  .tk-budget-card.is-clickable:active {
+    transform: translateY(1px);
+  }
+
+  .tk-meter {
+    background-color: var(--surface-3);
+    border-radius: 999px;
+    height: 0.5rem;
+    overflow: hidden;
+    position: relative;
+    width: 100%;
+  }
+
+  .tk-meter-lg {
+    height: 0.75rem;
+  }
+
+  .tk-meter-fill {
+    background-color: var(--status);
+    border-radius: 999px;
+    height: 100%;
+    transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* The share of the *period* that has gone, drawn as a hairline on top of the
+     fill. This is the comparison that makes a percentage mean anything: 60%
+     used is good news at the 80% mark and bad news at the 30% mark, and the
+     tick is what lets you see which without reading two numbers. */
+  .tk-meter-marker {
+    background-color: var(--text);
+    bottom: -2px;
+    opacity: 0.55;
+    position: absolute;
+    top: -2px;
+    width: 2px;
+  }
+
+  .tk-meter-overflow {
+    background-image: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 3px,
+      rgb(255 255 255 / 0.35) 3px,
+      rgb(255 255 255 / 0.35) 6px
+    );
+  }
+
+  /* One figure with its label under it. Used in a grid so the columns line up
+     across every card on the page. */
+  .tk-stat-label {
+    @apply text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-faint;
+  }
+
+  .tk-stat-value {
+    @apply text-sm font-semibold text-text;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tk-badge-status {
+    background-color: var(--status-soft);
+    color: var(--status-text);
+  }
+
+  /* The Today-page widget: same information, one line, no chrome. */
+  .tk-budget-strip {
+    @apply rounded-lg border border-border px-3 py-2.5;
+    background-color: var(--surface-2);
+    --status: var(--accent);
+    --status-soft: var(--accent-soft);
+    --status-text: var(--accent-text);
+  }
+
+  .tk-budget-strip[data-status='on_track'] {
+    --status: var(--success);
+    --status-soft: var(--success-soft);
+    --status-text: var(--success);
+  }
+
+  .tk-budget-strip[data-status='at_risk'] {
+    --status: var(--warn);
+    --status-soft: var(--warn-soft);
+    --status-text: var(--warn);
+  }
+
+  .tk-budget-strip[data-status='over'] {
+    --status: var(--danger);
+    --status-soft: var(--danger-soft);
+    --status-text: var(--danger);
   }
 }
 

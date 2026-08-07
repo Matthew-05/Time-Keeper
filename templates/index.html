@@ -29,6 +29,16 @@
           <select id="autocomplete-input"></select>
         </div>
 
+        <!-- Budgets in force for the running task's client. Same lifecycle as
+             the works list — it's about "the client I'm on right now", so it
+             appears and disappears with it. Silent when the client has no
+             active budget, which is the common case and shouldn't cost a row
+             of empty chrome. -->
+        <div id="budget-widget" class="hidden">
+          <label class="tk-label">Budget</label>
+          <div id="budget-widget-list" class="space-y-2"></div>
+        </div>
+
         <!-- Works (only shown while a task is running). Scoped to the running
              task's client for today, so it persists across separate blocks of
              time spent on the same client. -->

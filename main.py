@@ -42,8 +42,12 @@ if not DEV_MODE:
     os.environ['WEBVIEW2_USER_DATA_FOLDER'] = webview_dir
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for
-from models import db, Client, Task_Item, TimeTracking, BreakTracking, Work
+from models import db, Client, Task_Item, TimeTracking, BreakTracking, Work, Budget
 import settings as user_settings
+# Aliased: `budgets` is also the name of the page's view function and of half
+# the local variables in this file, and shadowing the module was a real bug
+# waiting to happen.
+import budgets as budget_allocation
 import notifications
 import ipc
 from reminders import ReminderService
@@ -423,6 +427,42 @@ def _ensure_task_client_id_nullable():
         conn.execute(text(f'ALTER TABLE {tmp} RENAME TO {table}'))
 
 
+def _ensure_task_budget_id_column():
+    """Add `task__item.budget_id` to a database created before budgets existed.
+
+    `db.create_all()` creates missing *tables* but never alters an existing one,
+    so the `budget` table appears on its own while this column would not. Same
+    situation `_ensure_task_client_id_nullable` handles, but far simpler: SQLite
+    can add a nullable column with a REFERENCES clause in place, no rebuild.
+
+    Additive and idempotent — the column defaults to NULL on every existing row,
+    which means "unpinned", which is exactly what allocation assumed before this
+    feature existed.
+    """
+    eng = db.engine
+    if eng.dialect.name != 'sqlite':
+        return
+    table = Task_Item.__table__.name
+    insp = inspect(eng)
+    if table not in insp.get_table_names():
+        return
+    if any(c['name'] == 'budget_id' for c in insp.get_columns(table)):
+        return
+
+    budget_table = Budget.__table__.name
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                f'ALTER TABLE {table} ADD COLUMN budget_id INTEGER '
+                f'REFERENCES {budget_table} (id) ON DELETE SET NULL'
+            )
+        )
+        conn.execute(
+            text(f'CREATE INDEX IF NOT EXISTS ix_{table}_budget_id ON {table} (budget_id)')
+        )
+    print('Added task__item.budget_id')
+
+
 def _backfill_works_from_descriptions():
     """Seed `work` from the superseded `task__item.description` column.
 
@@ -485,6 +525,9 @@ with app.app_context():
     _work_table_is_new = not inspect(db.engine).has_table(Work.__table__.name)
     db.create_all()
     _ensure_task_client_id_nullable()
+    # After the rebuild above, which recreates task__item from a fixed column
+    # list and would otherwise drop the column straight back off again.
+    _ensure_task_budget_id_column()
     if _work_table_is_new:
         _backfill_works_from_descriptions()
 
@@ -625,6 +668,17 @@ def delete_client(id):
     # hand because SQLite runs with foreign_keys OFF, which makes the model's
     # ondelete='CASCADE' documentation rather than enforcement.
     Work.query.filter(Work.client_id == id).delete(synchronize_session=False)
+    # Budgets go the same way as works, and for the same reason: a pot of hours
+    # for a client that no longer exists has nothing to measure. Un-pin first —
+    # the tasks survive as "removed client" time and must not be left pointing
+    # at a budget row that's about to disappear.
+    doomed = [b.id for b in Budget.query.filter(Budget.client_id == id).all()]
+    if doomed:
+        Task_Item.query.filter(Task_Item.budget_id.in_(doomed)).update(
+            {Task_Item.budget_id: None},
+            synchronize_session=False,
+        )
+        Budget.query.filter(Budget.client_id == id).delete(synchronize_session=False)
     db.session.delete(client)
     db.session.commit()
     return jsonify({'success': True})
@@ -1211,6 +1265,375 @@ def get_time_summary(period, client_id):
         'total_time': total_time
     })
 
+# --------------------------------------------------------------------------
+# Budgets
+#
+# The maths lives in budgets.py; this is the HTTP surface over it. Two things
+# to know before changing anything here:
+#
+#   * A budget stores no running total. Every read recomputes consumption from
+#     the tasks, because entries are edited constantly and a cached figure
+#     would go wrong silently.
+#   * Consumption is only ever computed for a whole client at once. One
+#     budget's usage depends on what its neighbours already absorbed, so
+#     answering "how full is budget 7" means allocating that client's entire
+#     set. `_client_allocation` is therefore the single entry point.
+# --------------------------------------------------------------------------
+
+
+def _work_hours_per_month():
+    return user_settings.get_setting('work_hours_per_month')
+
+
+def _client_allocation(client_id, now=None, every_task=False):
+    """Run the allocator over one client. Returns (budgets, used, split, unbudgeted).
+
+    By default the task query is the union of two sets: everything falling
+    inside the client's overall budgeted window, plus anything pinned to one of
+    those budgets from outside it. The second half matters — a pin is honoured
+    wherever it lands, so an entry pinned to a budget whose range has since been
+    shortened still has to be fetched or it would quietly stop counting.
+
+    That scoping makes the common read cheap, but it also means the returned
+    `unbudgeted` only sees gaps *inside* the window. `every_task=True` widens
+    the query to the client's whole history, which is what makes "hours that
+    fall against no budget at all" a true figure rather than a partial one.
+    Only the endpoint that reports that number pays for it.
+    """
+    now = now or datetime.now()
+
+    budgets = Budget.query.filter(Budget.client_id == client_id).all()
+    if not budgets:
+        if not every_task:
+            return [], {}, {}, 0.0
+        # No budgets at all: every recorded hour is unbudgeted by definition,
+        # and there's nothing for the allocator to pour into.
+        tasks = Task_Item.query.filter(Task_Item.client_id == client_id).all()
+        loose = sum(budget_allocation.billable_hours_by_task(tasks, now).values())
+        return [], {}, {}, loose
+
+    query = Task_Item.query.filter(Task_Item.client_id == client_id)
+    if not every_task:
+        window_start = min(b.start_date for b in budgets)
+        window_end = max(b.end_date for b in budgets)
+        budget_ids = [b.id for b in budgets]
+        query = query.filter(
+            db.or_(
+                db.and_(Task_Item.date >= window_start, Task_Item.date <= window_end),
+                Task_Item.budget_id.in_(budget_ids),
+            )
+        )
+
+    used, split, unbudgeted = budget_allocation.allocate(budgets, query.all(), now)
+    return budgets, used, split, unbudgeted
+
+
+def _summarise_client(client_id, now=None, today=None):
+    """Every budget for one client, summarised. Cheapest correct unit of work."""
+    budgets, used, _split, _unbudgeted = _client_allocation(client_id, now)
+    hours_per_month = _work_hours_per_month()
+    return [
+        budget_allocation.summarise(b, used.get(b.id, 0.0), hours_per_month, today)
+        for b in budgets
+    ]
+
+
+@app.route('/budgets')
+def budgets_page():
+    return render_template(
+        'budgets.html',
+        clients=Client.query.order_by(Client.name).all(),
+        version=APP_VERSION,
+    )
+
+
+@app.route('/api/budgets', methods=['GET'])
+def api_list_budgets():
+    """Every budget with its live figures, optionally filtered to one client."""
+    client_id = request.args.get('client_id', type=int)
+
+    if client_id is not None:
+        summaries = _summarise_client(client_id)
+    else:
+        summaries = []
+        for (cid,) in db.session.query(Budget.client_id).distinct().all():
+            summaries.extend(_summarise_client(cid))
+
+    closed = [s for s in summaries if s['status'] == 'closed']
+    live = [s for s in summaries if s['status'] != 'closed']
+    live.sort(key=lambda s: (s['status'] == 'upcoming', s['end_date'], s['name']))
+    closed.sort(key=lambda s: s['end_date'], reverse=True)
+
+    return jsonify(live + closed)
+
+
+@app.route('/api/budgets/for-client/<int:client_id>', methods=['GET'])
+def api_budgets_for_client(client_id):
+    """Only the budgets currently in force for a client — the Today widget.
+
+    Filtered server-side rather than in the widget so the dashboard never
+    downloads a client's whole budget history to show two meters.
+    """
+    active = [s for s in _summarise_client(client_id) if s['is_active']]
+    active.sort(key=lambda s: (s['end_date'], s['name']))
+    return jsonify(active)
+
+
+def _budget_or_404(budget_id):
+    budget = Budget.query.get(budget_id)
+    return budget
+
+
+@app.route('/api/budgets/<int:budget_id>', methods=['GET'])
+def api_get_budget(budget_id):
+    """One budget in full: figures, daily burn curve, and what fed it.
+
+    The entry list is what makes overlapping budgets workable — it's where you
+    see that a given afternoon landed on the wrong pot and pin it to the right
+    one.
+    """
+    budget = _budget_or_404(budget_id)
+    if budget is None:
+        return jsonify({'error': 'Budget not found'}), 404
+
+    now = datetime.now()
+    budgets, used, split, _unbudgeted = _client_allocation(budget.client_id, now)
+    hours_per_month = _work_hours_per_month()
+
+    summary = budget_allocation.summarise(budget, used.get(budget.id, 0.0), hours_per_month)
+
+    # Rebuild the per-task view of this budget's slice. A task that spilled
+    # contributes to two budgets, so it appears in both lists with only the
+    # hours that actually landed here.
+    tasks = {t.id: t for t in Task_Item.query.filter(Task_Item.client_id == budget.client_id).all()}
+    entries = []
+    day_hours = {}
+    for task_id, allocations in split.items():
+        for allocated_budget_id, hours, pinned in allocations:
+            if allocated_budget_id != budget.id or hours <= 0:
+                continue
+            task = tasks.get(task_id)
+            if task is None:
+                continue
+            day_hours[task.date] = day_hours.get(task.date, 0.0) + hours
+            entries.append({
+                'task_id': task.id,
+                'date': task.date.isoformat(),
+                'start_time': task.start_time.strftime('%H:%M') if task.start_time else None,
+                'end_time': task.end_time.strftime('%H:%M') if task.end_time else None,
+                'hours': round(hours, 2),
+                'pinned': pinned,
+                # A task that spilled is the single most confusing thing the
+                # allocator does, so it gets said out loud in the UI.
+                'split': len([a for a in allocations if a[1] > 0]) > 1,
+                'running': task.end_time is None,
+            })
+
+    entries.sort(key=lambda e: (e['date'], e['start_time'] or ''), reverse=True)
+
+    return jsonify({
+        **summary,
+        'burn': budget_allocation.burn_series(budget, day_hours, hours_per_month),
+        'entries': entries,
+        # Everything covering this client, so the re-pin dropdown can offer the
+        # alternatives without a second request.
+        'sibling_budgets': [
+            {
+                'id': b.id,
+                'name': b.name,
+                'start_date': b.start_date.isoformat(),
+                'end_date': b.end_date.isoformat(),
+            }
+            for b in sorted(budgets, key=lambda b: (b.end_date, b.name))
+        ],
+    })
+
+
+def _parse_budget_payload(data, partial=False):
+    """Validate a create/update body. Returns (fields, error_message)."""
+    fields = {}
+
+    if not partial or 'name' in data:
+        name = (data.get('name') or '').strip()
+        if not name:
+            return None, 'A budget needs a name.'
+        if len(name) > 120:
+            return None, 'That name is too long (120 characters max).'
+        fields['name'] = name
+
+    if not partial or 'client_id' in data:
+        try:
+            client_id = int(data.get('client_id'))
+        except (TypeError, ValueError):
+            return None, 'Choose a client for this budget.'
+        if Client.query.get(client_id) is None:
+            return None, 'That client no longer exists.'
+        fields['client_id'] = client_id
+
+    for key in ('start_date', 'end_date'):
+        if not partial or key in data:
+            try:
+                fields[key] = datetime.strptime(data.get(key), '%Y-%m-%d').date()
+            except (TypeError, ValueError):
+                return None, 'Dates must be YYYY-MM-DD.'
+
+    if not partial or 'budgeted_hours' in data:
+        try:
+            hours = float(data.get('budgeted_hours'))
+        except (TypeError, ValueError):
+            return None, 'Budgeted hours must be a number.'
+        if hours <= 0:
+            return None, 'Budgeted hours must be greater than zero.'
+        if hours > 100000:
+            return None, "That's more hours than anyone has. Check the figure."
+        fields['budgeted_hours'] = round(hours, 2)
+
+    if 'notes' in data:
+        notes = (data.get('notes') or '').strip()
+        fields['notes'] = notes or None
+
+    return fields, None
+
+
+@app.route('/api/budgets', methods=['POST'])
+def api_create_budget():
+    fields, error = _parse_budget_payload(request.get_json(silent=True) or {})
+    if error:
+        return jsonify({'error': error}), 400
+
+    if fields['end_date'] < fields['start_date']:
+        return jsonify({'error': 'The end date falls before the start date.'}), 400
+
+    budget = Budget(**fields)
+    db.session.add(budget)
+    db.session.commit()
+
+    hours_per_month = _work_hours_per_month()
+    _budgets, used, _split, _unbudgeted = _client_allocation(budget.client_id)
+    return jsonify(
+        budget_allocation.summarise(budget, used.get(budget.id, 0.0), hours_per_month)
+    ), 201
+
+
+@app.route('/api/budgets/<int:budget_id>', methods=['PUT'])
+def api_update_budget(budget_id):
+    budget = _budget_or_404(budget_id)
+    if budget is None:
+        return jsonify({'error': 'Budget not found'}), 404
+
+    fields, error = _parse_budget_payload(request.get_json(silent=True) or {}, partial=True)
+    if error:
+        return jsonify({'error': error}), 400
+
+    start = fields.get('start_date', budget.start_date)
+    end = fields.get('end_date', budget.end_date)
+    if end < start:
+        return jsonify({'error': 'The end date falls before the start date.'}), 400
+
+    moving_client = (
+        'client_id' in fields and fields['client_id'] != budget.client_id
+    )
+
+    for key, value in fields.items():
+        setattr(budget, key, value)
+
+    if moving_client:
+        # Pins are per client by construction — an entry for client A pinned to
+        # a budget that has just moved to client B would keep contributing time
+        # from the wrong client forever. Dropping them is the only honest
+        # answer, and it's a rare enough edit to be worth the bluntness.
+        Task_Item.query.filter(Task_Item.budget_id == budget.id).update(
+            {Task_Item.budget_id: None}, synchronize_session=False
+        )
+
+    db.session.commit()
+
+    hours_per_month = _work_hours_per_month()
+    _budgets, used, _split, _unbudgeted = _client_allocation(budget.client_id)
+    return jsonify(
+        budget_allocation.summarise(budget, used.get(budget.id, 0.0), hours_per_month)
+    )
+
+
+@app.route('/api/budgets/<int:budget_id>', methods=['DELETE'])
+def api_delete_budget(budget_id):
+    budget = _budget_or_404(budget_id)
+    if budget is None:
+        return jsonify({'error': 'Budget not found'}), 404
+
+    # Un-pin by hand: SQLite runs with foreign_keys OFF, so the model's
+    # ondelete='SET NULL' doesn't fire. Getting this wrong would leave entries
+    # pointing at a dead id, which the allocator treats as unpinned anyway —
+    # but only by accident, and the stale value would resurrect if the id were
+    # ever reused.
+    Task_Item.query.filter(Task_Item.budget_id == budget.id).update(
+        {Task_Item.budget_id: None}, synchronize_session=False
+    )
+    db.session.delete(budget)
+    db.session.commit()
+    return jsonify({'success': True})
+
+
+@app.route('/api/tasks/<int:task_id>/budget', methods=['PUT'])
+def api_assign_task_budget(task_id):
+    """Pin one time entry to a budget, or release it back to the allocator.
+
+    `{"budget_id": null}` is the release, and it's the important half — a pin
+    the user can't undo would be worse than no pin at all.
+    """
+    task = Task_Item.query.get(task_id)
+    if task is None:
+        return jsonify({'error': 'Time entry not found'}), 404
+
+    data = request.get_json(silent=True) or {}
+    if 'budget_id' not in data:
+        return jsonify({'error': 'Expected a budget_id (null to unpin).'}), 400
+
+    raw = data['budget_id']
+    if raw is None:
+        task.budget_id = None
+    else:
+        try:
+            budget_id = int(raw)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'budget_id must be a number or null.'}), 400
+
+        budget = Budget.query.get(budget_id)
+        if budget is None:
+            return jsonify({'error': 'That budget no longer exists.'}), 404
+        if budget.client_id != task.client_id:
+            return jsonify({
+                'error': "That budget belongs to a different client."
+            }), 400
+        task.budget_id = budget_id
+
+    db.session.commit()
+
+    # The whole client is re-summarised because moving one entry changes what
+    # spills where across every overlapping budget.
+    return jsonify({
+        'success': True,
+        'budgets': _summarise_client(task.client_id),
+    })
+
+
+@app.route('/api/budgets/unbudgeted/<int:client_id>', methods=['GET'])
+def api_unbudgeted_hours(client_id):
+    """Hours recorded for a client on days no budget covers.
+
+    Surfaced because the gap is the thing you can't see from the budgets
+    themselves: a period nobody wrote a budget for looks identical to a period
+    with nothing recorded in it.
+
+    Scans the client's whole history rather than the budgeted window — time
+    recorded before the first budget started or after the last one ended is
+    exactly the kind of gap worth knowing about, and it's the kind the scoped
+    query is blind to by construction.
+    """
+    _budgets, _used, _split, unbudgeted = _client_allocation(client_id, every_task=True)
+    return jsonify({'client_id': client_id, 'unbudgeted_hours': round(unbudgeted, 2)})
+
+
 @app.route('/update_task/<int:task_id>', methods=['PUT'])
 def update_task(task_id):
     data = request.json
@@ -1554,6 +1977,7 @@ admin.add_view(ModelView(TimeTracking, db.session))
 admin.add_view(ModelView(Client, db.session))
 admin.add_view(ModelView(BreakTracking, db.session))
 admin.add_view(ModelView(Work, db.session))
+admin.add_view(ModelView(Budget, db.session))
 
 if __name__ == '__main__':
     # Publish the port before the server is up: a toast button click can only

@@ -1,5 +1,6 @@
 import { TimeKeeper, ready } from './base.js';
 import { WorksList } from './works.js';
+import { BudgetWidget } from './budget_widget.js';
 
 export class TimeKeeperIndex extends TimeKeeper {
     constructor() {
@@ -15,6 +16,15 @@ export class TimeKeeperIndex extends TimeKeeper {
         // constructor rather than init(), which the page retries on failure
         // and would otherwise stack a second interval on top of the first.
         this.clientDayTotalInterval = setInterval(() => this.updateClientDayTotal(), 60000);
+
+        // Budget meters move as the running task accrues, on the same minute
+        // boundary and for the same reason. Separate interval rather than one
+        // combined tick because the two are independent requests and a slow
+        // budget fetch shouldn't hold up the day total.
+        this.budgetInterval = setInterval(
+            () => this.budgets.refresh().catch((e) => console.error(e)),
+            60000
+        );
     }
 
     async init() {
@@ -63,6 +73,15 @@ export class TimeKeeperIndex extends TimeKeeper {
             clientId: null,
             autoFocus: true,
         });
+
+        // Budgets in force for the client being worked on. Driven from
+        // setWorksVisible alongside the works list, so the two can never end up
+        // describing different clients.
+        this.budgets = new BudgetWidget({
+            container: document.getElementById('budget-widget'),
+            list: document.getElementById('budget-widget-list'),
+            api: this,
+        });
     }
 
 
@@ -92,6 +111,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         if (!visible) {
             this.currentTaskClientId = null;
             this.renderClientDayTotal(null);
+            this.budgets.clear();
             return;
         }
 
@@ -103,10 +123,12 @@ export class TimeKeeperIndex extends TimeKeeper {
             // reveals the form, checkUnfinishedTasks supplies the client a
             // moment later.
             this.works.showPending();
+            this.budgets.showPending();
             return;
         }
 
         this.works.setTarget(this.todayISO(), this.currentTaskClientId);
+        this.budgets.setTarget(this.currentTaskClientId);
     }
 
 

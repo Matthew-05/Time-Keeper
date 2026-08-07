@@ -1,0 +1,175 @@
+{% extends 'base.html' %}
+
+{% block title %}
+  Budgets | Time Keeper
+{% endblock %}
+
+{% block content %}
+  <div class="tk-page max-w-5xl">
+    <div class="tk-page-header">
+      <div>
+        <h1 class="tk-title">Budgets</h1>
+        <p class="tk-subtitle" id="budgets-subtitle">Hours committed, hours spent.</p>
+      </div>
+
+      <button type="button" id="new-budget" class="tk-btn tk-btn-primary flex-shrink-0">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        New budget
+      </button>
+    </div>
+
+    <!-- Portfolio line. Rendered from the same summaries as the cards below,
+         so the totals can't drift from what they're totalling. -->
+    <section id="budgets-overview" class="tk-card mb-4 hidden">
+      <div class="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border sm:grid-cols-4">
+        <div class="bg-surface px-4 py-3">
+          <div class="tk-stat-label">Active budgets</div>
+          <div class="tabular mt-1 text-xl font-semibold text-text" id="overview-count">—</div>
+        </div>
+        <div class="bg-surface px-4 py-3">
+          <div class="tk-stat-label">Hours committed</div>
+          <div class="tabular mt-1 text-xl font-semibold text-text" id="overview-budgeted">—</div>
+        </div>
+        <div class="bg-surface px-4 py-3">
+          <div class="tk-stat-label">Hours used</div>
+          <div class="tabular mt-1 text-xl font-semibold text-text" id="overview-used">—</div>
+        </div>
+        <div class="bg-surface px-4 py-3">
+          <div class="tk-stat-label">Needing attention</div>
+          <div class="tabular mt-1 text-xl font-semibold text-text" id="overview-risk">—</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div id="status-filter" class="tk-segmented" role="radiogroup" aria-label="Filter by status">
+        <button type="button" class="tk-segment active" role="radio" aria-checked="true" data-filter="active">Active</button>
+        <button type="button" class="tk-segment" role="radio" aria-checked="false" data-filter="upcoming">Upcoming</button>
+        <button type="button" class="tk-segment" role="radio" aria-checked="false" data-filter="closed">Closed</button>
+        <button type="button" class="tk-segment" role="radio" aria-checked="false" data-filter="all">All</button>
+      </div>
+
+      <label class="flex items-center gap-2">
+        <span class="tk-label mb-0">Client</span>
+        <select id="client-filter" class="tk-select w-56">
+          <option value="">All clients</option>
+          {% for client in clients %}
+            <option value="{{ client.id }}">{{ client.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <!-- Only shown when a single client is selected, because it's a per-client
+         figure and there's no honest way to total it across clients whose
+         budget coverage differs. -->
+    <p id="unbudgeted-note" class="mb-3 hidden text-xs text-muted"></p>
+
+    <div id="budget-list" class="grid gap-3">
+      <div class="tk-card tk-empty py-10">Loading budgets…</div>
+    </div>
+  </div>
+
+  <!-- Create / edit.
+       z-[70] because this one stacks: Edit inside the detail view opens it on
+       top. Both backdrops are z-60 from .tk-modal-backdrop, and this element
+       comes first in the DOM, so at equal z-index the detail view would paint
+       over the form the user just asked for. -->
+  <div id="budget-form-modal" class="tk-modal-backdrop z-[70] hidden" role="dialog" aria-modal="true" aria-labelledby="budget-form-title">
+    <div class="tk-modal">
+      <div class="tk-modal-header">
+        <h2 class="tk-card-title" id="budget-form-title">New budget</h2>
+        <button type="button" class="tk-btn-icon-sm" data-close-modal aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <form id="budget-form">
+        <div class="tk-modal-body space-y-4">
+          <div>
+            <label class="tk-label" for="budget-name">Name</label>
+            <input type="text" id="budget-name" class="tk-input" required maxlength="120"
+                   placeholder="Q3 retainer" autocomplete="off" />
+          </div>
+
+          <div>
+            <label class="tk-label" for="budget-client">Client</label>
+            <select id="budget-client" class="tk-select" required>
+              <option value="">Choose a client…</option>
+              {% for client in clients %}
+                <option value="{{ client.id }}">{{ client.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="tk-label" for="budget-start">Starts</label>
+              <input type="date" id="budget-start" class="tk-input tabular" required />
+            </div>
+            <div>
+              <label class="tk-label" for="budget-end">Ends</label>
+              <input type="date" id="budget-end" class="tk-input tabular" required />
+            </div>
+          </div>
+
+          <div>
+            <label class="tk-label" for="budget-hours">Budgeted hours</label>
+            <input type="number" id="budget-hours" class="tk-input tabular" required
+                   min="0.25" step="0.25" placeholder="40" />
+            <!-- Live capacity context: how much of everything you could work in
+                 this window the budget would consume. Catches a fat-fingered
+                 400-hour month before it's saved rather than after. -->
+            <p class="mt-1.5 text-xs text-muted" id="budget-capacity-hint"></p>
+          </div>
+
+          <div>
+            <label class="tk-label" for="budget-notes">Notes <span class="normal-case tracking-normal text-faint">(optional)</span></label>
+            <textarea id="budget-notes" class="tk-input" rows="2" maxlength="2000"></textarea>
+          </div>
+        </div>
+
+        <div class="tk-modal-footer flex items-center justify-between gap-3">
+          <button type="button" id="budget-delete" class="tk-btn tk-btn-danger tk-btn-sm hidden">Delete</button>
+          <div class="ml-auto flex gap-2">
+            <button type="button" class="tk-btn tk-btn-secondary" data-close-modal>Cancel</button>
+            <button type="submit" class="tk-btn tk-btn-primary" id="budget-save">Create budget</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Detail -->
+  <div id="budget-detail-modal" class="tk-modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="budget-detail-title">
+    <div class="tk-modal tk-modal-wide">
+      <div class="tk-modal-header">
+        <div class="min-w-0">
+          <h2 class="tk-card-title truncate" id="budget-detail-title">Budget</h2>
+          <p class="tabular mt-0.5 text-xs text-faint" id="budget-detail-range"></p>
+        </div>
+        <div class="flex flex-shrink-0 items-center gap-1.5">
+          <button type="button" id="budget-detail-edit" class="tk-btn tk-btn-secondary tk-btn-sm">Edit</button>
+          <button type="button" class="tk-btn-icon-sm" data-close-modal aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="tk-modal-body" id="budget-detail-body">
+        <div class="tk-empty py-10">Loading…</div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block page_scripts %}
+  <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/budgets.js') }}" type="module"></script>
+{% endblock %}

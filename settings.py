@@ -40,6 +40,13 @@ REMINDER_INTERVAL_MAX = 480  # 8 hours — longer than a working day.
 REMINDER_SNOOZE_MIN = 1
 REMINDER_SNOOZE_MAX = 120
 
+# Working hours in a month, which is what every budget projection is measured
+# against (see budgets.py). The floor is 1 rather than 0 because a zero would
+# make capacity zero and every projection undefined; the ceiling is a little
+# over 24×31 so a typo can't produce a negative-looking pace.
+WORK_HOURS_PER_MONTH_MIN = 1
+WORK_HOURS_PER_MONTH_MAX = 744
+
 
 def _validate_choice(choices):
     """Build a validator accepting only one of `choices` (case-insensitively)."""
@@ -87,6 +94,15 @@ _SCHEMA = {
     'reminder_snooze_minutes': (
         10,
         _validate_int(REMINDER_SNOOZE_MIN, REMINDER_SNOOZE_MAX),
+    ),
+    # How much you actually work in a month. Budgets spread this across each
+    # month's weekdays to decide how much of a period has really elapsed, which
+    # is what makes "% used" comparable to "% of the period gone". 160 is a
+    # 40-hour week; part-timers and anyone billing a fixed retainer will want
+    # their own number.
+    'work_hours_per_month': (
+        160,
+        _validate_int(WORK_HOURS_PER_MONTH_MIN, WORK_HOURS_PER_MONTH_MAX),
     ),
 }
 
