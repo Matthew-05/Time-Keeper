@@ -146,7 +146,7 @@ class Budgets extends TimeKeeper {
 
         if (!this.budgets.length) {
             this.overview.classList.add('hidden')
-            this.subtitle.textContent = 'Hours committed, hours spent.'
+            this.subtitle.textContent = 'Hours budgeted, hours spent.'
             return
         }
 
