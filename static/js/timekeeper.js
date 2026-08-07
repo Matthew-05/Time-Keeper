@@ -10,6 +10,11 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.currentTaskClient = null;
         this.currentTaskClientId = null;
 
+        // A quarter-hour figure can only change on a minute boundary, so this
+        // is the coarsest tick that never shows a stale number. Set up in the
+        // constructor rather than init(), which the page retries on failure
+        // and would otherwise stack a second interval on top of the first.
+        this.clientDayTotalInterval = setInterval(() => this.updateClientDayTotal(), 60000);
     }
 
     async init() {
@@ -36,6 +41,7 @@ export class TimeKeeperIndex extends TimeKeeper {
     initializeElements() {
         this.clientInput = document.getElementById('autocomplete-input');
         this.worksContainer = document.getElementById('works-container');
+        this.clientDayTotal = document.getElementById('client-day-total');
         this.actionButton = document.getElementById('action-button');
         this.completeButton = document.getElementById('complete-button');
         this.startButton = document.getElementById('start-button');
@@ -69,16 +75,28 @@ export class TimeKeeperIndex extends TimeKeeper {
     }
 
 
-    /** Show or hide the works list, pointing it at a client when shown. */
+    /**
+     * Show or hide everything scoped to the running task's client — the works
+     * list and the day total — pointing both at that client when shown.
+     *
+     * Single entry point on purpose: both pieces answer "which client am I on
+     * right now", and letting them be set separately is how they'd end up
+     * disagreeing.
+     */
     setWorksVisible(visible, clientId = null) {
         if (!this.worksContainer) return;
 
         this.worksContainer.style.display = visible ? 'block' : 'none';
         this.worksContainer.classList.toggle('hidden', !visible);
 
-        if (!visible) return;
+        if (!visible) {
+            this.currentTaskClientId = null;
+            this.renderClientDayTotal(null);
+            return;
+        }
 
         this.currentTaskClientId = clientId ?? this.currentTaskClientId;
+        this.updateClientDayTotal();
 
         if (this.currentTaskClientId == null) {
             // Shown before the running task has been fetched — checkDayStatus
@@ -89,6 +107,77 @@ export class TimeKeeperIndex extends TimeKeeper {
         }
 
         this.works.setTarget(this.todayISO(), this.currentTaskClientId);
+    }
+
+
+    /**
+     * Total time booked to the running task's client today: rounded to the
+     * quarter hour, with the real tracked figure and the rounding difference.
+     *
+     * Derived from `/tasks/<today>` rather than a purpose-built endpoint so it
+     * is by construction the same arithmetic the Task Browser does — that
+     * endpoint substitutes the current time for a task that hasn't ended, so
+     * the in-flight task is counted up to now and the figure climbs as you
+     * work.
+     */
+    async updateClientDayTotal() {
+        if (this.currentTaskClientId == null) {
+            this.renderClientDayTotal(null);
+            return;
+        }
+
+        const clientId = this.currentTaskClientId;
+
+        try {
+            const tasks = await this.fetchFromAPI(`/tasks/${this.todayISO()}`);
+
+            // The client may have changed while the request was in flight.
+            if (clientId !== this.currentTaskClientId) return;
+
+            const mine = tasks.filter(task => task.client_id === clientId);
+            const minutes = mine.reduce(
+                (total, task) => total + this.getMinuteDifference(task.end_time, task.start_time),
+                0
+            );
+
+            // Name off the same rows the minutes came from, so the label can't
+            // disagree with the figure. currentTaskClient is only the fallback
+            // for the moment before any task exists for this client.
+            const name = mine.length ? mine[0].client_name : this.currentTaskClient;
+
+            this.renderClientDayTotal(minutes, name);
+        } catch (error) {
+            // Leave the last known figure up rather than blanking it: a stale
+            // number for a minute is better than a gap where one used to be.
+            console.error('Failed to update client day total:', error);
+        }
+    }
+
+
+    renderClientDayTotal(minutes, name = null) {
+        const element = this.clientDayTotal;
+        if (!element) return;
+
+        if (minutes == null) {
+            element.classList.add('hidden');
+            element.innerHTML = '';
+            element.removeAttribute('title');
+            return;
+        }
+
+        const fractionalHours = this.totalTimeSpentToFractionalHours(minutes);
+        const difference = Math.round(fractionalHours * 60 - minutes);
+
+        // inline-block + truncate: a long client name would otherwise push the
+        // figure out of the header, and the figure is the point.
+        const label = name
+            ? `<span class="inline-block max-w-[12rem] truncate align-bottom text-muted">${this.escapeHtml(name)}</span>`
+              + '<span class="font-normal text-faint"> · </span>'
+            : '';
+
+        element.innerHTML = label + this.formatTimeWithDifference(fractionalHours, minutes, difference);
+        element.title = `${name || 'This client'} — rounded · tracked · rounding difference, today`;
+        element.classList.remove('hidden');
     }
 
 

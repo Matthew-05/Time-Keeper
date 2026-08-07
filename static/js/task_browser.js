@@ -693,16 +693,9 @@ export class TaskBrowser extends TimeKeeper {
         );
     }
 
-    formatTimeWithDifference(fractionalHours, totalMinutes, difference) {
-        const colorClass = difference > 0 ? 'text-success' : 'text-danger';
-        const diffDisplay = difference !== 0
-            ? `<span class="${colorClass} ml-1 text-xs font-medium">${difference > 0 ? '+' : '−'}${Math.abs(difference)}m</span>`
-            : '';
-
-        return `${fractionalHours}<span class="text-faint font-normal"> hrs</span>`
-            + `<span class="text-faint font-normal text-xs"> · ${this.minutesToHoursMinutes(totalMinutes)}</span>`
-            + diffDisplay;
-    }
+    // formatTimeWithDifference and getMinuteDifference now live on TimeKeeper
+    // in base.js — the Today page shows the same figure for the running
+    // client and the two must not drift.
 
     async renderTasks(tasks) {
         const tbody = document.getElementById('tasks-tbody');
@@ -905,10 +898,6 @@ export class TaskBrowser extends TimeKeeper {
         return `${year}-${month}-${day}`;
     }
 
-    getMinuteDifference(endTime, startTime) {
-        if (!endTime) return 0;
-        return this.timeStringToMinutes(endTime) - this.timeStringToMinutes(startTime);
-    }
 
     totalNumberofMinutesPerClient(tasks) {
         return tasks.reduce((total, task) => {

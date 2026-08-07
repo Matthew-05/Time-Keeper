@@ -253,4 +253,33 @@ export class TimeKeeper {
         const hours = minutes / 60;
         return Math.round(hours * 4) / 4;
     }
+
+    /**
+     * Minutes a task ran. `/tasks/<date>` substitutes the current time for a
+     * task that hasn't ended, so an in-flight task measures up to now.
+     */
+    getMinuteDifference(endTime, startTime) {
+        if (!endTime) return 0;
+        return this.timeStringToMinutes(endTime) - this.timeStringToMinutes(startTime);
+    }
+
+    /**
+     * The house format for a billable figure: rounded quarter-hours, the real
+     * tracked time, and what the rounding gave or took.
+     *
+     *     3.5 hrs · 3:20 · +10m
+     *
+     * Shared so the Today page and the Task Browser can't drift into showing
+     * the same number two different ways.
+     */
+    formatTimeWithDifference(fractionalHours, totalMinutes, difference) {
+        const colorClass = difference > 0 ? 'text-success' : 'text-danger';
+        const diffDisplay = difference !== 0
+            ? `<span class="${colorClass} ml-1 text-xs font-medium">${difference > 0 ? '+' : '−'}${Math.abs(difference)}m</span>`
+            : '';
+
+        return `${fractionalHours}<span class="text-faint font-normal"> hrs</span>`
+            + `<span class="text-faint font-normal text-xs"> · ${this.minutesToHoursMinutes(totalMinutes)}</span>`
+            + diffDisplay;
+    }
 }
