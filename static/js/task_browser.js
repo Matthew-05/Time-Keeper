@@ -1,4 +1,4 @@
-import { TimeKeeper, ready, clientColor } from './base.js';
+import { TimeKeeper, ready, clientColor, lockBodyScroll, unlockBodyScroll } from './base.js';
 import { WorksList, fetchWorks, joinWorks } from './works.js';
 
 export class TaskBrowser extends TimeKeeper {
@@ -280,7 +280,10 @@ export class TaskBrowser extends TimeKeeper {
         this.worksModalTitle.textContent = client.name;
         this.worksModalSubtitle.textContent = this.formatDateLong(dateStr);
 
-        this.worksModal.classList.remove('hidden');
+        if (this.worksModal.classList.contains('hidden')) {
+            this.worksModal.classList.remove('hidden');
+            lockBodyScroll();
+        }
         // force: the same client can be reopened after an edit elsewhere, and
         // setTarget would otherwise treat an unchanged target as a no-op and
         // show a stale list.
@@ -291,9 +294,10 @@ export class TaskBrowser extends TimeKeeper {
     }
 
     closeWorksModal() {
-        if (!this.worksModal) return;
+        if (!this.worksModal || this.worksModal.classList.contains('hidden')) return;
         this.worksModal.classList.add('hidden');
         this.worksModalClient = null;
+        unlockBodyScroll();
     }
 
     /** Copy one client's works for the browsed day, comma-separated. */

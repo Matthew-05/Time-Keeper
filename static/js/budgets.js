@@ -1,4 +1,4 @@
-import { TimeKeeper, ready } from './base.js'
+import { TimeKeeper, ready, lockBodyScroll, unlockBodyScroll } from './base.js'
 import {
     STATUS_LABEL,
     dateRange,
@@ -58,11 +58,16 @@ class Budgets extends TimeKeeper {
         this.fields = {
             name: document.getElementById('budget-name'),
             client: document.getElementById('budget-client'),
-            start: document.getElementById('budget-start'),
-            end: document.getElementById('budget-end'),
+            range: document.getElementById('budget-range'),
             hours: document.getElementById('budget-hours'),
             notes: document.getElementById('budget-notes'),
         }
+
+        // The two dates the form actually submits. Mirrors what's picked in
+        // the range field rather than being read back out of it, since a
+        // single-day pick renders as one date with no ' to ' separator to
+        // split on.
+        this.range = { start: '', end: '' }
 
         this.budgets = []
         this.filter = 'active'
@@ -305,24 +310,38 @@ class Budgets extends TimeKeeper {
             this.remove().catch((e) => console.error(e))
         })
 
-        // Capacity context updates as you type, so an unrealistic figure is
+        // Capacity context updates as you pick, so an unrealistic figure is
         // obvious before it's saved rather than after it's blown.
-        const refresh = () => this.updateCapacityHint()
-        this.fields.start.addEventListener('change', refresh)
-        this.fields.end.addEventListener('change', refresh)
-        this.fields.hours.addEventListener('input', refresh)
-
-        // Picking a start with no end yet almost always means a period of the
-        // same length again, and an empty end field is the most common way to
-        // get a validation error on first use.
-        this.fields.start.addEventListener('change', () => {
-            if (!this.fields.end.value && this.fields.start.value) {
-                const [y, m, d] = this.fields.start.value.split('-').map(Number)
+        this.rangePicker = flatpickr(this.fields.range, {
+            mode: 'range',
+            dateFormat: 'Y-m-d',
+            showMonths: 2,
+            // Left calendar defaults to the *start* month. Flatpickr would
+            // otherwise open centered on whichever date was picked last —
+            // the end, most of the time — which buries the start of a
+            // multi-month budget a click away.
+            onOpen: () => {
+                if (this.range.start) this.rangePicker.jumpToDate(this.range.start)
+            },
+            onChange: (selectedDates) => {
+                if (selectedDates.length === 2) {
+                    this.range.start = this.toISO(selectedDates[0])
+                    this.range.end = this.toISO(selectedDates[1])
+                    this.updateCapacityHint()
+                }
+            },
+            // Clicking just one date and closing the calendar almost always
+            // means a period of the same length again — default the end to
+            // the last day of that month, same as a single click used to do
+            // with the old start/end inputs.
+            onClose: (selectedDates) => {
+                if (selectedDates.length !== 1) return
+                const [y, m, d] = this.toISO(selectedDates[0]).split('-').map(Number)
                 const end = new Date(y, m - 1 + 1, d - 1)
-                this.fields.end.value = this.toISO(end)
-                this.updateCapacityHint()
-            }
+                this.rangePicker.setDate([selectedDates[0], end], true)
+            },
         })
+        this.fields.hours.addEventListener('input', () => this.updateCapacityHint())
     }
 
     toISO(date) {
@@ -340,10 +359,19 @@ class Budgets extends TimeKeeper {
 
         this.fields.name.value = budget?.name ?? ''
         this.fields.client.value = budget ? String(budget.client_id) : ''
-        this.fields.start.value = budget?.start_date ?? this.toISO(new Date())
-        this.fields.end.value = budget?.end_date ?? ''
         this.fields.hours.value = budget?.budgeted_hours ?? ''
         this.fields.notes.value = budget?.notes ?? ''
+
+        this.range.start = budget?.start_date ?? this.toISO(new Date())
+        if (budget) {
+            this.range.end = budget.end_date
+        } else {
+            // Same default a single click on the old start field used to
+            // produce: the rest of that month.
+            const [y, m, d] = this.range.start.split('-').map(Number)
+            this.range.end = this.toISO(new Date(y, m - 1 + 1, d - 1))
+        }
+        this.rangePicker.setDate([this.range.start, this.range.end], false)
 
         this.updateCapacityHint()
         this.showModal(this.formModal)
@@ -358,15 +386,15 @@ class Budgets extends TimeKeeper {
      * absurd. The authoritative figure is still whatever comes back on save.
      */
     updateCapacityHint() {
-        const { start, end, hours: hoursField } = this.fields
-        const budgeted = Number(hoursField.value)
+        const { start, end } = this.range
+        const budgeted = Number(this.fields.hours.value)
 
-        if (!start.value || !end.value || !budgeted) {
+        if (!start || !end || !budgeted) {
             this.capacityHint.textContent = ''
             return
         }
 
-        const days = this.businessDaysBetween(start.value, end.value)
+        const days = this.businessDaysBetween(start, end)
         if (!days) {
             this.capacityHint.textContent = 'That period contains no working days.'
             return
@@ -396,8 +424,8 @@ class Budgets extends TimeKeeper {
         const payload = {
             name: this.fields.name.value.trim(),
             client_id: Number(this.fields.client.value),
-            start_date: this.fields.start.value,
-            end_date: this.fields.end.value,
+            start_date: this.range.start,
+            end_date: this.range.end,
             budgeted_hours: Number(this.fields.hours.value),
             notes: this.fields.notes.value.trim(),
         }
@@ -492,7 +520,13 @@ class Budgets extends TimeKeeper {
         this.detailRange.textContent =
             `${detail.client_name ?? 'Unknown client'} · ${dateRange(detail)}`
 
-        this.detailEdit.onclick = () => this.openForm(detail)
+        // Closes the summary rather than stacking the form on top of it —
+        // two overlapping backdrops plus a wide detail view behind a narrow
+        // form modal made for a visibly janky transition.
+        this.detailEdit.onclick = () => {
+            this.hideModal(this.detailModal)
+            this.openForm(detail)
+        }
 
         this.detailBody.innerHTML = `
           <div class="tk-budget-card border-0 p-0 shadow-none" data-status="${detail.status}">
@@ -773,19 +807,21 @@ class Budgets extends TimeKeeper {
 
         document.addEventListener('keydown', (event) => {
             if (event.key !== 'Escape') return
-            // Innermost first: editing from the detail view stacks the two.
             if (!this.formModal.classList.contains('hidden')) this.hideModal(this.formModal)
             else if (!this.detailModal.classList.contains('hidden')) this.hideModal(this.detailModal)
         })
     }
 
     showModal(modal) {
+        if (!modal.classList.contains('hidden')) return
         modal.classList.remove('hidden')
+        lockBodyScroll()
     }
 
     hideModal(modal) {
-        if (!modal) return
+        if (!modal || modal.classList.contains('hidden')) return
         modal.classList.add('hidden')
+        unlockBodyScroll()
 
         if (modal === this.formModal) {
             this.editing = null

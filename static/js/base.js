@@ -22,6 +22,28 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 /**
+ * Body-scroll lock for modals, reference-counted.
+ *
+ * The budgets page can stack two modals (detail, then an editor on top of
+ * it), so a plain boolean would unlock the page as soon as the inner one
+ * closed while the outer was still open. Counting opens/closes keeps the
+ * lock held until every modal that asked for it has let go.
+ */
+let scrollLockCount = 0;
+
+export function lockBodyScroll() {
+    scrollLockCount++;
+    document.documentElement.classList.add('tk-scroll-locked');
+}
+
+export function unlockBodyScroll() {
+    scrollLockCount = Math.max(0, scrollLockCount - 1);
+    if (scrollLockCount === 0) {
+        document.documentElement.classList.remove('tk-scroll-locked');
+    }
+}
+
+/**
  * Stable per-client colour, shared by the History timeline and the Summary
  * charts.
  *

@@ -72,12 +72,10 @@
     </div>
   </div>
 
-  <!-- Create / edit.
-       z-[70] because this one stacks: Edit inside the detail view opens it on
-       top. Both backdrops are z-60 from .tk-modal-backdrop, and this element
-       comes first in the DOM, so at equal z-index the detail view would paint
-       over the form the user just asked for. -->
-  <div id="budget-form-modal" class="tk-modal-backdrop z-[70] hidden" role="dialog" aria-modal="true" aria-labelledby="budget-form-title">
+  <!-- Create / edit. Never shown stacked on the detail view — Edit closes
+       the detail modal first (see detailEdit.onclick) rather than opening on
+       top of it, so this only ever needs the default backdrop z-index. -->
+  <div id="budget-form-modal" class="tk-modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="budget-form-title">
     <div class="tk-modal">
       <div class="tk-modal-header">
         <h2 class="tk-card-title" id="budget-form-title">New budget</h2>
@@ -88,7 +86,7 @@
         </button>
       </div>
 
-      <form id="budget-form">
+      <form id="budget-form" class="flex min-h-0 flex-1 flex-col">
         <div class="tk-modal-body space-y-4">
           <div>
             <label class="tk-label" for="budget-name">Name</label>
@@ -106,15 +104,10 @@
             </select>
           </div>
 
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="tk-label" for="budget-start">Starts</label>
-              <input type="date" id="budget-start" class="tk-input tabular" required />
-            </div>
-            <div>
-              <label class="tk-label" for="budget-end">Ends</label>
-              <input type="date" id="budget-end" class="tk-input tabular" required />
-            </div>
+          <div>
+            <label class="tk-label" for="budget-range">Dates</label>
+            <input type="text" id="budget-range" class="tk-input tabular cursor-pointer" required
+                   placeholder="Select date range…" autocomplete="off" readonly />
           </div>
 
           <div>

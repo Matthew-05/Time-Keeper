@@ -891,6 +891,14 @@
      supports ::backdrop, but styling it can't use our CSS variables through
      Tailwind's @apply, and the app needs one modal that themes with everything
      else. Visibility is toggled with `hidden` from JS. */
+  /* Applied to <html> while a modal is open (see lockBodyScroll in base.js)
+     so the page behind the backdrop can't be scrolled by wheel/touch/keyboard
+     while it's covered. */
+  html.tk-scroll-locked,
+  html.tk-scroll-locked body {
+    overflow: hidden;
+  }
+
   .tk-modal-backdrop {
     align-items: center;
     background-color: rgb(15 23 42 / 0.45);
@@ -911,6 +919,11 @@
     flex-direction: column;
     max-height: min(32rem, 100%);
     max-width: 28rem;
+    /* Without this, a child that doesn't itself take part in the flex chain
+       (the budget form's <form> used to be exactly that) can push its own
+       height past max-height and spill its footer out below the rounded
+       card instead of being clipped and scrolled internally. */
+    overflow: hidden;
     width: 100%;
   }
 
