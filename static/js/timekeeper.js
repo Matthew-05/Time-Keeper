@@ -83,10 +83,8 @@ export class TimeKeeperIndex extends TimeKeeper {
         if (this.currentTaskClientId == null) {
             // Shown before the running task has been fetched — checkDayStatus
             // reveals the form, checkUnfinishedTasks supplies the client a
-            // moment later. Hold a loading state rather than flashing "Nothing
-            // recorded yet" at someone whose list isn't empty.
-            this.works.loading = true;
-            this.works.render();
+            // moment later.
+            this.works.showPending();
             return;
         }
 
@@ -629,6 +627,20 @@ export class TimeKeeperIndex extends TimeKeeper {
     async loadChoices() {
         try {
             const data = await this.fetchFromAPI('/autocomplete');
+
+            // Choices does not treat replaceChoices as a clean slate: it keeps
+            // whatever is currently *selected* and re-inserts it at the head of
+            // the new list. So refreshing while a client was selected listed
+            // that client twice — once retained, once from the fresh list — and
+            // pinned it above the server's most-recently-used ordering, hiding
+            // the client whose task had actually just ended. Dropping the
+            // selection first is what makes the replace an actual replace.
+            //
+            // Deliberately after the await: a failed fetch must leave the
+            // dropdown exactly as it was, not wipe the user's selection.
+            const selected = this.autocomplete.getValue(true);
+            if (selected) this.autocomplete.removeActiveItems();
+
             // replaceChoices = true: /autocomplete returns the full client list
             // already ordered most-recently-used first. Appending instead would
             // leave stale entries behind and freeze the original ordering.
@@ -641,6 +653,10 @@ export class TimeKeeperIndex extends TimeKeeper {
                 'label',
                 true
             );
+
+            // Restore the selection. setClientValue's echo guard stops this
+            // from firing a redundant /update_task_client.
+            if (selected) this.setClientValue(selected);
         } catch (error) {
             console.error('Failed to load choices:', error);
         }
@@ -650,16 +666,13 @@ export class TimeKeeperIndex extends TimeKeeper {
     /**
      * Re-pull the client list so the "most recent first" ordering reflects
      * tasks completed during this session, not just those that existed at page
-     * load. Preserves the current selection.
+     * load. `loadChoices` preserves the current selection itself — doing it
+     * again out here is what used to re-add the selected client on top of the
+     * copy Choices had already retained.
      */
     async refreshChoices() {
         if (!this.autocomplete) return;
-
-        const selected = this.autocomplete.getValue(true);
         await this.loadChoices();
-        if (selected) {
-            this.setClientValue(selected);
-        }
     }
 
 

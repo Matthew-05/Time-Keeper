@@ -62,11 +62,41 @@ export class WorksList {
      * render pass without causing a flicker.
      */
     async setTarget(dateStr, clientId, { force = false } = {}) {
-        if (!force && dateStr === this.date && clientId === this.clientId) return;
+        // The no-op only applies to a *settled* list. One showing a spinner or
+        // an error has nothing on screen worth preserving, and skipping the
+        // load would strand it there — which is exactly what left the Today
+        // page on "Loading works…" when a task was started for the client the
+        // list happened to be pointing at already.
+        const settled = !this.loading && !this.failed;
+        if (!force && settled && dateStr === this.date && clientId === this.clientId) return;
+
         this.date = dateStr;
         this.clientId = clientId;
         this.editingId = null;
         await this.load();
+    }
+
+    /**
+     * Show a loading state for a target that isn't known yet.
+     *
+     * The dashboard reveals the works list from one request (is a task
+     * running?) and learns the client from the next, so there's a moment with
+     * nothing to load. A spinner beats flashing "Nothing recorded yet" at
+     * someone whose list isn't empty.
+     *
+     * Clearing `clientId` matters as much as the spinner: it means the
+     * `setTarget` that follows always has a different target to compare
+     * against, whichever client turns out to be running.
+     */
+    showPending() {
+        this.clientId = null;
+        this.editingId = null;
+        this.loading = true;
+        this.failed = false;
+        // Invalidate anything in flight — its response belongs to the previous
+        // target and must not paint over the placeholder.
+        this.loadToken++;
+        this.render();
     }
 
     async load() {

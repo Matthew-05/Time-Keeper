@@ -60,7 +60,7 @@ from flask_admin.theme import Bootstrap4Theme
 import webview
 from werkzeug.serving import run_simple
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
-from sqlalchemy import func, String, literal
+from sqlalchemy import func, String, literal, case
 import socket
 
 
@@ -494,16 +494,27 @@ _IN_PROGRESS_SORT_KEY = "9999-12-31 23:59:59.999999"
 
 
 def _task_end_sort_string():
-    """Lexicographically sortable 'YYYY-MM-DD HH:MM:SS.ffffff' end moment per task.
+    """Lexicographically sortable 'YYYY-MM-DD HH:MM:SS.ffffff' activity moment per task.
 
     SQLAlchemy stores SQLite Date/Time as zero-padded ISO text, so plain string
-    comparison is chronological. A task that has not been completed yet has no
-    end time; it counts as the most recent activity, so it gets a sentinel key
-    that sorts above every real timestamp.
+    comparison is chronological.
+
+    A task with no end time gets the sentinel, which sorts above every real
+    timestamp — but **only if it is today's**. `end_day` doesn't close tasks
+    that were left open, so forgetting to complete one and ending the day
+    leaves an open row behind permanently. Treating that as "in progress" gave
+    its client the sentinel forever and pinned it to the top of the client
+    dropdown above genuinely recent work, months later. An abandoned open task
+    is evidence of activity on the day it started and nothing more, so it falls
+    back to its own start time.
     """
-    return func.coalesce(
-        Task_Item.date.cast(String) + literal(" ") + Task_Item.end_time.cast(String),
-        literal(_IN_PROGRESS_SORT_KEY),
+    ended = Task_Item.date.cast(String) + literal(" ") + Task_Item.end_time.cast(String)
+    started = Task_Item.date.cast(String) + literal(" ") + Task_Item.start_time.cast(String)
+
+    return case(
+        (Task_Item.end_time.isnot(None), ended),
+        (Task_Item.date == date.today(), literal(_IN_PROGRESS_SORT_KEY)),
+        else_=started,
     )
 
 
