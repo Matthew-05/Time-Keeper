@@ -335,13 +335,21 @@ def _safe_divide(numerator, denominator):
     return None if not denominator else numerator / denominator
 
 
-def status_for(percent_used, projected_percent, started, ended, paused=False):
+def status_for(
+    percent_used,
+    projected_percent,
+    started,
+    ended,
+    paused=False,
+    risk_threshold_percent=10.0,
+):
     """One word for where a budget stands. Drives colour everywhere in the UI.
 
     ``over`` is about what has already happened; ``at_risk`` is about where the
     current pace lands. Keeping them separate matters — a budget at 40% on day
     three of a month is fine, and the same 40% on day twenty-five is not, and
-    only the projection can tell them apart.
+    only the projection can tell them apart. Each budget supplies its own
+    tolerated projected overage, defaulting to 10%.
 
     ``paused`` sits between the calendar facts and the pace verdict, and the
     order is the design:
@@ -365,7 +373,10 @@ def status_for(percent_used, projected_percent, started, ended, paused=False):
         return 'closed'
     if paused:
         return 'paused'
-    if projected_percent is not None and projected_percent > 105:
+    if (
+        projected_percent is not None
+        and projected_percent > 100 + risk_threshold_percent
+    ):
         return 'at_risk'
     return 'on_track'
 
@@ -404,6 +415,10 @@ def summarise(budget, used_hours, hours_per_month, today=None, holds=(), day_hou
     held = hold_days(holds, today)
 
     budgeted = float(budget.budgeted_hours)
+    raw_risk_threshold = getattr(budget, 'risk_threshold_percent', None)
+    risk_threshold = float(
+        raw_risk_threshold if raw_risk_threshold is not None else 10.0
+    )
     used = round(used_hours, 2)
     remaining = round(budgeted - used, 2)
     percent_used = round(used / budgeted * 100, 1) if budgeted else None
@@ -491,6 +506,7 @@ def summarise(budget, used_hours, hours_per_month, today=None, holds=(), day_hou
         'start_date': budget.start_date.isoformat(),
         'end_date': budget.end_date.isoformat(),
         'budgeted_hours': round(budgeted, 2),
+        'risk_threshold_percent': round(risk_threshold, 2),
         'notes': budget.notes,
         'closed_at': budget.closed_at.isoformat() if manually_closed else None,
 
@@ -534,7 +550,14 @@ def summarise(budget, used_hours, hours_per_month, today=None, holds=(), day_hou
         # the point. Pausing shouldn't make a budget vanish from the screen you
         # log time on.
         'is_active': started and not ended,
-        'status': status_for(percent_used, projected_percent, started, ended, paused),
+        'status': status_for(
+            percent_used,
+            projected_percent,
+            started,
+            ended,
+            paused,
+            risk_threshold,
+        ),
 
         'is_paused': paused,
         'paused_since': current.start_date.isoformat() if current else None,

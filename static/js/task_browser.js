@@ -819,12 +819,18 @@ export class TaskBrowser extends TimeKeeper {
         detailCell.className = 'p-0';
 
         const detailTable = document.createElement('table');
-        detailTable.className = 'tk-table tk-table-nested tk-table-hover';
+        detailTable.className = 'tk-table tk-table-nested tk-table-hover tk-task-table';
         detailTable.innerHTML = `
+            <colgroup>
+                <col class="tk-task-time-column">
+                <col class="tk-task-time-column">
+                <col class="tk-task-duration-column">
+                <col class="tk-task-actions-column">
+            </colgroup>
             <thead>
                 <tr>
-                    <th>Start</th>
-                    <th>End</th>
+                    <th class="tk-task-time-heading">Start</th>
+                    <th class="tk-task-time-heading">End</th>
                     <th class="tk-num">Duration</th>
                     <th class="tk-task-actions-heading">Actions</th>
                 </tr>
@@ -832,11 +838,11 @@ export class TaskBrowser extends TimeKeeper {
             <tbody>
                 ${client.tasks.map(task => `
                     <tr data-task-id="${task.id}" class="${task.is_ongoing ? 'tk-row-ongoing' : ''}">
-                        <td class="tk-num whitespace-nowrap">
+                        <td class="tk-num tk-task-time-cell whitespace-nowrap">
                             <span class="time-display">${this.convertTo12HourFormat(task.start_time)}</span>
                             <input type="text" class="task-time-picker start-time tk-time-input hidden" value="${task.start_time}">
                         </td>
-                        <td class="tk-num whitespace-nowrap">
+                        <td class="tk-num tk-task-time-cell whitespace-nowrap">
                             <span class="time-display">
                                 ${task.is_ongoing ?
                 `${this.convertTo12HourFormat(task.end_time)} <span class="tk-badge tk-badge-warn ml-1.5">Ongoing</span>` :

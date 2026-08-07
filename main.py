@@ -496,6 +496,28 @@ def _ensure_budget_closed_at_column():
     print('Added budget.closed_at')
 
 
+def _ensure_budget_risk_threshold_column():
+    """Backfill the per-budget at-risk threshold on existing SQLite databases."""
+    eng = db.engine
+    if eng.dialect.name != 'sqlite':
+        return
+    table = Budget.__table__.name
+    insp = inspect(eng)
+    if table not in insp.get_table_names():
+        return
+    if any(c['name'] == 'risk_threshold_percent' for c in insp.get_columns(table)):
+        return
+
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                f'ALTER TABLE {table} ADD COLUMN '
+                'risk_threshold_percent FLOAT NOT NULL DEFAULT 10'
+            )
+        )
+    print('Added budget.risk_threshold_percent')
+
+
 def _backfill_works_from_descriptions():
     """Seed `work` from the superseded `task__item.description` column.
 
@@ -563,6 +585,7 @@ with app.app_context():
     _ensure_task_budget_id_column()
     _ensure_task_budget_excluded_column()
     _ensure_budget_closed_at_column()
+    _ensure_budget_risk_threshold_column()
     if _work_table_is_new:
         _backfill_works_from_descriptions()
 
@@ -1623,6 +1646,15 @@ def _parse_budget_payload(data, partial=False):
         if hours > 100000:
             return None, "That's more hours than anyone has. Check the figure."
         fields['budgeted_hours'] = round(hours, 2)
+
+    if not partial or 'risk_threshold_percent' in data:
+        try:
+            threshold = float(data.get('risk_threshold_percent', 10.0))
+        except (TypeError, ValueError):
+            return None, 'At-risk threshold must be a percentage.'
+        if not math.isfinite(threshold) or threshold < 0 or threshold > 100:
+            return None, 'At-risk threshold must be between 0% and 100%.'
+        fields['risk_threshold_percent'] = round(threshold, 2)
 
     if 'notes' in data:
         notes = (data.get('notes') or '').strip()

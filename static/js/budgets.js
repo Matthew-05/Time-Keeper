@@ -73,6 +73,7 @@ class Budgets extends TimeKeeper {
             client: document.getElementById('budget-client'),
             range: document.getElementById('budget-range'),
             hours: document.getElementById('budget-hours'),
+            riskThreshold: document.getElementById('budget-risk-threshold'),
             notes: document.getElementById('budget-notes'),
         }
 
@@ -151,18 +152,24 @@ class Budgets extends TimeKeeper {
 
         const budgeted = active.reduce((sum, b) => sum + b.budgeted_hours, 0)
         const used = active.reduce((sum, b) => sum + b.used_hours, 0)
-        const risk = active.filter((b) => b.status === 'over')
+        const atRisk = active.filter((b) => b.status === 'at_risk')
+        const overBudget = active.filter((b) => b.status === 'over')
 
         document.getElementById('overview-count').textContent = active.length
         document.getElementById('overview-budgeted').textContent = hours(budgeted)
         document.getElementById('overview-used').textContent =
             `${hours(used)}${budgeted ? ` · ${percent((used / budgeted) * 100)}` : ''}`
 
+        const atRiskEl = document.getElementById('overview-at-risk')
+        atRiskEl.textContent = atRisk.length
+        atRiskEl.classList.toggle('text-warn', atRisk.length > 0)
+        atRiskEl.classList.toggle('text-text', atRisk.length === 0)
+
         const riskEl = document.getElementById('overview-risk')
-        riskEl.textContent = risk.length
-        // The one figure on this row that should draw the eye when non-zero.
-        riskEl.classList.toggle('text-danger', risk.length > 0)
-        riskEl.classList.toggle('text-text', risk.length === 0)
+        riskEl.textContent = overBudget.length
+        // Already-over work is the strongest warning on this row.
+        riskEl.classList.toggle('text-danger', overBudget.length > 0)
+        riskEl.classList.toggle('text-text', overBudget.length === 0)
 
         this.overview.classList.remove('hidden')
         this.subtitle.textContent =
@@ -200,6 +207,7 @@ class Budgets extends TimeKeeper {
 
     card(budget) {
         const pace = paceNote(budget)
+        const diagnosis = this.diagnosisInsight(budget)
 
         // Days-left reads better than a second date on a card that already
         // carries the range in its subhead.
@@ -231,7 +239,10 @@ class Budgets extends TimeKeeper {
                   ${this.escapeHtml(budget.client_name ?? 'Unknown client')} · ${dateRange(budget)}
                 </p>
               </div>
-              <span class="tk-badge tk-badge-status flex-shrink-0">${STATUS_LABEL[budget.status]}</span>
+              <div class="flex flex-shrink-0 items-center gap-1.5">
+                <span class="tk-badge tk-badge-status">${STATUS_LABEL[budget.status]}</span>
+                ${diagnosis ? this.insightIcon(diagnosis, `${STATUS_LABEL[budget.status]} diagnosis`) : ''}
+              </div>
             </div>
 
             <div class="mb-2 flex items-baseline justify-between gap-3">
@@ -392,6 +403,7 @@ class Budgets extends TimeKeeper {
         this.fields.name.value = budget?.name ?? ''
         this.fields.client.value = budget ? String(budget.client_id) : ''
         this.fields.hours.value = budget?.budgeted_hours ?? ''
+        this.fields.riskThreshold.value = budget?.risk_threshold_percent ?? 10
         this.fields.notes.value = budget?.notes ?? ''
 
         this.range.start = budget?.start_date ?? this.toISO(new Date())
@@ -459,6 +471,7 @@ class Budgets extends TimeKeeper {
             start_date: this.range.start,
             end_date: this.range.end,
             budgeted_hours: Number(this.fields.hours.value),
+            risk_threshold_percent: Number(this.fields.riskThreshold.value),
             notes: this.fields.notes.value.trim(),
         }
 
@@ -592,6 +605,7 @@ class Budgets extends TimeKeeper {
 
     renderDetail(detail) {
         const canClose = detail.is_active && !detail.closed_at
+        const diagnosis = this.diagnosisInsight(detail)
         this.detailCloseBudget.classList.toggle('hidden', !canClose)
         this.resetCloseBudgetButton()
 
@@ -614,7 +628,10 @@ class Budgets extends TimeKeeper {
               <span class="tabular text-lg font-semibold text-text">
                 ${hours(detail.used_hours)}<span class="font-normal text-faint"> / ${hours(detail.budgeted_hours)} hrs</span>
               </span>
-              <span class="tk-badge tk-badge-status">${STATUS_LABEL[detail.status]}</span>
+              <div class="flex items-center gap-1.5">
+                <span class="tk-badge tk-badge-status">${STATUS_LABEL[detail.status]}</span>
+                ${diagnosis ? this.insightIcon(diagnosis, `${STATUS_LABEL[detail.status]} diagnosis`) : ''}
+              </div>
             </div>
             ${meter(detail, { large: true })}
             <p class="mt-2 text-sm text-muted">${this.escapeHtml(headline(detail))}</p>
@@ -1063,18 +1080,34 @@ class Budgets extends TimeKeeper {
         if (this.detailId === budgetId) await this.openDetail(budgetId)
     }
 
+    diagnosisInsight(budget) {
+        if (budget.status === 'at_risk') {
+            return `At risk because the current pace projects ${hours(budget.projected_hours)} hrs (${percent(budget.projected_percent)} of the ${hours(budget.budgeted_hours)}-hr commitment), ${hours(budget.projected_overage)} hrs over. This budget's threshold is ${hours(budget.risk_threshold_percent)}% over.`
+        }
+        if (budget.status === 'over') {
+            return `Over budget because ${hours(budget.used_hours)} hrs have already been used against ${hours(budget.budgeted_hours)} committed, ${hours(budget.over_by)} hrs over.`
+        }
+        return null
+    }
+
+    insightIcon(insight, label) {
+        return `
+          <button type="button" class="tk-insight" data-insight="${insight}"
+                  aria-label="${label}: ${insight}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="9"></circle>
+              <path d="M12 11v5M12 8h.01"></path>
+            </svg>
+          </button>
+        `
+    }
+
     insightLabel(label, insight) {
         return `
           <div class="tk-stat-label flex items-center gap-1">
             ${label}
-            <button type="button" class="tk-insight" data-insight="${insight}"
-                    aria-label="${label}: ${insight}">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="12" cy="12" r="9"></circle>
-                <path d="M12 11v5M12 8h.01"></path>
-              </svg>
-            </button>
+            ${this.insightIcon(insight, label)}
           </div>
         `
     }

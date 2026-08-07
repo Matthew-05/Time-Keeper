@@ -23,7 +23,7 @@
     <!-- Portfolio line. Rendered from the same summaries as the cards below,
          so the totals can't drift from what they're totalling. -->
     <section id="budgets-overview" class="tk-card mb-4 hidden">
-      <div class="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border sm:grid-cols-4">
+      <div class="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border sm:grid-cols-3 lg:grid-cols-5">
         <div class="bg-surface px-4 py-3">
           <div class="tk-stat-label">Active budgets</div>
           <div class="tabular mt-1 text-xl font-semibold text-text" id="overview-count">—</div>
@@ -49,6 +49,17 @@
             </button>
           </div>
           <div class="tabular mt-1 text-xl font-semibold text-text" id="overview-used">—</div>
+        </div>
+        <div class="bg-surface px-4 py-3">
+          <div class="tk-stat-label flex items-center gap-1">
+            At risk
+            <button type="button" class="tk-insight" data-insight="Active budgets whose projection exceeds their own at-risk threshold. New budgets default to 10%. Budgets already over are counted separately." aria-label="At risk: Active budgets whose projection exceeds their own at-risk threshold. New budgets default to 10%. Budgets already over are counted separately.">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" />
+              </svg>
+            </button>
+          </div>
+          <div class="tabular mt-1 text-xl font-semibold text-text" id="overview-at-risk">—</div>
         </div>
         <div class="bg-surface px-4 py-3">
           <div class="tk-stat-label flex items-center gap-1">
@@ -139,6 +150,15 @@
                  this window the budget would consume. Catches a fat-fingered
                  400-hour month before it's saved rather than after. -->
             <p class="mt-1.5 text-xs text-muted" id="budget-capacity-hint"></p>
+          </div>
+
+          <div>
+            <label class="tk-label" for="budget-risk-threshold">At-risk threshold (%)</label>
+            <input type="number" id="budget-risk-threshold" class="tk-input tabular" required
+                   min="0" max="100" step="0.5" value="10" />
+            <p class="mt-1.5 text-xs text-muted">
+              Mark this budget at risk when its projected total is more than this percentage over the commitment.
+            </p>
           </div>
 
           <div>

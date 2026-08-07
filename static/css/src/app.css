@@ -753,9 +753,31 @@
   /* Editing a history entry stays a single, stable table row. The previous
      layout stacked Delete, a full-width select, then Save/Cancel, making the
      row jump to several times its normal height. */
+  .tk-task-table {
+    min-width: 44rem;
+    table-layout: fixed;
+  }
+
+  .tk-task-time-column {
+    width: 7.5rem;
+  }
+
+  .tk-task-time-heading,
+  .tk-task-time-cell {
+    text-align: left;
+  }
+
+  .tk-task-duration-column {
+    width: 6.5rem;
+  }
+
+  .tk-task-actions-column {
+    width: 20rem;
+  }
+
   .tk-task-actions-heading,
   .tk-task-actions-cell {
-    width: 20rem;
+    text-align: right;
   }
 
   .tk-task-view-actions,
@@ -793,7 +815,7 @@
 
   .tk-table-nested .task-time-picker {
     display: block;
-    margin-inline: auto 0;
+    margin-inline: 0 auto;
   }
 
   .tk-table-nested .task-time-picker.hidden {

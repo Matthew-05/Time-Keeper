@@ -42,6 +42,11 @@ class Budget(db.Model):
     start_date = db.Column(db.Date, nullable=False)
     end_date = db.Column(db.Date, nullable=False)  # Inclusive.
     budgeted_hours = db.Column(db.Float, nullable=False)
+    # How far above the commitment the projection may run before this budget
+    # becomes at-risk. Different engagements tolerate different variance.
+    risk_threshold_percent = db.Column(
+        db.Float, nullable=False, default=10.0, server_default='10'
+    )
     notes = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
     # A manual close is distinct from the scheduled end date. Keeping both
@@ -55,6 +60,10 @@ class Budget(db.Model):
         db.Index('ix_budget_client_dates', 'client_id', 'start_date', 'end_date'),
         db.CheckConstraint('end_date >= start_date', name='ck_budget_dates_ordered'),
         db.CheckConstraint('budgeted_hours > 0', name='ck_budget_hours_positive'),
+        db.CheckConstraint(
+            'risk_threshold_percent >= 0 AND risk_threshold_percent <= 100',
+            name='ck_budget_risk_threshold_range',
+        ),
     )
 
     def __repr__(self):
