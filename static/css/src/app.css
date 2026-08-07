@@ -1285,6 +1285,52 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Small, focusable explanations for figures whose arithmetic is not obvious
+     from the label alone. The popover is mounted on <body> by budgets.js so it
+     is not clipped by rounded cards, tables, or modal scroll containers. */
+  .tk-insight {
+    align-items: center;
+    border-radius: 999px;
+    color: var(--faint);
+    cursor: help;
+    display: inline-flex;
+    flex-shrink: 0;
+    height: 0.875rem;
+    justify-content: center;
+    transition: color 0.15s ease, background-color 0.15s ease;
+    width: 0.875rem;
+  }
+
+  .tk-insight:hover,
+  .tk-insight:focus-visible {
+    background-color: var(--accent-soft);
+    color: var(--accent-text);
+    outline: none;
+  }
+
+  .tk-insight svg {
+    height: 0.75rem;
+    width: 0.75rem;
+  }
+
+  .tk-insight-popover {
+    background-color: var(--text);
+    border: 1px solid color-mix(in srgb, var(--surface) 18%, transparent);
+    border-radius: 7px;
+    box-shadow: var(--shadow-pop);
+    color: var(--surface);
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.35;
+    max-width: min(17rem, calc(100vw - 1rem));
+    padding: 0.5rem 0.625rem;
+    pointer-events: none;
+    position: fixed;
+    text-transform: none;
+    letter-spacing: normal;
+    z-index: 70;
+  }
+
   .tk-badge-status {
     background-color: var(--status-soft);
     color: var(--status-text);

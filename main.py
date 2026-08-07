@@ -465,6 +465,23 @@ def _ensure_task_budget_id_column():
     print('Added task__item.budget_id')
 
 
+def _ensure_budget_closed_at_column():
+    """Add the nullable manual-close marker to pre-existing SQLite databases."""
+    eng = db.engine
+    if eng.dialect.name != 'sqlite':
+        return
+    table = Budget.__table__.name
+    insp = inspect(eng)
+    if table not in insp.get_table_names():
+        return
+    if any(c['name'] == 'closed_at' for c in insp.get_columns(table)):
+        return
+
+    with eng.begin() as conn:
+        conn.execute(text(f'ALTER TABLE {table} ADD COLUMN closed_at DATETIME'))
+    print('Added budget.closed_at')
+
+
 def _backfill_works_from_descriptions():
     """Seed `work` from the superseded `task__item.description` column.
 
@@ -530,6 +547,7 @@ with app.app_context():
     # After the rebuild above, which recreates task__item from a fixed column
     # list and would otherwise drop the column straight back off again.
     _ensure_task_budget_id_column()
+    _ensure_budget_closed_at_column()
     if _work_table_is_new:
         _backfill_works_from_descriptions()
 
@@ -1646,6 +1664,26 @@ def api_delete_budget(budget_id):
     db.session.delete(budget)
     db.session.commit()
     return jsonify({'success': True})
+
+
+@app.route('/api/budgets/<int:budget_id>/close', methods=['POST'])
+def api_close_budget(budget_id):
+    """Close a live budget without erasing its originally scheduled end date."""
+    budget = _budget_or_404(budget_id)
+    if budget is None:
+        return jsonify({'error': 'Budget not found'}), 404
+    if budget.closed_at is not None:
+        return jsonify({'error': 'This budget is already closed.'}), 409
+
+    today = date.today()
+    if today < budget.start_date:
+        return jsonify({'error': 'An upcoming budget cannot be closed.'}), 400
+    if today > budget.end_date:
+        return jsonify({'error': 'This budget has already ended.'}), 409
+
+    budget.closed_at = datetime.now()
+    db.session.commit()
+    return jsonify(_summarise_one(budget))
 
 
 # --------------------------------------------------------------------------

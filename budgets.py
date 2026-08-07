@@ -226,8 +226,14 @@ def eligible_budgets(budgets, day):
     order is stable across requests — an allocation that reshuffled itself
     between two page loads would be impossible to trust.
     """
-    covering = [b for b in budgets if b.start_date <= day <= b.end_date]
-    covering.sort(key=lambda b: (b.end_date, b.start_date, b.id))
+    def effective_end(budget):
+        closed_at = getattr(budget, 'closed_at', None)
+        return min(budget.end_date, closed_at.date()) if closed_at else budget.end_date
+
+    covering = [
+        b for b in budgets if b.start_date <= day <= effective_end(b)
+    ]
+    covering.sort(key=lambda b: (effective_end(b), b.start_date, b.id))
     return covering
 
 
@@ -400,7 +406,8 @@ def summarise(budget, used_hours, hours_per_month, today=None, holds=(), day_hou
     percent_used = round(used / budgeted * 100, 1) if budgeted else None
 
     started = today >= budget.start_date
-    ended = today > budget.end_date
+    manually_closed = getattr(budget, 'closed_at', None) is not None
+    ended = manually_closed or today > budget.end_date
     elapsed_end = min(today, budget.end_date)
     paused = started and not ended and today in held
 
@@ -482,6 +489,7 @@ def summarise(budget, used_hours, hours_per_month, today=None, holds=(), day_hou
         'end_date': budget.end_date.isoformat(),
         'budgeted_hours': round(budgeted, 2),
         'notes': budget.notes,
+        'closed_at': budget.closed_at.isoformat() if manually_closed else None,
 
         'used_hours': used,
         'remaining_hours': remaining,

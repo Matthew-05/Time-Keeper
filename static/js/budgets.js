@@ -31,8 +31,16 @@ const FILTERS = {
     // months. The dashed card and the badge are what mark it out.
     active: (b) => b.is_active,
     upcoming: (b) => b.status === 'upcoming',
-    closed: (b) => b.status === 'closed',
+    // An ended budget can deliberately keep an "over budget" badge, so the
+    // closed tab follows whether it is still active rather than badge text.
+    closed: (b) => b.started && !b.is_active,
     all: () => true,
+}
+
+const INSIGHTS = {
+    used: 'Task time allocated to this budget. Each client\'s daily time is rounded to the nearest quarter hour.',
+    projected: 'Estimated total at the end date if your capacity-weighted pace so far continues. Weekends and held days are excluded.',
+    pace: 'Average hours used per elapsed working day. Weekends and held days are excluded.',
 }
 
 class Budgets extends TimeKeeper {
@@ -58,6 +66,7 @@ class Budgets extends TimeKeeper {
         this.detailTitle = document.getElementById('budget-detail-title')
         this.detailRange = document.getElementById('budget-detail-range')
         this.detailEdit = document.getElementById('budget-detail-edit')
+        this.detailCloseBudget = document.getElementById('budget-detail-close-budget')
 
         this.fields = {
             name: document.getElementById('budget-name'),
@@ -76,8 +85,10 @@ class Budgets extends TimeKeeper {
         this.budgets = []
         this.filter = 'active'
         this.editing = null
+        this.formReturnBudgetId = null
         this.detailId = null
         this.chart = null
+        this.closeBudgetResetTimer = null
 
         // Guards a slow response from painting over a newer one — the same
         // problem works.js solves with its loadToken.
@@ -88,6 +99,7 @@ class Budgets extends TimeKeeper {
         this.bindFilters()
         this.bindForm()
         this.bindModals()
+        this.bindInsights()
         this.bindTheme()
         await this.load()
     }
@@ -173,8 +185,12 @@ class Budgets extends TimeKeeper {
         this.list.innerHTML = budgets.map((b) => this.card(b)).join('')
 
         this.list.querySelectorAll('[data-budget-id]').forEach((card) => {
-            card.addEventListener('click', () => this.openDetail(Number(card.dataset.budgetId)))
+            card.addEventListener('click', (event) => {
+                if (event.target.closest('.tk-insight')) return
+                this.openDetail(Number(card.dataset.budgetId))
+            })
             card.addEventListener('keydown', (event) => {
+                if (event.target.closest('.tk-insight')) return
                 if (event.key !== 'Enter' && event.key !== ' ') return
                 event.preventDefault()
                 this.openDetail(Number(card.dataset.budgetId))
@@ -235,11 +251,11 @@ class Budgets extends TimeKeeper {
                 <div class="tk-stat-value">${hours(budget.remaining_hours)}<span class="font-normal text-faint"> hrs</span></div>
               </div>
               <div>
-                <div class="tk-stat-label">Projected</div>
+                ${this.insightLabel('Projected', INSIGHTS.projected)}
                 <div class="tk-stat-value">${hours(budget.projected_hours)}<span class="font-normal text-faint"> hrs</span></div>
               </div>
               <div>
-                <div class="tk-stat-label">Pace</div>
+                ${this.insightLabel('Pace', INSIGHTS.pace)}
                 <div class="tk-stat-value">${hours(budget.pace_hours_per_day)}<span class="font-normal text-faint"> /day</span></div>
               </div>
               <div>
@@ -365,8 +381,9 @@ class Budgets extends TimeKeeper {
         return `${date.getFullYear()}-${month}-${day}`
     }
 
-    openForm(budget = null) {
+    openForm(budget = null, { returnToDetail = false } = {}) {
         this.editing = budget
+        this.formReturnBudgetId = returnToDetail && budget ? budget.id : null
 
         this.formTitle.textContent = budget ? 'Edit budget' : 'New budget'
         this.saveButton.textContent = budget ? 'Save changes' : 'Create budget'
@@ -446,6 +463,7 @@ class Budgets extends TimeKeeper {
         }
 
         const editing = this.editing
+        const returnBudgetId = this.formReturnBudgetId
         this.saveButton.disabled = true
 
         try {
@@ -461,13 +479,13 @@ class Budgets extends TimeKeeper {
                 { quiet: true }
             )
 
-            this.hideModal(this.formModal)
+            // Wait to restore the detail view until the list reload has
+            // completed, so it opens with the newly saved figures.
+            this.hideModal(this.formModal, { reopenDetail: false })
             this.showToast(editing ? 'Budget updated' : 'Budget created', 'success')
             await this.load()
 
-            // Re-open the detail view on top of fresh figures if that's where
-            // the edit came from.
-            if (editing && this.detailId === editing.id) await this.openDetail(editing.id)
+            if (editing && returnBudgetId) await this.openDetail(returnBudgetId)
         } catch (error) {
             this.showToast(error.message, 'error')
         } finally {
@@ -497,7 +515,7 @@ class Budgets extends TimeKeeper {
                 { method: 'DELETE' },
                 { quiet: true }
             )
-            this.hideModal(this.formModal)
+            this.hideModal(this.formModal, { reopenDetail: false })
             this.hideModal(this.detailModal)
             this.detailId = null
             this.showToast('Budget deleted. The time it tracked is untouched.', 'success')
@@ -507,6 +525,49 @@ class Budgets extends TimeKeeper {
         } finally {
             this.deleteButton.classList.remove('tk-btn-danger-armed')
             this.deleteButton.textContent = 'Delete'
+        }
+    }
+
+    resetCloseBudgetButton() {
+        if (this.closeBudgetResetTimer) {
+            clearTimeout(this.closeBudgetResetTimer)
+            this.closeBudgetResetTimer = null
+        }
+        this.detailCloseBudget.disabled = false
+        this.detailCloseBudget.classList.remove('tk-btn-danger-armed')
+        this.detailCloseBudget.textContent = 'Close budget'
+    }
+
+    async closeBudget() {
+        const detail = this.detail
+        if (!detail?.is_active || detail.closed_at) return
+
+        // Closing stops future automatic allocation, so require the same
+        // deliberate second click used by Delete without interrupting the
+        // flow with a browser-native confirmation dialog.
+        if (!this.detailCloseBudget.classList.contains('tk-btn-danger-armed')) {
+            this.detailCloseBudget.classList.add('tk-btn-danger-armed')
+            this.detailCloseBudget.textContent = 'Really close?'
+            this.closeBudgetResetTimer = setTimeout(() => {
+                this.closeBudgetResetTimer = null
+                this.resetCloseBudgetButton()
+            }, 4000)
+            return
+        }
+
+        this.detailCloseBudget.disabled = true
+        try {
+            await this.fetchFromAPI(
+                `/api/budgets/${detail.id}/close`,
+                { method: 'POST' },
+                { quiet: true }
+            )
+            this.showToast('Budget closed. Time on later dates will no longer be allocated to it.', 'success')
+            await this.load()
+            if (this.detailId === detail.id) await this.openDetail(detail.id)
+        } catch (error) {
+            this.showToast(error.message, 'error')
+            this.resetCloseBudgetButton()
         }
     }
 
@@ -530,6 +591,10 @@ class Budgets extends TimeKeeper {
     }
 
     renderDetail(detail) {
+        const canClose = detail.is_active && !detail.closed_at
+        this.detailCloseBudget.classList.toggle('hidden', !canClose)
+        this.resetCloseBudgetButton()
+
         this.detail = detail
         this.detailTitle.textContent = detail.name
         this.detailRange.textContent =
@@ -540,7 +605,7 @@ class Budgets extends TimeKeeper {
         // form modal made for a visibly janky transition.
         this.detailEdit.onclick = () => {
             this.hideModal(this.detailModal)
-            this.openForm(detail)
+            this.openForm(detail, { returnToDetail: true })
         }
 
         this.detailBody.innerHTML = `
@@ -556,9 +621,9 @@ class Budgets extends TimeKeeper {
           </div>
 
           <div class="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border sm:grid-cols-4">
-            ${this.detailStat('Used', `${hours(detail.used_hours)} hrs`, percent(detail.percent_used))}
+            ${this.detailStat('Used', `${hours(detail.used_hours)} hrs`, percent(detail.percent_used), INSIGHTS.used)}
             ${this.detailStat('Remaining', `${hours(detail.remaining_hours)} hrs`, `${detail.remaining_business_days} work days`)}
-            ${this.detailStat('Projected', `${hours(detail.projected_hours)} hrs`, percent(detail.projected_percent))}
+            ${this.detailStat('Projected', `${hours(detail.projected_hours)} hrs`, percent(detail.projected_percent), INSIGHTS.projected)}
             ${this.detailStat('Period gone', percent(detail.percent_elapsed), `${detail.elapsed_business_days}/${detail.total_business_days} days`)}
           </div>
 
@@ -576,12 +641,12 @@ class Budgets extends TimeKeeper {
             }
           </p>
 
-          ${this.holdsSection(detail)}
-
           <div class="mt-5">
             <h3 class="tk-card-title mb-2">Burn</h3>
             <div class="h-52"><canvas id="burn-chart"></canvas></div>
           </div>
+
+          ${this.holdsSection(detail)}
 
           <div class="mt-5">
             <div class="mb-2 flex items-center justify-between gap-3">
@@ -600,10 +665,8 @@ class Budgets extends TimeKeeper {
     /**
      * Holds — the periods this project was paused.
      *
-     * Lives above the burn chart rather than below the entries because it's
-     * the explanation for the shape of everything under it. Somebody looking
-     * at a flat fortnight in the middle of the chart should find the reason
-     * before they find the data.
+     * Lives directly below the burn chart so the graph is encountered first
+     * and its held-day shading leads naturally into the dates that explain it.
      *
      * Two ways in, because there are two genuinely different situations:
      *
@@ -683,7 +746,7 @@ class Budgets extends TimeKeeper {
             </div>
             <p class="mb-2 text-xs text-faint">
               Held days are removed from this budget's capacity, so pace, projection and the
-              ideal line below all ignore them.
+              ideal line above all ignore them.
               ${
                   detail.held_business_days > 0
                       ? `<span class="tabular font-semibold text-muted">${detail.held_business_days}</span> work day${
@@ -992,10 +1055,26 @@ class Budgets extends TimeKeeper {
         if (this.detailId === budgetId) await this.openDetail(budgetId)
     }
 
-    detailStat(label, value, sub) {
+    insightLabel(label, insight) {
+        return `
+          <div class="tk-stat-label flex items-center gap-1">
+            ${label}
+            <button type="button" class="tk-insight" data-insight="${insight}"
+                    aria-label="${label}: ${insight}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"></circle>
+                <path d="M12 11v5M12 8h.01"></path>
+              </svg>
+            </button>
+          </div>
+        `
+    }
+
+    detailStat(label, value, sub, insight = null) {
         return `
           <div class="bg-surface px-3 py-2.5">
-            <div class="tk-stat-label">${label}</div>
+            ${insight ? this.insightLabel(label, insight) : `<div class="tk-stat-label">${label}</div>`}
             <div class="tabular mt-0.5 text-base font-semibold text-text">${value}</div>
             <div class="tabular text-[0.6875rem] text-faint">${sub}</div>
           </div>
@@ -1253,6 +1332,10 @@ class Budgets extends TimeKeeper {
     // -- modals ------------------------------------------------------------
 
     bindModals() {
+        this.detailCloseBudget.addEventListener('click', () => {
+            this.closeBudget().catch((e) => console.error(e))
+        })
+
         document.querySelectorAll('[data-close-modal]').forEach((button) => {
             button.addEventListener('click', () =>
                 this.hideModal(button.closest('.tk-modal-backdrop'))
@@ -1274,23 +1357,84 @@ class Budgets extends TimeKeeper {
         })
     }
 
+    bindInsights() {
+        this.insightPopover = document.createElement('div')
+        this.insightPopover.className = 'tk-insight-popover hidden'
+        this.insightPopover.setAttribute('role', 'tooltip')
+        document.body.appendChild(this.insightPopover)
+
+        const show = (target) => {
+            this.insightPopover.textContent = target.dataset.insight
+            this.insightPopover.classList.remove('hidden')
+
+            const anchor = target.getBoundingClientRect()
+            const tip = this.insightPopover.getBoundingClientRect()
+            let left = anchor.left + anchor.width / 2 - tip.width / 2
+            left = Math.max(8, Math.min(left, window.innerWidth - tip.width - 8))
+            let top = anchor.top - tip.height - 8
+            if (top < 8) top = anchor.bottom + 8
+
+            this.insightPopover.style.left = `${left}px`
+            this.insightPopover.style.top = `${top}px`
+        }
+        const hide = () => this.insightPopover.classList.add('hidden')
+
+        document.addEventListener('mouseover', (event) => {
+            const target = event.target.closest?.('.tk-insight')
+            if (target) show(target)
+        })
+        document.addEventListener('mouseout', (event) => {
+            const target = event.target.closest?.('.tk-insight')
+            if (target && !target.contains(event.relatedTarget)) hide()
+        })
+        document.addEventListener('focusin', (event) => {
+            const target = event.target.closest?.('.tk-insight')
+            if (target) show(target)
+        })
+        document.addEventListener('focusout', (event) => {
+            if (event.target.closest?.('.tk-insight')) hide()
+        })
+        document.addEventListener('click', (event) => {
+            const target = event.target.closest?.('.tk-insight')
+            if (!target) {
+                hide()
+                return
+            }
+            event.preventDefault()
+            event.stopPropagation()
+            show(target)
+        })
+        document.addEventListener('scroll', hide, true)
+        window.addEventListener('resize', hide)
+    }
+
     showModal(modal) {
         if (!modal.classList.contains('hidden')) return
         modal.classList.remove('hidden')
         lockBodyScroll()
     }
 
-    hideModal(modal) {
+    hideModal(modal, { reopenDetail = true } = {}) {
         if (!modal || modal.classList.contains('hidden')) return
         modal.classList.add('hidden')
         unlockBodyScroll()
 
         if (modal === this.formModal) {
+            const returnBudgetId = this.formReturnBudgetId
+            this.formReturnBudgetId = null
             this.editing = null
             this.deleteButton.classList.remove('tk-btn-danger-armed')
             this.deleteButton.textContent = 'Delete'
+
+            // X, Cancel, backdrop click, and Escape all come through here.
+            // Restore the budget they were editing without making each close
+            // control maintain its own copy of the transition logic.
+            if (reopenDetail && returnBudgetId) {
+                this.openDetail(returnBudgetId).catch((e) => console.error(e))
+            }
         }
         if (modal === this.detailModal) {
+            this.resetCloseBudgetButton()
             this.detailId = null
             this.detail = null
             if (this.chart) {

@@ -44,6 +44,10 @@ class Budget(db.Model):
     budgeted_hours = db.Column(db.Float, nullable=False)
     notes = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    # A manual close is distinct from the scheduled end date. Keeping both
+    # preserves the original commitment while letting the allocator stop
+    # sending later work into a budget that was deliberately wrapped up.
+    closed_at = db.Column(db.DateTime, nullable=True)
 
     __table_args__ = (
         # Every read is "this client's budgets, and which of them cover this
