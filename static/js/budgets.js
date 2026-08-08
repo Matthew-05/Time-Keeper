@@ -39,8 +39,8 @@ const FILTERS = {
 
 const INSIGHTS = {
     used: 'Task time allocated to this budget. Each client\'s daily time is rounded to the nearest quarter hour.',
-    projected: 'Estimated total at the end date if your capacity-weighted pace so far continues. Weekends and held days are excluded.',
-    pace: 'Average hours used per elapsed working day. Weekends and held days are excluded.',
+    projected: 'Estimated total at the end date if your capacity-weighted pace so far continues. Days off and held days are excluded.',
+    pace: 'Average hours used per elapsed working day. Days off and held days are excluded.',
 }
 
 class Budgets extends TimeKeeper {

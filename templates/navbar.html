@@ -30,7 +30,7 @@
 
       <a
         href="/settings"
-        class="tk-btn-icon{% if request.path == '/settings' %} is-active{% endif %}"
+        class="tk-btn-icon{% if request.path in ['/settings', '/work-calendar'] %} is-active{% endif %}"
         title="Settings"
         aria-label="Settings"
       >

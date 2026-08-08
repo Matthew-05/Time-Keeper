@@ -24,6 +24,7 @@ import json
 import os
 import tempfile
 import threading
+from datetime import date
 from pathlib import Path
 
 # Same directory the database lives in — see main.py.
@@ -40,12 +41,11 @@ REMINDER_INTERVAL_MAX = 480  # 8 hours — longer than a working day.
 REMINDER_SNOOZE_MIN = 1
 REMINDER_SNOOZE_MAX = 120
 
-# Working hours in a month, which is what every budget projection is measured
-# against (see budgets.py). The floor is 1 rather than 0 because a zero would
-# make capacity zero and every projection undefined; the ceiling is a little
-# over 24×31 so a typo can't produce a negative-looking pace.
-WORK_HOURS_PER_MONTH_MIN = 1
-WORK_HOURS_PER_MONTH_MAX = 744
+# Default hours contributed by each recurring workday. Date-specific rules can
+# replace this amount for individual dates or filtered ranges.
+WORK_HOURS_PER_DAY_MIN = 0.25
+WORK_HOURS_PER_DAY_MAX = 24
+DEFAULT_WORK_DAYS = [0, 1, 2, 3, 4]  # Monday through Friday.
 
 
 def _validate_choice(choices):
@@ -81,6 +81,155 @@ def _validate_int(low, high):
     return validate
 
 
+def _validate_number(low, high):
+    """Build a validator for a finite number within an inclusive range."""
+
+    def validate(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        value = float(value)
+        if not low <= value <= high:
+            return None
+        value = round(value, 2)
+        return int(value) if value.is_integer() else value
+
+    return validate
+
+
+def _validate_work_days(value):
+    """A non-empty, duplicate-free list of weekday numbers (Monday is 0)."""
+    if not isinstance(value, list):
+        return None
+
+    clean = []
+    for day in value:
+        if isinstance(day, bool) or not isinstance(day, int) or not 0 <= day <= 6:
+            return None
+        if day not in clean:
+            clean.append(day)
+    return sorted(clean) if clean else None
+
+
+def _validate_work_calendar_overrides(value):
+    """Validate and normalise date-range work-calendar rules.
+
+    A rule may override the work/non-work status, the hours for each working
+    day, or both. An optional weekday filter applies it only to selected days
+    inside the range. Reset flags explicitly restore either field to the
+    effective schedule default. Rules are intentionally ordered: when ranges
+    overlap, the later rule wins independently for each field.
+    """
+    if not isinstance(value, list):
+        return None
+
+    clean = []
+    seen_ids = set()
+    for item in value:
+        if not isinstance(item, dict):
+            return None
+
+        rule_id = item.get('id')
+        if not isinstance(rule_id, str) or not rule_id.strip() or len(rule_id) > 80:
+            return None
+        rule_id = rule_id.strip()
+        if rule_id in seen_ids:
+            return None
+
+        try:
+            start = date.fromisoformat(item.get('start_date', ''))
+            end = date.fromisoformat(item.get('end_date', ''))
+        except (TypeError, ValueError):
+            return None
+        if end < start:
+            return None
+
+        weekdays = item.get('weekdays')
+        if weekdays is not None:
+            weekdays = _validate_work_days(weekdays)
+            if weekdays is None:
+                return None
+
+        is_workday = item.get('is_workday')
+        if is_workday is not None and not isinstance(is_workday, bool):
+            return None
+
+        reset_workday = item.get('reset_workday', False)
+        reset_hours = item.get('reset_hours', False)
+        if not isinstance(reset_workday, bool) or not isinstance(reset_hours, bool):
+            return None
+        if reset_workday and is_workday is not None:
+            return None
+
+        hours = item.get('hours_per_day')
+        if hours is not None:
+            if isinstance(hours, bool) or not isinstance(hours, (int, float)):
+                return None
+            hours = float(hours)
+            if not WORK_HOURS_PER_DAY_MIN <= hours <= WORK_HOURS_PER_DAY_MAX:
+                return None
+            hours = round(hours, 2)
+        if reset_hours and hours is not None:
+            return None
+
+        if (
+            is_workday is None
+            and hours is None
+            and not reset_workday
+            and not reset_hours
+        ):
+            return None
+
+        clean.append({
+            'id': rule_id,
+            'start_date': start.isoformat(),
+            'end_date': end.isoformat(),
+            'weekdays': weekdays,
+            'is_workday': is_workday,
+            'hours_per_day': hours,
+            'reset_workday': reset_workday,
+            'reset_hours': reset_hours,
+        })
+        seen_ids.add(rule_id)
+
+    return clean
+
+
+def _validate_work_schedule_history(value):
+    """Validate effective-dated snapshots of the default work schedule."""
+    if not isinstance(value, list):
+        return None
+
+    clean = []
+    seen_dates = set()
+    validate_hours = _validate_number(
+        WORK_HOURS_PER_DAY_MIN, WORK_HOURS_PER_DAY_MAX
+    )
+    for item in value:
+        if not isinstance(item, dict):
+            return None
+        try:
+            effective = date.fromisoformat(item.get('effective_from', ''))
+        except (TypeError, ValueError):
+            return None
+        if effective in seen_dates:
+            return None
+
+        hours = validate_hours(item.get('hours_per_day'))
+        work_days = _validate_work_days(item.get('work_days'))
+        if hours is None or work_days is None:
+            return None
+
+        clean.append({
+            'effective_from': effective.isoformat(),
+            'hours_per_day': hours,
+            'work_days': work_days,
+        })
+        seen_dates.add(effective)
+
+    clean.sort(key=lambda item: item['effective_from'])
+    return clean
+
+
 # key -> (default, validator). The validator returns a cleaned value, or None to
 # reject it and fall back to the default.
 _SCHEMA = {
@@ -95,18 +244,29 @@ _SCHEMA = {
         10,
         _validate_int(REMINDER_SNOOZE_MIN, REMINDER_SNOOZE_MAX),
     ),
-    # How much you actually work in a month. Budgets spread this across each
-    # month's weekdays to decide how much of a period has really elapsed, which
-    # is what makes "% used" comparable to "% of the period gone". 160 is a
-    # 40-hour week; part-timers and anyone billing a fixed retainer will want
-    # their own number.
-    'work_hours_per_month': (
-        160,
-        _validate_int(WORK_HOURS_PER_MONTH_MIN, WORK_HOURS_PER_MONTH_MAX),
+    # How much you normally work on each selected recurring workday, before
+    # date-specific exceptions are layered on top.
+    'work_hours_per_day': (
+        8,
+        _validate_number(WORK_HOURS_PER_DAY_MIN, WORK_HOURS_PER_DAY_MAX),
     ),
+    # The recurring workweek and exceptions layered over it. Keeping these in
+    # the settings file means holidays and temporary schedules survive a
+    # database reset alongside the daily-hours preference they refine.
+    'work_days': (DEFAULT_WORK_DAYS, _validate_work_days),
+    'work_calendar_overrides': ([], _validate_work_calendar_overrides),
+    # Snapshots are created automatically whenever either default changes.
+    # They keep historical budget calculations fixed while the newest values
+    # remain the convenient top-level settings used by the editor.
+    'work_schedule_history': ([], _validate_work_schedule_history),
 }
 
-DEFAULTS = {key: default for key, (default, _) in _SCHEMA.items()}
+# Lists must not be shared with callers, especially the override editor which
+# mutates its local copy before PUTting it back.
+DEFAULTS = {
+    key: list(default) if isinstance(default, list) else default
+    for key, (default, _) in _SCHEMA.items()
+}
 
 # Reads happen on every request (the context processor) and writes come from the
 # settings page; Flask serves those on different threads.
@@ -117,14 +277,48 @@ def _coerce(raw):
     """Project an arbitrary dict onto the schema, filling in defaults."""
     if not isinstance(raw, dict):
         raw = {}
+    else:
+        raw = dict(raw)
+
+    # Compatibility for both earlier capacity models. Weekly hours divide by
+    # the saved recurring workdays; the older monthly value first uses the
+    # app's historical four-week conversion. Legacy keys disappear on the next
+    # atomic write because neither is in the current schema.
+    if 'work_hours_per_day' not in raw:
+        work_days = _validate_work_days(raw.get('work_days')) or DEFAULT_WORK_DAYS
+        legacy_weekly = raw.get('work_hours_per_week')
+        if (
+            isinstance(legacy_weekly, (int, float))
+            and not isinstance(legacy_weekly, bool)
+            and 0.25 <= float(legacy_weekly) <= 168
+        ):
+            converted = float(legacy_weekly) / len(work_days)
+        else:
+            legacy_monthly = raw.get('work_hours_per_month')
+            if (
+                isinstance(legacy_monthly, (int, float))
+                and not isinstance(legacy_monthly, bool)
+                and 1 <= float(legacy_monthly) <= 744
+            ):
+                converted = (float(legacy_monthly) / 4) / len(work_days)
+            else:
+                converted = None
+
+        if converted is not None:
+            converted = min(WORK_HOURS_PER_DAY_MAX, round(converted, 2))
+            if converted >= WORK_HOURS_PER_DAY_MIN:
+                raw['work_hours_per_day'] = converted
 
     clean = {}
     for key, (default, validate) in _SCHEMA.items():
         if key in raw:
             value = validate(raw[key])
-            clean[key] = default if value is None else value
+            if value is None:
+                clean[key] = list(default) if isinstance(default, list) else default
+            else:
+                clean[key] = value
         else:
-            clean[key] = default
+            clean[key] = list(default) if isinstance(default, list) else default
     return clean
 
 
@@ -177,7 +371,7 @@ def get_setting(key):
     return load_settings().get(key, DEFAULTS.get(key))
 
 
-def update_settings(changes):
+def update_settings(changes, effective_date=None):
     """Merge `changes` into the stored settings and persist.
 
     Unknown keys are ignored and invalid values fall back to the default, so a
@@ -191,6 +385,44 @@ def update_settings(changes):
         merged = dict(current)
         merged.update({k: v for k, v in changes.items() if k in _SCHEMA})
         clean = _coerce(merged)
+
+        schedule_changed = (
+            clean['work_hours_per_day'] != current['work_hours_per_day']
+            or clean['work_days'] != current['work_days']
+        )
+        if schedule_changed:
+            effective_date = effective_date or date.today()
+            effective_iso = effective_date.isoformat()
+            history = [dict(item) for item in current['work_schedule_history']]
+
+            # The first change needs a baseline for every earlier date. Later
+            # changes already have one, so they only add/replace today's row.
+            if not history:
+                history.append({
+                    'effective_from': date.min.isoformat(),
+                    'hours_per_day': current['work_hours_per_day'],
+                    'work_days': list(current['work_days']),
+                })
+
+            version = {
+                'effective_from': effective_iso,
+                'hours_per_day': clean['work_hours_per_day'],
+                'work_days': list(clean['work_days']),
+            }
+            existing = next(
+                (
+                    index
+                    for index, item in enumerate(history)
+                    if item['effective_from'] == effective_iso
+                ),
+                None,
+            )
+            if existing is None:
+                history.append(version)
+            else:
+                history[existing] = version
+            history.sort(key=lambda item: item['effective_from'])
+            clean['work_schedule_history'] = history
 
         if clean != current or not os.path.exists(SETTINGS_PATH):
             _write_file(clean)

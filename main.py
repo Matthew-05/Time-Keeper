@@ -232,6 +232,12 @@ def settings_page():
     return render_template('settings.html', version=APP_VERSION)
 
 
+@app.route('/work-calendar')
+def work_calendar_page():
+    """Calendar editor for recurring capacity and date-specific exceptions."""
+    return render_template('work_calendar.html', version=APP_VERSION)
+
+
 @app.route('/api/settings', methods=['GET'])
 def api_get_settings():
     return jsonify(user_settings.load_settings())
@@ -253,6 +259,8 @@ def api_update_settings():
     unknown = [key for key in changes if key not in user_settings.DEFAULTS]
     if unknown:
         return jsonify({'error': f'Unknown setting(s): {", ".join(sorted(unknown))}'}), 400
+    if 'work_schedule_history' in changes:
+        return jsonify({'error': 'Work schedule history is managed automatically.'}), 400
 
     try:
         saved = user_settings.update_settings(changes)
@@ -261,6 +269,61 @@ def api_update_settings():
         return jsonify({'error': 'Could not write the settings file'}), 500
 
     return jsonify(saved)
+
+
+@app.route('/api/work-calendar', methods=['GET'])
+def api_work_calendar():
+    """Resolved capacity for a requested calendar window.
+
+    Returning evaluated days keeps the calendar display and budget projections
+    on exactly the same rules, including overlapping ranges where later rules
+    win one field at a time.
+    """
+    try:
+        start = date.fromisoformat(request.args.get('start', ''))
+        end = date.fromisoformat(request.args.get('end', ''))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Expected ISO start and end dates.'}), 400
+
+    if end < start:
+        return jsonify({'error': 'The calendar end date must follow its start date.'}), 400
+    if (end - start).days > 370:
+        return jsonify({'error': 'Calendar windows are limited to one year.'}), 400
+
+    settings = user_settings.load_settings()
+    hours = settings['work_hours_per_day']
+    work_days = settings['work_days']
+    overrides = settings['work_calendar_overrides']
+    schedule_history = settings['work_schedule_history']
+
+    days = []
+    day = start
+    while day <= end:
+        details = budget_allocation.workday_details(
+            day, hours, work_days, overrides, schedule_history
+        )
+        days.append({
+            'date': day.isoformat(),
+            'is_workday': details['is_workday'],
+            # Keep calculation precision in the payload; the calendar rounds
+            # only for display, while its calendar total still reconciles to
+            # the exact value budget projections use.
+            'hours': details['hours'],
+            'default_hours': details['default_hours'],
+            'configured_hours': details['configured_hours'],
+            'status_overridden': details['status_overridden'],
+            'hours_overridden': details['hours_overridden'],
+            'active_rule_ids': details['active_rule_ids'],
+        })
+        day += timedelta(days=1)
+
+    return jsonify({
+        'work_hours_per_day': hours,
+        'work_days': work_days,
+        'schedule_history': schedule_history,
+        'overrides': overrides,
+        'days': days,
+    })
 
 
 # --------------------------------------------------------------------------
@@ -1346,8 +1409,15 @@ def get_time_summary(period, client_id):
 # --------------------------------------------------------------------------
 
 
-def _work_hours_per_month():
-    return user_settings.get_setting('work_hours_per_month')
+def _work_calendar_settings():
+    """Capacity settings sampled together so one calculation is consistent."""
+    settings = user_settings.load_settings()
+    return (
+        settings['work_hours_per_day'],
+        settings['work_days'],
+        settings['work_calendar_overrides'],
+        settings['work_schedule_history'],
+    )
 
 
 def _client_allocation(client_id, now=None, every_task=False):
@@ -1434,32 +1504,39 @@ def _summarise_one(budget, now=None, today=None):
     """
     budgets, used, split, _unbudgeted, tasks = _client_allocation(budget.client_id, now)
     day_hours = _day_hours_by_budget(split, tasks)
+    hours_per_day, work_days, overrides, schedule_history = _work_calendar_settings()
     return budget_allocation.summarise(
         budget,
         used.get(budget.id, 0.0),
-        _work_hours_per_month(),
+        hours_per_day,
         today,
         holds=budget.holds,
         day_hours=day_hours.get(budget.id, {}),
+        work_days=work_days,
+        calendar_overrides=overrides,
+        schedule_versions=schedule_history,
     )
 
 
 def _summarise_client(client_id, now=None, today=None):
     """Every budget for one client, summarised. Cheapest correct unit of work."""
     budgets, used, split, _unbudgeted, tasks = _client_allocation(client_id, now)
-    hours_per_month = _work_hours_per_month()
+    hours_per_day, work_days, overrides, schedule_history = _work_calendar_settings()
     day_hours = _day_hours_by_budget(split, tasks)
     return [
         budget_allocation.summarise(
             b,
             used.get(b.id, 0.0),
-            hours_per_month,
+            hours_per_day,
             today,
             # `holds` is a relationship on the budget rows already in memory,
             # so this is one small query per budget rather than a new round of
             # allocation work.
             holds=b.holds,
             day_hours=day_hours.get(b.id, {}),
+            work_days=work_days,
+            calendar_overrides=overrides,
+            schedule_versions=schedule_history,
         )
         for b in budgets
     ]
@@ -1525,15 +1602,18 @@ def api_get_budget(budget_id):
 
     now = datetime.now()
     budgets, used, split, _unbudgeted, task_rows = _client_allocation(budget.client_id, now)
-    hours_per_month = _work_hours_per_month()
+    hours_per_day, work_days, overrides, schedule_history = _work_calendar_settings()
 
     day_hours = _day_hours_by_budget(split, task_rows).get(budget.id, {})
     summary = budget_allocation.summarise(
         budget,
         used.get(budget.id, 0.0),
-        hours_per_month,
+        hours_per_day,
         holds=budget.holds,
         day_hours=day_hours,
+        work_days=work_days,
+        calendar_overrides=overrides,
+        schedule_versions=schedule_history,
     )
 
     # Rebuild the per-task view of this budget's slice. A task that spilled
@@ -1590,7 +1670,13 @@ def api_get_budget(budget_id):
     return jsonify({
         **summary,
         'burn': budget_allocation.burn_series(
-            budget, day_hours, hours_per_month, holds=budget.holds
+            budget,
+            day_hours,
+            hours_per_day,
+            holds=budget.holds,
+            work_days=work_days,
+            calendar_overrides=overrides,
+            schedule_versions=schedule_history,
         ),
         'entries': entries,
         'unassigned_entries': unassigned_entries,

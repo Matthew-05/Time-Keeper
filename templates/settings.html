@@ -47,26 +47,21 @@
       <div class="p-4">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <span class="tk-label mb-0.5 block">Working hours per month</span>
+            <span class="tk-label mb-0.5 block">Work calendar</span>
             <p class="text-sm text-muted">
-              Spread across each month's weekdays to work out how much of a budget's
-              period has really gone. Everything a budget projects is measured against it.
+              {{ settings.work_hours_per_day }} hours per workday across
+              {{ settings.work_days | length }} usual
+              {{ 'workday' if (settings.work_days | length) == 1 else 'workdays' }}.
             </p>
           </div>
 
-          <label class="flex flex-shrink-0 items-center gap-1.5">
-            <input
-              type="number"
-              id="work-hours-input"
-              class="tk-input tabular w-24 text-center"
-              min="1"
-              max="744"
-              step="1"
-              value="{{ settings.work_hours_per_month }}"
-              aria-label="Working hours per month"
-            />
-            <span class="text-sm text-muted">hrs</span>
-          </label>
+          <a href="/work-calendar" class="tk-btn tk-btn-secondary flex-shrink-0">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="5" width="18" height="16" rx="2" />
+              <path d="M16 3v4M8 3v4M3 10h18" />
+            </svg>
+            Customize calendar
+          </a>
         </div>
       </div>
     </section>

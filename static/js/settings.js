@@ -32,7 +32,6 @@ class Settings extends TimeKeeper {
         this.intervalCustom = document.getElementById('reminder-interval-custom')
         this.intervalInput = document.getElementById('reminder-interval-input')
         this.snoozeInput = document.getElementById('reminder-snooze-input')
-        this.workHoursInput = document.getElementById('work-hours-input')
 
         // Dev-only; absent in a packaged build.
         this.testButton = document.getElementById('reminder-test')
@@ -43,7 +42,6 @@ class Settings extends TimeKeeper {
             reminder_enabled: this.reminderToggle.getAttribute('aria-checked') === 'true',
             reminder_interval_minutes: Number(this.intervalInput.value),
             reminder_snooze_minutes: Number(this.snoozeInput.value),
-            work_hours_per_month: Number(this.workHoursInput.value),
         }
 
         this.pendingSaves = new Map()
@@ -51,15 +49,8 @@ class Settings extends TimeKeeper {
 
     init() {
         this.initTheme()
-        this.initCapacity()
         this.initReminders()
         this.initDevTools()
-    }
-
-    // -- capacity ----------------------------------------------------------
-
-    initCapacity() {
-        this.bindNumberField(this.workHoursInput, 'work_hours_per_month')
     }
 
     // -- theme -------------------------------------------------------------

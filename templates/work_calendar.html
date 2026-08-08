@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+
+{% block title %}
+  Work Calendar | Time Keeper
+{% endblock %}
+
+{% block content %}
+  <div class="tk-page">
+    <div class="tk-page-header">
+      <div>
+        <a href="/settings" class="mb-2 inline-flex items-center gap-1 text-sm text-muted hover:text-text">
+          <span aria-hidden="true">&larr;</span> Settings
+        </a>
+        <h1 class="tk-title">Work calendar</h1>
+        <p class="tk-subtitle">Set your usual capacity, then override it for holidays, overtime, leave, or temporary schedules.</p>
+      </div>
+    </div>
+
+    <section class="tk-card">
+      <div class="tk-card-header">
+        <h2 class="tk-card-title">Calendar defaults</h2>
+        <span id="defaults-status" class="text-xs text-faint" role="status"></span>
+      </div>
+      <div class="grid gap-5 p-5 lg:grid-cols-[15rem_1fr] lg:items-end">
+        <label>
+          <span class="tk-label">Default working hours per day</span>
+          <span class="flex items-center gap-2">
+            <input id="calendar-daily-hours" class="tk-input tabular" type="number" min="0.25" max="24" step="0.25" disabled />
+            <span class="text-sm text-muted">hrs</span>
+          </span>
+        </label>
+
+        <div>
+          <span class="tk-label">Usual workdays</span>
+          <div id="calendar-workdays" class="flex flex-wrap gap-2" role="group" aria-label="Usual workdays">
+            {% for short in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
+              <button type="button" class="tk-day-toggle" data-weekday="{{ loop.index0 }}" aria-pressed="false" disabled>{{ short }}</button>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      <div class="tk-card-footer text-xs text-muted">
+        Each usual workday contributes this amount. Changes take effect today; earlier dates retain the defaults that applied then. Date overrides can still replace individual dates.
+      </div>
+    </section>
+
+    <div class="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <section class="tk-card overflow-hidden">
+        <div class="tk-card-header flex-wrap">
+          <div class="flex items-center gap-2">
+            <button id="calendar-previous" type="button" class="tk-btn-icon" aria-label="Previous month">&larr;</button>
+            <button id="calendar-today" type="button" class="tk-btn tk-btn-ghost">Today</button>
+            <button id="calendar-next" type="button" class="tk-btn-icon" aria-label="Next month">&rarr;</button>
+          </div>
+          <div class="text-right">
+            <h2 id="calendar-month-title" class="text-base font-semibold text-text" aria-live="polite"></h2>
+            <p id="calendar-month-capacity" class="mt-0.5 text-xs text-muted"></p>
+          </div>
+        </div>
+
+        <div class="p-3 sm:p-5">
+          <div id="calendar-weekday-headers" class="tk-work-calendar-weekdays" role="group" aria-label="Select a weekday in this month">
+            {% for short in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
+              <button type="button" data-calendar-weekday="{{ loop.index0 }}" aria-pressed="false" title="Select every {{ short }} in this month">{{ short }}</button>
+            {% endfor %}
+          </div>
+          <div id="work-calendar-grid" class="tk-work-calendar-grid" role="grid" aria-label="Work capacity calendar"></div>
+        </div>
+
+        <div class="tk-card-footer flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted">
+          <span class="inline-flex items-center gap-1.5"><span class="tk-calendar-key bg-accent-soft"></span> Override</span>
+          <span class="inline-flex items-center gap-1.5"><span class="tk-calendar-key bg-surface-3"></span> Non-working</span>
+          <span>Click a date for one day, Shift-click another date for a range, or click a weekday heading for every matching day.</span>
+        </div>
+      </section>
+
+      <aside class="tk-card xl:sticky xl:top-[calc(var(--nav-h)+1rem)]">
+        <div class="tk-card-header">
+          <h2 class="tk-card-title">Selected range</h2>
+          <button id="calendar-clear-selection" type="button" class="text-xs text-muted hover:text-text">Clear</button>
+        </div>
+
+        <div class="space-y-5 p-5">
+          <p id="calendar-selection-label" class="text-sm font-medium text-text">Select a date on the calendar.</p>
+
+          <fieldset id="calendar-override-fields" disabled>
+            <div>
+              <legend class="tk-label">Day status</legend>
+              <div id="calendar-status-options" class="tk-segmented flex w-full" role="radiogroup" aria-label="Day status override">
+                <button type="button" class="tk-segment flex-1" role="radio" data-status="default">No override</button>
+                <button type="button" class="tk-segment flex-1" role="radio" data-status="work">Working</button>
+                <button type="button" class="tk-segment flex-1" role="radio" data-status="off">Off</button>
+              </div>
+            </div>
+
+            <div class="mt-5">
+              <span class="tk-label">Hours per working day</span>
+              <div id="calendar-hours-options" class="tk-segmented flex w-full" role="radiogroup" aria-label="Hours override">
+                <button type="button" class="tk-segment flex-1" role="radio" data-hours-mode="default">No override</button>
+                <button type="button" class="tk-segment flex-1" role="radio" data-hours-mode="custom">Custom</button>
+              </div>
+              <label id="calendar-custom-hours-wrap" class="mt-3 hidden items-center gap-2">
+                <input id="calendar-custom-hours" class="tk-input tabular" type="number" min="0.25" max="24" step="0.25" value="8" />
+                <span class="whitespace-nowrap text-sm text-muted">hrs / day</span>
+              </label>
+            </div>
+          </fieldset>
+
+          <p class="text-xs text-faint">Choose at least one non-default value. If rules overlap, the later rule wins for each setting it changes.</p>
+
+          <button id="calendar-save-override" type="button" class="tk-btn tk-btn-primary w-full justify-center" disabled>Save override</button>
+        </div>
+      </aside>
+    </div>
+
+    <section class="tk-card mt-4">
+      <div class="tk-card-header">
+        <div>
+          <h2 class="tk-card-title">Effective overrides this month</h2>
+          <p class="mt-1 text-xs text-faint">Only rules currently visible in the displayed month are listed.</p>
+        </div>
+        <span id="calendar-rule-count" class="tk-badge tk-badge-neutral"></span>
+      </div>
+      <div id="calendar-rules" class="divide-y divide-border"></div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block page_scripts %}
+  <script src="{{ url_for('static', filename='js/work_calendar.js') }}" type="module"></script>
+{% endblock %}

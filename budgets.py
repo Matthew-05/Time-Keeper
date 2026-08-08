@@ -10,9 +10,9 @@ read. That's deliberate. Time entries are edited constantly in the Task Browser
 total would be wrong within minutes with no way to notice.
 
 **Capacity** — how much working time a date range actually contains, from the
-user's ``work_hours_per_month`` setting. This is what turns "18 of 40 hours
-used" into "you're on pace for 47", which is the number that's actually
-actionable.
+user's daily hours, recurring workweek, and date-range overrides. This is
+what turns "18 of 40 hours used" into "you're on pace for 47", which is the
+number that's actually actionable.
 
 **Holds** live inside capacity rather than beside it. A paused project's days
 are simply days that contribute nothing, which is what a weekend already is, so
@@ -27,6 +27,8 @@ dicts, so it can be exercised directly.
 import calendar
 import math
 from datetime import date, datetime, timedelta
+
+DEFAULT_WORK_DAYS = frozenset({0, 1, 2, 3, 4})
 
 # A budget's date range is inclusive at both ends, and so is every loop here.
 # Written once so the off-by-one lives in exactly one place.
@@ -74,13 +76,136 @@ def round_to_quarter_hour(seconds):
 # --------------------------------------------------------------------------
 
 
-def business_days_in_month(year, month):
-    """Mon–Fri count for a calendar month. Never zero for a real month."""
+def _work_days_set(work_days):
+    """Defensively turn a setting value into weekday numbers."""
+    try:
+        return frozenset(int(day) for day in work_days if not isinstance(day, bool))
+    except (TypeError, ValueError):
+        return DEFAULT_WORK_DAYS
+
+
+def _rule_date(value):
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _schedule_for_day(day, hours_per_day, work_days, schedule_versions):
+    """Return the effective default schedule without altering old dates."""
+    selected = None
+    selected_date = None
+    for version in schedule_versions or ():
+        if not isinstance(version, dict):
+            continue
+        effective = _rule_date(version.get('effective_from'))
+        if effective is None or effective > day:
+            continue
+        if selected_date is None or effective > selected_date:
+            selected = version
+            selected_date = effective
+
+    if selected is None:
+        return float(hours_per_day), _work_days_set(work_days)
+
+    try:
+        hours = float(selected['hours_per_day'])
+        days = _work_days_set(selected['work_days'])
+        return hours, days
+    except (KeyError, TypeError, ValueError):
+        return float(hours_per_day), _work_days_set(work_days)
+
+
+def workday_details(
+    day,
+    hours_per_day,
+    work_days=DEFAULT_WORK_DAYS,
+    overrides=(),
+    schedule_versions=(),
+):
+    """Resolve one date against the recurring week and ordered range rules.
+
+    Status and hours cascade independently. This lets one broad rule set a
+    temporary daily amount while a later holiday rule only marks a smaller
+    range non-working. The last matching value for each field wins.
+    """
+    default_hours, default_days = _schedule_for_day(
+        day, hours_per_day, work_days, schedule_versions
+    )
+    default_is_workday = day.weekday() in default_days
+    is_workday = default_is_workday
+    hours_override = None
+    status_overridden = False
+    hours_overridden = False
+    status_rule_id = None
+    hours_rule_id = None
+
+    for rule in overrides or ():
+        if not isinstance(rule, dict):
+            continue
+        start = _rule_date(rule.get('start_date'))
+        end = _rule_date(rule.get('end_date'))
+        if start is None or end is None or not start <= day <= end:
+            continue
+
+        weekdays = rule.get('weekdays')
+        if weekdays is not None:
+            try:
+                if day.weekday() not in {int(value) for value in weekdays}:
+                    continue
+            except (TypeError, ValueError):
+                continue
+
+        if rule.get('reset_workday') is True:
+            is_workday = default_is_workday
+            status_overridden = False
+            status_rule_id = None
+        elif rule.get('is_workday') is not None:
+            is_workday = bool(rule['is_workday'])
+            status_overridden = True
+            status_rule_id = rule.get('id')
+        if rule.get('reset_hours') is True:
+            hours_override = None
+            hours_overridden = False
+            hours_rule_id = None
+        elif rule.get('hours_per_day') is not None:
+            try:
+                hours_override = float(rule['hours_per_day'])
+                hours_overridden = True
+                hours_rule_id = rule.get('id')
+            except (TypeError, ValueError):
+                pass
+
+    hours = hours_override if hours_overridden else default_hours
+
+    return {
+        'is_workday': is_workday,
+        'hours': hours if is_workday else 0.0,
+        # The chosen amount before non-working status zeros capacity. The
+        # calendar editor needs this to populate an hours override on an off
+        # day without losing the configured value.
+        'configured_hours': hours,
+        'default_hours': default_hours,
+        'status_overridden': status_overridden,
+        'hours_overridden': hours_overridden,
+        'active_rule_ids': list(dict.fromkeys(
+            rule_id
+            for rule_id in (status_rule_id, hours_rule_id)
+            if rule_id is not None
+        )),
+    }
+
+
+def business_days_in_month(year, month, work_days=DEFAULT_WORK_DAYS):
+    """Recurring workday count for a calendar month."""
     _first_weekday, days = calendar.monthrange(year, month)
+    work_days = _work_days_set(work_days)
     return sum(
         1
         for day in range(1, days + 1)
-        if date(year, month, day).weekday() < 5
+        if date(year, month, day).weekday() in work_days
     )
 
 
@@ -119,18 +244,24 @@ def is_held(holds, day, today=None):
     return day in hold_days(holds, today)
 
 
-def day_capacity(day, hours_per_month, held=frozenset()):
+def day_capacity(
+    day,
+    hours_per_day,
+    held=frozenset(),
+    work_days=DEFAULT_WORK_DAYS,
+    overrides=(),
+    schedule_versions=(),
+):
     """Working hours available on `day`.
 
-    The user tells us hours per *month*; months have different numbers of
-    working days, so the monthly figure is spread evenly across that month's
-    weekdays rather than assuming a fixed 21.7. February and a 23-weekday
-    August therefore both come out at the stated monthly total, which is what
-    somebody entering "160" means.
+    Each recurring workday contributes the configured daily amount. Changing
+    the recurring workweek therefore adds or removes whole days of capacity
+    instead of redistributing a fixed weekly total across them.
 
-    Weekends are zero. That's the whole reason this isn't a plain calendar-day
-    run rate: checking a budget on a Friday afternoon shouldn't show a pace
-    that's about to be diluted by two days nobody works.
+    Recurring non-work days and dates explicitly marked non-working are zero.
+    That's the whole reason this isn't a plain calendar-day run rate: checking
+    a budget before time off shouldn't show a pace diluted by days nobody
+    works.
 
     **Held days are zero for exactly the same reason.** A project on hold has
     days in its range that nobody was ever going to work, and diluting the pace
@@ -139,12 +270,22 @@ def day_capacity(day, hours_per_month, held=frozenset()):
     ``hold_days``; passing it is what makes every figure in this module
     hold-aware, and passing nothing gives the pre-holds behaviour exactly.
     """
-    if day.weekday() >= 5 or day in held:
+    if day in held:
         return 0.0
-    return hours_per_month / business_days_in_month(day.year, day.month)
+    return workday_details(
+        day, hours_per_day, work_days, overrides, schedule_versions
+    )['hours']
 
 
-def capacity_between(start, end, hours_per_month, held=frozenset()):
+def capacity_between(
+    start,
+    end,
+    hours_per_day,
+    held=frozenset(),
+    work_days=DEFAULT_WORK_DAYS,
+    overrides=(),
+    schedule_versions=(),
+):
     """Total working hours in the inclusive range, or 0.0 if it's empty."""
     if end < start:
         return 0.0
@@ -155,19 +296,38 @@ def capacity_between(start, end, hours_per_month, held=frozenset()):
     # partial-month edges honest.
     day = start
     while day <= end:
-        total += day_capacity(day, hours_per_month, held)
+        total += day_capacity(
+            day,
+            hours_per_day,
+            held,
+            work_days,
+            overrides,
+            schedule_versions,
+        )
         day += timedelta(days=1)
     return total
 
 
-def business_days_between(start, end, held=frozenset()):
-    """Mon–Fri count across the inclusive range, excluding held days."""
+def business_days_between(
+    start,
+    end,
+    held=frozenset(),
+    work_days=DEFAULT_WORK_DAYS,
+    overrides=(),
+    schedule_versions=(),
+):
+    """Configured working-day count across the inclusive range."""
     if end < start:
         return 0
     total = 0
     day = start
     while day <= end:
-        if day.weekday() < 5 and day not in held:
+        if (
+            day not in held
+            and workday_details(
+                day, 1, work_days, overrides, schedule_versions
+            )['is_workday']
+        ):
             total += 1
         day += timedelta(days=1)
     return total
@@ -381,13 +541,23 @@ def status_for(
     return 'on_track'
 
 
-def summarise(budget, used_hours, hours_per_month, today=None, holds=(), day_hours=None):
+def summarise(
+    budget,
+    used_hours,
+    hours_per_day,
+    today=None,
+    holds=(),
+    day_hours=None,
+    work_days=DEFAULT_WORK_DAYS,
+    calendar_overrides=(),
+    schedule_versions=(),
+):
     """Everything the UI shows about one budget, from its consumed hours.
 
     The projection is a capacity-weighted run rate: hours used, scaled by the
     ratio of the period's total working capacity to the capacity that has
-    elapsed. Because capacity is zero at weekends and spread across each
-    month's actual weekdays, this answers "at this rate, where do I finish"
+    elapsed. Because capacity is zero at on days off spread across each
+    configured workdays, this answers "at this rate, where do I finish"
     without a Friday reading being dragged down by the weekend ahead of it or a
     short February reading like a slowdown.
 
@@ -430,22 +600,57 @@ def summarise(budget, used_hours, hours_per_month, today=None, holds=(), day_hou
     paused = started and not ended and today in held
 
     total_capacity = capacity_between(
-        budget.start_date, budget.end_date, hours_per_month, held
+        budget.start_date,
+        budget.end_date,
+        hours_per_day,
+        held,
+        work_days,
+        calendar_overrides,
+        schedule_versions,
     )
     elapsed_capacity = (
-        capacity_between(budget.start_date, elapsed_end, hours_per_month, held)
+        capacity_between(
+            budget.start_date,
+            elapsed_end,
+            hours_per_day,
+            held,
+            work_days,
+            calendar_overrides,
+            schedule_versions,
+        )
         if started
         else 0.0
     )
     remaining_capacity = max(0.0, total_capacity - elapsed_capacity)
 
-    total_days = business_days_between(budget.start_date, budget.end_date, held)
+    total_days = business_days_between(
+        budget.start_date,
+        budget.end_date,
+        held,
+        work_days,
+        calendar_overrides,
+        schedule_versions,
+    )
     elapsed_days = (
-        business_days_between(budget.start_date, elapsed_end, held) if started else 0
+        business_days_between(
+            budget.start_date,
+            elapsed_end,
+            held,
+            work_days,
+            calendar_overrides,
+            schedule_versions,
+        )
+        if started
+        else 0
     )
     # Today is spent, so tomorrow is the first day still available.
     remaining_days = business_days_between(
-        max(budget.start_date, today + timedelta(days=1)), budget.end_date, held
+        max(budget.start_date, today + timedelta(days=1)),
+        budget.end_date,
+        held,
+        work_days,
+        calendar_overrides,
+        schedule_versions,
     )
 
     ratio = _safe_divide(total_capacity, elapsed_capacity)
@@ -460,13 +665,20 @@ def summarise(budget, used_hours, hours_per_month, today=None, holds=(), day_hou
     # What you can average from tomorrow and still land exactly on budget.
     required_pace = _safe_divide(remaining, remaining_days) if remaining_days else None
 
-    # Working days the holds removed from this budget's own range. Weekends
-    # aren't counted — they were never capacity, so claiming a hold "cost" them
-    # would overstate what the pause actually took.
+    # Working days the holds removed from this budget's own range. Configured
+    # days off aren't counted — they were never capacity, so claiming a hold
+    # "cost" them would overstate what the pause actually took.
     held_working_days = sum(
         1
         for day in held
-        if budget.start_date <= day <= budget.end_date and day.weekday() < 5
+        if budget.start_date <= day <= budget.end_date
+        and workday_details(
+            day,
+            hours_per_day,
+            work_days,
+            calendar_overrides,
+            schedule_versions,
+        )['is_workday']
     )
     held_hours = (
         round(sum(h for d, h in day_hours.items() if d in held), 2)
@@ -494,7 +706,14 @@ def summarise(budget, used_hours, hours_per_month, today=None, holds=(), day_hou
         # hold that starts the moment this one ends.
         resumes_on = current.end_date + timedelta(days=1)
         while resumes_on <= budget.end_date and (
-            resumes_on.weekday() >= 5 or resumes_on in held
+            day_capacity(
+                resumes_on,
+                hours_per_day,
+                held,
+                work_days,
+                calendar_overrides,
+                schedule_versions,
+            ) <= 0
         ):
             resumes_on += timedelta(days=1)
 
@@ -578,7 +797,16 @@ def summarise(budget, used_hours, hours_per_month, today=None, holds=(), day_hou
     }
 
 
-def burn_series(budget, day_hours, hours_per_month, today=None, holds=()):
+def burn_series(
+    budget,
+    day_hours,
+    hours_per_day,
+    today=None,
+    holds=(),
+    work_days=DEFAULT_WORK_DAYS,
+    calendar_overrides=(),
+    schedule_versions=(),
+):
     """Cumulative actual vs. the capacity-paced ideal, one point per day.
 
     The ideal line isn't a straight diagonal: it tracks capacity, so it's flat
@@ -602,7 +830,13 @@ def burn_series(budget, day_hours, hours_per_month, today=None, holds=()):
     held = hold_days(holds, today)
 
     total_capacity = capacity_between(
-        budget.start_date, budget.end_date, hours_per_month, held
+        budget.start_date,
+        budget.end_date,
+        hours_per_day,
+        held,
+        work_days,
+        calendar_overrides,
+        schedule_versions,
     )
     budgeted = float(budget.budgeted_hours)
 
@@ -612,7 +846,14 @@ def burn_series(budget, day_hours, hours_per_month, today=None, holds=()):
 
     day = budget.start_date
     while day <= budget.end_date:
-        spent_capacity += day_capacity(day, hours_per_month, held)
+        spent_capacity += day_capacity(
+            day,
+            hours_per_day,
+            held,
+            work_days,
+            calendar_overrides,
+            schedule_versions,
+        )
         cumulative += day_hours.get(day, 0.0)
 
         points.append({
