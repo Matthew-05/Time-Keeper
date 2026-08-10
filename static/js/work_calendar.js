@@ -174,7 +174,6 @@ class WorkCalendar extends TimeKeeper {
             button.className = 'tk-work-calendar-day'
             button.classList.toggle('is-outside', outside)
             button.classList.toggle('is-off', details && !details.is_workday)
-            button.classList.toggle('is-override', Boolean(overridden))
             button.classList.toggle('is-selected', selected)
             button.classList.toggle('is-today', key === this.today)
             button.dataset.date = key
@@ -186,14 +185,19 @@ class WorkCalendar extends TimeKeeper {
             const capacity = document.createElement('span')
             capacity.className = 'tk-calendar-capacity tabular'
             capacity.textContent = details?.is_workday ? `${details.hours.toFixed(2).replace(/\.00$/, '')}h` : 'Off'
-            button.append(number, capacity)
+            const capacityRow = document.createElement('span')
+            capacityRow.className = 'tk-calendar-capacity-row'
+            capacityRow.appendChild(capacity)
+            button.appendChild(number)
 
             if (overridden) {
                 const badge = document.createElement('span')
                 badge.className = 'tk-calendar-override-label'
                 badge.textContent = 'Override'
-                button.appendChild(badge)
+                capacityRow.appendChild(badge)
             }
+
+            button.appendChild(capacityRow)
 
             const accessible = `${RANGE_FORMAT.format(day)}: ${capacity.textContent}${overridden ? ', overridden' : ''}`
             button.setAttribute('aria-label', accessible)
