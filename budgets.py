@@ -25,6 +25,7 @@ dicts, so it can be exercised directly.
 """
 
 import calendar
+import math
 from datetime import date, datetime, timedelta
 
 from rounding import round_seconds_to_hours
@@ -339,43 +340,150 @@ def business_days_between(
 # --------------------------------------------------------------------------
 
 
-def billable_hours_by_task(tasks, now=None, rounding_policy=None):
-    """Per-task hours that sum, within a client-day, to the billable figure.
+def raw_hours_by_task(tasks, now=None):
+    """Return each entry's actual duration, without inventing entry rounding.
 
-    The global policy is applied per client per day, matching History and
-    invoicing. But a pin is per *task*, so allocation needs a per-task number
-    that still adds up to the policy-adjusted day.
-
-    So each day's rounding difference is spread across that day's tasks in
-    proportion to their length. A 20-minute and a 40-minute task on a day that
-    rounds 1:00 to 1.0 stay at 1/3 and 2/3 of it. The alternative — allocating
-    raw seconds and rounding at the end — would let a budget's total disagree
-    with the same client-day total shown everywhere else in the app.
-
-    A day whose raw time is zero contributes nothing, which also keeps the
-    scale factor from dividing by zero.
+    Company rounding happens once at the client-day boundary. An entry is
+    therefore always a raw fact; only a day's destination ledger has a
+    billable value.
     """
     now = now or datetime.now()
+    return {task.id: task_seconds(task, now) / 3600.0 for task in tasks}
 
-    raw = {}
-    per_day = {}
+
+def billable_hours_by_task(tasks, now=None, rounding_policy=None):
+    """Return legacy per-entry billable shares, rounded per client-day.
+
+    Budget allocation deliberately uses :func:`raw_hours_by_task` because an
+    entry itself is a raw fact. This compatibility helper retains its original
+    contract for reports and older callers: round each complete client-day,
+    then apportion that billable total across its entries deterministically.
+    """
+    now = now or datetime.now()
+    tasks = list(tasks)
+    result_seconds = {task.id: 0 for task in tasks}
+    groups = {}
     for task in tasks:
-        seconds = task_seconds(task, now)
-        raw[task.id] = seconds
-        per_day[task.date] = per_day.get(task.date, 0.0) + seconds
+        key = (getattr(task, 'client_id', None), task.date)
+        groups.setdefault(key, []).append(task)
 
-    scale = {}
-    for day, seconds in per_day.items():
-        if seconds <= 0:
-            scale[day] = 0.0
-        else:
-            adjusted = round_seconds_to_hours(seconds, rounding_policy)
-            scale[day] = adjusted / (seconds / 3600.0)
-
+    for day_tasks in groups.values():
+        weights = {task.id: task_seconds(task, now) for task in day_tasks}
+        rounded_hours = round_seconds_to_hours(sum(weights.values()), rounding_policy)
+        rounded_seconds = max(0, int(round(rounded_hours * 3600)))
+        result_seconds.update(
+            _largest_remainder(weights, rounded_seconds, sort_key=lambda task_id: task_id)
+        )
     return {
-        task.id: (raw[task.id] / 3600.0) * scale[task.date]
-        for task in tasks
+        task_id: seconds / 3600.0
+        for task_id, seconds in result_seconds.items()
     }
+
+
+def _largest_remainder(weights, total, sort_key):
+    """Apportion an integer total proportionally with deterministic ties."""
+    result = {key: 0 for key in weights}
+    weight_total = sum(weights.values())
+    if weight_total <= 0 or total <= 0:
+        return result
+
+    ranked = []
+    assigned = 0
+    for key in sorted(weights, key=sort_key):
+        quota = total * weights[key] / weight_total
+        whole = math.floor(quota)
+        result[key] = whole
+        assigned += whole
+        ranked.append((quota - whole, key))
+
+    ranked.sort(key=lambda item: (-item[0], sort_key(item[1])))
+    for _remainder, key in ranked[:total - assigned]:
+        result[key] += 1
+    return result
+
+
+def _destination_sort_key(destination):
+    """Stable ordering for largest-remainder ties."""
+    kind, budget_id = destination
+    order = {'budget': 0, 'no_budget': 1, 'excluded': 2, 'unbudgeted': 3}
+    return (order.get(kind, 99), budget_id if budget_id is not None else -1)
+
+
+def _apportion_day(destinations, rounded_seconds):
+    """Apportion integer billable seconds using deterministic remainders."""
+    return _largest_remainder(
+        {key: value['raw_seconds'] for key, value in destinations.items()},
+        rounded_seconds,
+        sort_key=_destination_sort_key,
+    )
+
+
+def _pinned_reservations(pinned_raw_seconds, other_raw_seconds, rounded_seconds):
+    """Return an integer starting point for pinned-capacity convergence.
+
+    The pooled deferred destination is only a seed. Splitting that pool can
+    change largest-remainder winners, so :func:`allocation_ledger` repeatedly
+    pours and derives reservations from the complete destination map before it
+    exposes a ledger.
+    """
+    weights = {
+        ('budget', budget_id): seconds
+        for budget_id, seconds in pinned_raw_seconds.items()
+    }
+    deferred = ('unallocated', None)
+    if other_raw_seconds > 0:
+        weights[deferred] = other_raw_seconds
+    apportioned = _largest_remainder(
+        weights,
+        rounded_seconds,
+        sort_key=_destination_sort_key,
+    )
+    return {
+        budget_id: apportioned.get(('budget', budget_id), 0)
+        for budget_id in pinned_raw_seconds
+    }
+
+
+def _pinned_share_of_destination(pinned_raw_seconds, raw_seconds, billable_seconds):
+    """Partition an already-final destination share into pin and loose parts.
+
+    This is capacity bookkeeping, not another client-day apportionment. A
+    half-up cumulative boundary makes the two integer subparts reconcile to the
+    destination's authoritative whole-second value.
+    """
+    if pinned_raw_seconds <= 0 or raw_seconds <= 0 or billable_seconds <= 0:
+        return 0
+    if pinned_raw_seconds >= raw_seconds - 1e-7:
+        return billable_seconds
+    boundary = math.floor(
+        billable_seconds * pinned_raw_seconds / raw_seconds + 0.5
+    )
+    return min(billable_seconds, max(0, boundary))
+
+
+def _partition_subshares(weights, total):
+    """Split a destination's exact seconds for explanatory sub-rows.
+
+    This is intentionally not another largest-remainder allocation. The only
+    authoritative allocation is the client-day destination apportionment. The
+    reason rows are a presentation breakdown of an already-fixed No-budget
+    destination, using cumulative boundaries so their integer pieces still
+    reconcile exactly.
+    """
+    result = {key: 0 for key in weights}
+    weight_total = sum(weights.values())
+    if weight_total <= 0 or total <= 0:
+        return result
+    assigned = 0
+    cumulative = 0.0
+    ordered = sorted(weights)
+    for key in ordered[:-1]:
+        cumulative += weights[key]
+        boundary = int(round(total * cumulative / weight_total))
+        result[key] = boundary - assigned
+        assigned = boundary
+    result[ordered[-1]] = total - assigned
+    return result
 
 
 def eligible_budgets(budgets, day):
@@ -398,93 +506,424 @@ def eligible_budgets(budgets, day):
     return covering
 
 
-def allocate(budgets, tasks, now=None, rounding_policy=None):
-    """Distribute `tasks` across `budgets` for a single client.
+def allocation_ledger(budgets, tasks, now=None, rounding_policy=None):
+    """Distribute raw entries, then round once per client-day.
 
-    Returns ``(used, entries, unbudgeted_hours)``:
+    Returns ``(used, entries, unbudgeted_hours, days)``. ``entries`` contains
+    raw slices only. ``used`` and ``unbudgeted_hours`` come from the day ledger's
+    billable destination amounts. Every day dictionary exposes its raw total,
+    rounded total, adjustment, provisional state, and destination shares.
 
-    - ``used`` — ``{budget_id: hours}``, which can exceed the budget's total;
-      going over is a fact to display, not an error to suppress.
-    - ``entries`` — ``{task_id: (budget_id_or_None, hours, pinned_bool)}``.
-      One task can land in two budgets when it spills, so the same task id can
-      appear in more than one entry; callers that need that detail read
-      ``split`` below instead.
-    - ``unbudgeted_hours`` — time on days no budget covers.
-
-    Order of operations, and it matters:
-
-    1. **Pins are honoured first, unconditionally**, before any pouring. A
-       pinned entry is the user overruling the allocator, so it consumes its
-       budget's capacity ahead of everything else and is never spilled
-       elsewhere — including when that puts the budget over, and including when
-       the entry's date falls outside the budget's own range. Silently ignoring
-       a pin the user set is far worse than showing them an overage they can
-       see and fix.
-    2. **Everything else pours chronologically** into whatever capacity is
-       left. Chronological because the fill has to be reproducible and has to
-       match intuition: the hours you worked first are the hours that consumed
-       the budget first.
-    3. **Overflow lands on the last eligible budget.** Once every budget
-       covering a day is full, the remainder still has to be counted somewhere
-       or the numbers stop reconciling — so it goes on the pot that expires
-       last, as visible overage.
+    Pins still reserve capacity before automatic entries, loose time still
+    pours chronologically, and overflow still lands on the last eligible
+    budget. Explicit No-budget entries participate in the client's daily
+    rounding before their destination is separated from budget consumption.
     """
     now = now or datetime.now()
-
-    hours = billable_hours_by_task(tasks, now, rounding_policy)
-    # Explicitly excluded entries remain client-associated, but never consume
-    # a budget and are not reported as accidental coverage gaps.
-    tasks = [t for t in tasks if not getattr(t, 'budget_excluded', False)]
+    tasks = list(tasks)
+    raw_seconds = {task.id: task_seconds(task, now) for task in tasks}
     by_id = {b.id: b for b in budgets}
 
-    used = {b.id: 0.0 for b in budgets}
-    split = {}
-    unbudgeted = 0.0
+    excluded = [t for t in tasks if getattr(t, 'budget_excluded', False)]
+    eligible_tasks = [t for t in tasks if not getattr(t, 'budget_excluded', False)]
+    pinned = [
+        t for t in eligible_tasks
+        if t.budget_id is not None and t.budget_id in by_id
+    ]
+    loose = [
+        t for t in eligible_tasks
+        if t.budget_id is None or t.budget_id not in by_id
+    ]
 
-    pinned = [t for t in tasks if t.budget_id is not None and t.budget_id in by_id]
-    loose = [t for t in tasks if t.budget_id is None or t.budget_id not in by_id]
-
+    # Work out each day's billable scale and finalize whole-second pin
+    # reservations before any chronological loose allocation. The final
+    # destination-level largest-remainder pass still happens exactly once,
+    # after loose time has reached its final budgets; reservations are only
+    # provisional capacity charges and are replaced by that final result.
+    all_days = sorted({task.date for task in tasks})
+    tasks_by_day = {}
+    pinned_raw_by_day = {}
+    for task in tasks:
+        tasks_by_day.setdefault(task.date, []).append(task)
     for task in pinned:
-        amount = hours.get(task.id, 0.0)
-        used[task.budget_id] += amount
-        split.setdefault(task.id, []).append((task.budget_id, amount, True))
+        day_pins = pinned_raw_by_day.setdefault(task.date, {})
+        day_pins[task.budget_id] = (
+            day_pins.get(task.budget_id, 0.0) + raw_seconds[task.id]
+        )
+    day_plans = {}
+    for day in all_days:
+        day_tasks = tasks_by_day[day]
+        total_raw_seconds = sum(raw_seconds[task.id] for task in day_tasks)
+        rounded_hours = round_seconds_to_hours(total_raw_seconds, rounding_policy)
+        rounded_seconds = max(0, int(round(rounded_hours * 3600)))
+        scale = rounded_seconds / total_raw_seconds if total_raw_seconds else 0.0
+        day_plans[day] = {
+            'raw_seconds': total_raw_seconds,
+            'rounded_seconds': rounded_seconds,
+            'scale': scale,
+            'pinned_raw_seconds': pinned_raw_by_day.get(day, {}),
+        }
+        pinned_raw_total = sum(day_plans[day]['pinned_raw_seconds'].values())
+        day_plans[day]['pinned_reserved_seconds'] = _pinned_reservations(
+            day_plans[day]['pinned_raw_seconds'],
+            max(0.0, total_raw_seconds - pinned_raw_total),
+            rounded_seconds,
+        )
 
     # Chronological, with id as the final tiebreaker so two entries sharing a
     # start time can't swap places between requests.
     loose.sort(key=lambda t: (t.date, t.start_time, t.id))
-
+    loose_by_day = {}
     for task in loose:
-        remaining = hours.get(task.id, 0.0)
-        if remaining <= 0:
-            split.setdefault(task.id, []).append((None, 0.0, False))
-            continue
+        loose_by_day.setdefault(task.date, []).append(task)
 
-        covering = eligible_budgets(budgets, task.date)
-        if not covering:
-            unbudgeted += remaining
-            split.setdefault(task.id, []).append((None, remaining, False))
-            continue
+    def pour(pinned_reservations):
+        """Pour once with candidate pin reservations and return final shares."""
+        local_split = {}
+        local_per_day = {}
 
-        for index, budget in enumerate(covering):
-            headroom = budget.budgeted_hours - used[budget.id]
-            last = index == len(covering) - 1
+        def record(task, destination, seconds, is_pinned=False, reason=None):
+            budget_id = destination[1] if destination[0] == 'budget' else None
+            local_split.setdefault(task.id, []).append(
+                (budget_id, seconds / 3600.0, is_pinned)
+            )
+            day_destinations = local_per_day.setdefault(task.date, {})
+            part = day_destinations.setdefault(
+                destination,
+                {
+                    'raw_seconds': 0.0,
+                    'task_ids': set(),
+                    'reason_raw_seconds': {},
+                    'reason_task_ids': {},
+                },
+            )
+            part['raw_seconds'] += seconds
+            part['task_ids'].add(task.id)
+            reason = reason or destination[0]
+            part['reason_raw_seconds'][reason] = (
+                part['reason_raw_seconds'].get(reason, 0.0) + seconds
+            )
+            part['reason_task_ids'].setdefault(reason, set()).add(task.id)
 
-            if last:
-                # Nowhere left to spill: take the whole remainder, overage and
-                # all, so the client's hours always reconcile.
-                take = remaining
-            else:
-                take = min(remaining, max(0.0, headroom))
+        capacity_used = {b.id: 0.0 for b in budgets}
+        for reservations in pinned_reservations.values():
+            for budget_id, seconds in reservations.items():
+                capacity_used[budget_id] += seconds
 
-            if take > 0:
-                used[budget.id] += take
-                split.setdefault(task.id, []).append((budget.id, take, False))
-                remaining -= take
+        for task in excluded:
+            record(
+                task,
+                ('no_budget', None),
+                raw_seconds[task.id],
+                reason='excluded',
+            )
+        for task in pinned:
+            record(
+                task,
+                ('budget', task.budget_id),
+                raw_seconds[task.id],
+                True,
+            )
 
-            if remaining <= 1e-9:
-                break
+        apportioned_by_day = {}
+        for day in all_days:
+            plan = day_plans[day]
+            scale = plan['scale']
+            for task in loose_by_day.get(day, []):
+                remaining_raw = raw_seconds[task.id]
+                if remaining_raw <= 0:
+                    record(task, ('no_budget', None), 0.0, reason='coverage_gap')
+                    continue
 
+                covering = eligible_budgets(budgets, day)
+                if not covering:
+                    record(
+                        task,
+                        ('no_budget', None),
+                        remaining_raw,
+                        reason='coverage_gap',
+                    )
+                    continue
+
+                if scale <= 0:
+                    record(task, ('budget', covering[0].id), remaining_raw)
+                    continue
+
+                remaining_billable = remaining_raw * scale
+                for index, budget in enumerate(covering):
+                    headroom = (
+                        budget.budgeted_hours * 3600 - capacity_used[budget.id]
+                    )
+                    last = index == len(covering) - 1
+                    take_billable = (
+                        remaining_billable
+                        if last else min(remaining_billable, max(0.0, headroom))
+                    )
+                    if take_billable > 0:
+                        take_raw = (
+                            remaining_raw
+                            if last else min(remaining_raw, take_billable / scale)
+                        )
+                        capacity_used[budget.id] += take_raw * scale
+                        record(task, ('budget', budget.id), take_raw)
+                        remaining_raw -= take_raw
+                        remaining_billable -= take_raw * scale
+                    if remaining_billable <= 1e-7:
+                        break
+
+            destinations = local_per_day.get(day, {})
+            apportioned = _apportion_day(
+                destinations, plan['rounded_seconds']
+            )
+            apportioned_by_day[day] = apportioned
+            for destination, billable_value in apportioned.items():
+                kind, budget_id = destination
+                if kind != 'budget':
+                    continue
+                raw_value = destinations[destination]['raw_seconds']
+                pinned_reserved = pinned_reservations[day].get(budget_id, 0)
+                pinned_raw = plan['pinned_raw_seconds'].get(budget_id, 0.0)
+                loose_ideal = max(0.0, raw_value - pinned_raw) * scale
+                capacity_used[budget_id] += (
+                    billable_value - pinned_reserved - loose_ideal
+                )
+
+        return local_split, local_per_day, apportioned_by_day
+
+    def reservations_from(destinations_by_day, apportioned_by_day):
+        result = {}
+        for day, plan in day_plans.items():
+            day_result = {}
+            destinations = destinations_by_day.get(day, {})
+            apportioned = apportioned_by_day.get(day, {})
+            for budget_id, pinned_raw in plan['pinned_raw_seconds'].items():
+                destination = ('budget', budget_id)
+                raw_value = destinations[destination]['raw_seconds']
+                day_result[budget_id] = _pinned_share_of_destination(
+                    pinned_raw,
+                    raw_value,
+                    apportioned.get(destination, 0),
+                )
+            result[day] = day_result
+        return result
+
+    pinned_reservations = {
+        day: dict(plan['pinned_reserved_seconds'])
+        for day, plan in day_plans.items()
+    }
+    seen = set()
+    history = []
+    max_planning_passes = 64
+    for _pass in range(max_planning_passes):
+        state = tuple(
+            (day, budget_id, seconds)
+            for day in all_days
+            for budget_id, seconds in sorted(pinned_reservations[day].items())
+        )
+        if state in seen:
+            raise RuntimeError(f'Pinned budget reservations did not converge: {history[-4:]} -> {state}')
+        seen.add(state)
+        history.append(state)
+        split, per_day, apportioned_by_day = pour(pinned_reservations)
+        exact_reservations = reservations_from(per_day, apportioned_by_day)
+        if exact_reservations == pinned_reservations:
+            break
+        pinned_reservations = exact_reservations
+    else:
+        raise RuntimeError(
+            f'Pinned budget reservations exceeded {max_planning_passes} passes'
+        )
+
+    used_seconds = {b.id: 0 for b in budgets}
+    unbudgeted_seconds = 0
+    days = []
+
+    for day in all_days:
+        plan = day_plans[day]
+        destinations = per_day.get(day, {})
+        total_raw_seconds = plan['raw_seconds']
+        rounded_seconds = plan['rounded_seconds']
+        # This is the sole largest-remainder pass for the client-day. Pins and
+        # automatic slices already sharing a budget are aggregated first.
+        apportioned = apportioned_by_day[day]
+        destination_rows = []
+
+        for destination in sorted(destinations, key=_destination_sort_key):
+            kind, budget_id = destination
+            raw_value = destinations[destination]['raw_seconds']
+            billable_value = apportioned.get(destination, 0)
+            if kind == 'budget':
+                used_seconds[budget_id] += billable_value
+            reason_shares = {}
+            if kind == 'no_budget':
+                raw_seconds_by_reason = destinations[destination][
+                    'reason_raw_seconds'
+                ]
+                reason_billable = _partition_subshares(
+                    raw_seconds_by_reason, billable_value
+                )
+                for reason, reason_raw_seconds in raw_seconds_by_reason.items():
+                    reason_billable_seconds = reason_billable.get(reason, 0)
+                    reason_shares[reason] = {
+                        'raw_hours': reason_raw_seconds / 3600.0,
+                        'billable_hours': reason_billable_seconds / 3600.0,
+                        'rounding_adjustment_hours': (
+                            reason_billable_seconds - reason_raw_seconds
+                        ) / 3600.0,
+                        'task_ids': sorted(
+                            destinations[destination]['reason_task_ids'][reason]
+                        ),
+                    }
+                unbudgeted_seconds += reason_billable.get('coverage_gap', 0)
+
+            destination_rows.append({
+                'kind': kind,
+                'reason': (
+                    next(iter(reason_shares))
+                    if len(reason_shares) == 1 else 'mixed'
+                ) if reason_shares else kind,
+                'budget_id': budget_id,
+                'raw_hours': raw_value / 3600.0,
+                'billable_hours': billable_value / 3600.0,
+                'rounding_adjustment_hours': (billable_value - raw_value) / 3600.0,
+                'reason_shares': reason_shares,
+                'task_ids': sorted(destinations[destination]['task_ids']),
+            })
+
+        days.append({
+            'date': day,
+            'raw_hours': total_raw_seconds / 3600.0,
+            'rounded_hours': rounded_seconds / 3600.0,
+            'rounding_adjustment_hours': (rounded_seconds - total_raw_seconds) / 3600.0,
+            # Today's total can change when another entry is added even if no
+            # timer is currently running, so the whole current day is tentative.
+            'provisional': day == now.date(),
+            'destinations': destination_rows,
+        })
+
+    used = {budget_id: seconds / 3600.0 for budget_id, seconds in used_seconds.items()}
+    return used, split, unbudgeted_seconds / 3600.0, days
+
+
+def allocate(budgets, tasks, now=None, rounding_policy=None):
+    """Compatibility wrapper returning the allocator's original three values."""
+    used, split, unbudgeted, _days = allocation_ledger(
+        budgets, tasks, now, rounding_policy
+    )
     return used, split, unbudgeted
+
+
+def rounding_days_for_budget(ledger, budget_id):
+    """Return JSON-safe day totals and reason-level No-budget shares."""
+    rows = []
+    for client_day in ledger:
+        budget_destination = next(
+            (
+                destination for destination in client_day['destinations']
+                if destination['kind'] == 'budget'
+                and destination['budget_id'] == budget_id
+            ),
+            None,
+        )
+        no_budget = [
+            destination for destination in client_day['destinations']
+            if destination['kind'] == 'no_budget'
+        ]
+        if budget_destination is None and not no_budget:
+            continue
+
+        def total(destinations, field):
+            return sum(destination[field] for destination in destinations)
+
+        def seconds(hours):
+            return int(round(hours * 3600))
+
+        no_budget_reasons = {}
+        for destination in no_budget:
+            for reason, share in destination.get('reason_shares', {}).items():
+                totals = no_budget_reasons.setdefault(
+                    reason,
+                    {
+                        'raw_hours': 0.0,
+                        'billable_hours': 0.0,
+                        'rounding_adjustment_hours': 0.0,
+                        'task_ids': set(),
+                    },
+                )
+                totals['raw_hours'] += share['raw_hours']
+                totals['billable_hours'] += share['billable_hours']
+                totals['rounding_adjustment_hours'] += share[
+                    'rounding_adjustment_hours'
+                ]
+                totals['task_ids'].update(share.get('task_ids', []))
+
+        serialized_reasons = {
+            reason: {
+                'raw_hours': round(share['raw_hours'], 6),
+                'raw_seconds': seconds(share['raw_hours']),
+                'billable_hours': round(share['billable_hours'], 6),
+                'billable_seconds': seconds(share['billable_hours']),
+                'rounding_adjustment_hours': round(
+                    share['rounding_adjustment_hours'], 6
+                ),
+                'rounding_adjustment_seconds': seconds(
+                    share['rounding_adjustment_hours']
+                ),
+                'task_ids': sorted(share['task_ids']),
+            }
+            for reason, share in sorted(no_budget_reasons.items())
+        }
+
+        rows.append({
+            'date': client_day['date'].isoformat(),
+            'raw_hours': round(client_day['raw_hours'], 6),
+            'raw_seconds': seconds(client_day['raw_hours']),
+            'rounded_hours': round(client_day['rounded_hours'], 6),
+            'rounded_seconds': seconds(client_day['rounded_hours']),
+            'rounding_adjustment_hours': round(
+                client_day['rounding_adjustment_hours'], 6
+            ),
+            'rounding_adjustment_seconds': seconds(
+                client_day['rounding_adjustment_hours']
+            ),
+            'provisional': client_day['provisional'],
+            'budget_raw_hours': round(
+                budget_destination['raw_hours'] if budget_destination else 0.0, 6
+            ),
+            'budget_raw_seconds': seconds(
+                budget_destination['raw_hours'] if budget_destination else 0.0
+            ),
+            'budget_billable_hours': round(
+                budget_destination['billable_hours'] if budget_destination else 0.0, 6
+            ),
+            'budget_billable_seconds': seconds(
+                budget_destination['billable_hours']
+                if budget_destination else 0.0
+            ),
+            'budget_rounding_adjustment_hours': round(
+                budget_destination['rounding_adjustment_hours']
+                if budget_destination else 0.0,
+                6,
+            ),
+            'budget_rounding_adjustment_seconds': seconds(
+                budget_destination['rounding_adjustment_hours']
+                if budget_destination else 0.0
+            ),
+            'no_budget_raw_hours': round(total(no_budget, 'raw_hours'), 6),
+            'no_budget_raw_seconds': seconds(total(no_budget, 'raw_hours')),
+            'no_budget_billable_hours': round(total(no_budget, 'billable_hours'), 6),
+            'no_budget_billable_seconds': seconds(
+                total(no_budget, 'billable_hours')
+            ),
+            'no_budget_rounding_adjustment_hours': round(
+                total(no_budget, 'rounding_adjustment_hours'), 6
+            ),
+            'no_budget_rounding_adjustment_seconds': seconds(
+                total(no_budget, 'rounding_adjustment_hours')
+            ),
+            'no_budget_reasons': serialized_reasons,
+        })
+    return rows
 
 
 # --------------------------------------------------------------------------
@@ -599,9 +1038,16 @@ def summarise(
     risk_threshold = float(
         raw_risk_threshold if raw_risk_threshold is not None else 10.0
     )
-    used = round(used_hours, 2)
-    remaining = round(budgeted - used, 2)
-    percent_used = round(used / budgeted * 100, 1) if budgeted else None
+    # Keep allocation precision for every decision and derived metric. Values
+    # are rounded only when serialized below; otherwise a one-second overage
+    # can disappear into a displayed 100.0% and be misclassified as in-budget.
+    exact_used = float(used_hours)
+    exact_remaining = budgeted - exact_used
+    exact_percent_used = exact_used / budgeted * 100 if budgeted else None
+    budgeted_seconds = int(round(budgeted * 3600))
+    used_seconds = int(round(exact_used * 3600))
+    remaining_seconds = budgeted_seconds - used_seconds
+    over_by_seconds = max(0, used_seconds - budgeted_seconds)
 
     started = today >= budget.start_date
     manually_closed = getattr(budget, 'closed_at', None) is not None
@@ -653,14 +1099,14 @@ def summarise(
         if started
         else 0
     )
-    percent_elapsed = (
-        round(elapsed_capacity / total_capacity * 100, 1)
+    exact_percent_elapsed = (
+        elapsed_capacity / total_capacity * 100
         if total_capacity
         else None
     )
     projection_mature = (
-        percent_elapsed is not None
-        and percent_elapsed >= MIN_PROJECTION_ELAPSED_PERCENT
+        exact_percent_elapsed is not None
+        and exact_percent_elapsed >= MIN_PROJECTION_ELAPSED_PERCENT
         and elapsed_days >= MIN_PROJECTION_ELAPSED_DAYS
     )
     # Today is spent, so tomorrow is the first day still available.
@@ -674,16 +1120,18 @@ def summarise(
     )
 
     ratio = _safe_divide(total_capacity, elapsed_capacity)
-    projected = round(used * ratio, 2) if ratio is not None else None
-    projected_percent = (
-        round(projected / budgeted * 100, 1)
-        if projected is not None and budgeted
+    exact_projected = exact_used * ratio if ratio is not None else None
+    exact_projected_percent = (
+        exact_projected / budgeted * 100
+        if exact_projected is not None and budgeted
         else None
     )
 
-    pace = _safe_divide(used, elapsed_days)
+    pace = _safe_divide(exact_used, elapsed_days)
     # What you can average from tomorrow and still land exactly on budget.
-    required_pace = _safe_divide(remaining, remaining_days) if remaining_days else None
+    required_pace = (
+        _safe_divide(exact_remaining, remaining_days) if remaining_days else None
+    )
 
     # Working days the holds removed from this budget's own range. Configured
     # days off aren't counted — they were never capacity, so claiming a hold
@@ -745,19 +1193,36 @@ def summarise(
         'start_date': budget.start_date.isoformat(),
         'end_date': budget.end_date.isoformat(),
         'budgeted_hours': round(budgeted, 2),
+        'budgeted_seconds': budgeted_seconds,
         'risk_threshold_percent': round(risk_threshold, 2),
         'notes': budget.notes,
         'closed_at': budget.closed_at.isoformat() if manually_closed else None,
 
-        'used_hours': used,
-        'remaining_hours': remaining,
-        'percent_used': percent_used,
-        'over_by': round(max(0.0, used - budgeted), 2),
+        'used_hours': round(exact_used, 2),
+        'remaining_hours': round(exact_remaining, 2),
+        'used_seconds': used_seconds,
+        'remaining_seconds': remaining_seconds,
+        'percent_used': (
+            round(exact_percent_used, 1)
+            if exact_percent_used is not None else None
+        ),
+        'percent_used_exact': (
+            exact_percent_used
+            if exact_percent_used is not None else None
+        ),
+        'over_by': round(max(0.0, exact_used - budgeted), 2),
+        'over_by_seconds': over_by_seconds,
 
-        'projected_hours': projected,
-        'projected_percent': projected_percent,
+        'projected_hours': (
+            round(exact_projected, 2) if exact_projected is not None else None
+        ),
+        'projected_percent': (
+            round(exact_projected_percent, 1)
+            if exact_projected_percent is not None else None
+        ),
         'projected_overage': (
-            round(projected - budgeted, 2) if projected is not None else None
+            round(exact_projected - budgeted, 2)
+            if exact_projected is not None else None
         ),
 
         'pace_hours_per_day': round(pace, 2) if pace is not None else None,
@@ -777,7 +1242,10 @@ def summarise(
         'total_business_days': total_days,
         'elapsed_business_days': elapsed_days,
         'remaining_business_days': remaining_days,
-        'percent_elapsed': percent_elapsed,
+        'percent_elapsed': (
+            round(exact_percent_elapsed, 1)
+            if exact_percent_elapsed is not None else None
+        ),
         'projection_mature': projection_mature,
 
         'started': started,
@@ -789,8 +1257,8 @@ def summarise(
         # log time on.
         'is_active': started and not ended,
         'status': status_for(
-            percent_used,
-            projected_percent,
+            exact_percent_used,
+            exact_projected_percent,
             started,
             ended,
             paused,

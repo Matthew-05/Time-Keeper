@@ -30,6 +30,49 @@ export function hours(value) {
     return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)
 }
 
+/**
+ * A duration that preserves the ledger's whole-second apportionment.
+ *
+ * Destination shares can legitimately contain half-minutes (for example, a
+ * 15-minute client-day split evenly across two budgets). Rounding each share
+ * to a whole minute would make the visible pieces stop adding up to the day.
+ */
+export function exactDuration(value) {
+    if (value == null || Number.isNaN(Number(value))) return '—'
+    return exactDurationSeconds(Number(value) * 3600)
+}
+
+/** Format an already-apportioned second count without a lossy conversion. */
+export function exactDurationSeconds(value) {
+    if (value == null || Number.isNaN(Number(value))) return '—'
+    const totalSeconds = Math.round(Math.abs(Number(value)))
+    const wholeHours = Math.floor(totalSeconds / 3600)
+    const wholeMinutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+    const parts = []
+    if (wholeHours) parts.push(`${wholeHours}h`)
+    if (wholeMinutes) parts.push(`${wholeMinutes}m`)
+    if (seconds || !parts.length) parts.push(`${seconds}s`)
+    return parts.join(' ')
+}
+
+/** Summary duration that keeps familiar decimal hours unless exactness matters. */
+export function budgetDuration(
+    budget,
+    hoursField,
+    secondsField,
+    { exact = false, floorAtZero = false } = {}
+) {
+    let seconds = budget?.[secondsField]
+    let value = budget?.[hoursField]
+    if (floorAtZero && Number(seconds) <= 0) {
+        seconds = 0
+        value = 0
+    }
+    if (exact && seconds != null) return exactDurationSeconds(seconds)
+    return `${hours(value)} hrs.`
+}
+
 /** A percentage with no decimal — nothing here is precise enough to warrant one. */
 export function percent(value) {
     return value == null ? '—' : `${Math.round(value)}%`
@@ -78,7 +121,7 @@ export function headline(budget) {
     }
 
     if (budget.status === 'over') {
-        return `${hours(budget.over_by)} hrs. over budget`
+        return `${budgetDuration(budget, 'over_by', 'over_by_seconds', { exact: true })} over budget`
     }
 
     // Deliberately says nothing about pace. A paused project has no pace, and
@@ -90,10 +133,16 @@ export function headline(budget) {
         const back = budget.resumes_on
             ? `resumes ${shortDate(budget.resumes_on)}`
             : 'no resume date set'
-        return `On hold${since} · ${hours(budget.remaining_hours)} hrs. left · ${back}`
+        return `On hold${since} · ${budgetDuration(budget, 'remaining_hours', 'remaining_seconds', { floorAtZero: true })} left · ${back}`
     }
 
     if (budget.status === 'closed') {
+        const remainingSeconds = budget.remaining_seconds
+        if (remainingSeconds != null) {
+            return remainingSeconds >= 0
+                ? `Finished ${budgetDuration(budget, 'remaining_hours', 'remaining_seconds')} under budget`
+                : `Finished ${exactDurationSeconds(-remainingSeconds)} over budget`
+        }
         const left = budget.remaining_hours
         return left >= 0
             ? `Finished ${hours(left)} hrs. under budget`
@@ -104,7 +153,7 @@ export function headline(budget) {
         return `Current average pace points to ${hours(budget.projected_hours)} hrs. — ${hours(budget.projected_overage)} over budget`
     }
 
-    return `${hours(budget.remaining_hours)} hrs. remaining`
+    return `${budgetDuration(budget, 'remaining_hours', 'remaining_seconds', { floorAtZero: true })} remaining`
 }
 
 /**
@@ -117,14 +166,15 @@ export function headline(budget) {
  * the bar is for is being readable at a glance from across the room.
  */
 export function meterBreakdown(budget, { showPeriodMarker = true } = {}) {
-    const usage = `Used: ${hours(budget.used_hours)} of ${hours(budget.budgeted_hours)} hrs. (${percent(budget.percent_used)}).`
+    const isOver = (budget.over_by_seconds ?? 0) > 0
+    const usage = `Used: ${budgetDuration(budget, 'used_hours', 'used_seconds', { exact: isOver })} of ${hours(budget.budgeted_hours)} hrs. (${percent(budget.percent_used_exact ?? budget.percent_used)}).`
     const remaining =
-        budget.remaining_hours == null
+        budget.remaining_seconds == null && budget.remaining_hours == null
             ? ''
-            : budget.remaining_hours < 0
-              ? ` Over budget: ${hours(-budget.remaining_hours)} hrs.`
-              : ` Remaining: ${hours(budget.remaining_hours)} hrs.`
-    const capped = (budget.percent_used ?? 0) > 100
+            : isOver
+              ? ` Over budget: ${budgetDuration(budget, 'over_by', 'over_by_seconds', { exact: true })}.`
+              : ` Remaining: ${budgetDuration(budget, 'remaining_hours', 'remaining_seconds', { floorAtZero: true })}.`
+    const capped = isOver
         ? ' The filled bar is capped at 100%.'
         : ''
     const elapsed = !showPeriodMarker
@@ -139,9 +189,10 @@ export function meterBreakdown(budget, { showPeriodMarker = true } = {}) {
 }
 
 export function meter(budget, { large = false, showPeriodMarker = true } = {}) {
-    const used = Math.min(100, Math.max(0, budget.percent_used ?? 0))
+    const exactPercent = budget.percent_used_exact ?? budget.percent_used ?? 0
+    const used = Math.min(100, Math.max(0, exactPercent))
     const elapsed = budget.percent_elapsed
-    const over = (budget.percent_used ?? 0) > 100
+    const over = (budget.over_by_seconds ?? 0) > 0 || exactPercent > 100
     const breakdown = meterBreakdown(budget, { showPeriodMarker })
 
     const marker =
@@ -150,7 +201,7 @@ export function meter(budget, { large = false, showPeriodMarker = true } = {}) {
             : `<span class="tk-meter-marker" style="left: ${Math.min(100, elapsed)}%"></span>`
 
     return `<div class="tk-meter tk-meter-tooltip${large ? ' tk-meter-lg' : ''}"
-                 data-insight="${escapeAttribute(breakdown)}" role="img"
+                 data-insight="${escapeAttribute(breakdown)}" role="img" tabindex="0"
                  aria-label="${escapeAttribute(`Budget progress. ${breakdown}`)}" title="">`
         + `<div class="tk-meter-fill${over ? ' tk-meter-overflow' : ''}" style="width: ${used}%"></div>`
         + marker

@@ -60,7 +60,7 @@ import threading
 import time
 import math
 from datetime import datetime, date, timedelta
-from sqlalchemy import text, inspect, desc, and_
+from sqlalchemy import text, inspect, desc, and_, or_
 from flask_migrate import Migrate
 from flask_admin import Admin
 from flask_admin.contrib.sqla import ModelView
@@ -1562,81 +1562,62 @@ def _work_calendar_settings():
 def _client_allocation(client_id, now=None, every_task=False):
     """Run the allocator over one client.
 
-    Returns ``(budgets, used, split, unbudgeted, tasks)``. The tasks come back
+    Returns ``(budgets, used, split, unbudgeted, tasks, days)``. The tasks come back
     because callers need dates to fold the per-task ``split`` into per-day
-    figures, and re-querying for them would be a second pass over rows this
-    function has already loaded.
+    figures. ``days`` is the client-day rounding ledger.
 
-    By default the task query is the union of two sets: everything falling
-    inside the client's overall budgeted window, plus anything pinned to one of
-    those budgets from outside it. The second half matters — a pin is honoured
-    wherever it lands, so an entry pinned to a budget whose range has since been
-    shortened still has to be fetched or it would quietly stop counting.
-
-    That scoping makes the common read cheap, but it also means the returned
-    `unbudgeted` only sees gaps *inside* the window. `every_task=True` widens
-    the query to the client's whole history, which is what makes "hours that
-    fall against no budget at all" a true figure rather than a partial one.
-    Only the endpoint that reports that number pays for it.
+    Normal budget reads are bounded to the client's overall budget window.
+    Pinned entries outside that window are also included, together with every
+    same-client entry on those dates: a client-day is the indivisible rounding
+    boundary, so loading a pin without its neighbours would disagree with the
+    company total. ``every_task=True`` is reserved for the unbudgeted-history
+    endpoint, whose purpose genuinely requires the client's full history.
     """
     now = now or datetime.now()
     rounding_policy = _rounding_policy()
 
     budgets = Budget.query.filter(Budget.client_id == client_id).all()
-    if not budgets:
-        if not every_task:
-            return [], {}, {}, 0.0, []
-        # No budgets at all: every recorded hour is unbudgeted by definition,
-        # and there's nothing for the allocator to pour into.
-        tasks = Task_Item.query.filter(
-            Task_Item.client_id == client_id,
-            Task_Item.budget_excluded.is_(False),
-        ).all()
-        loose = sum(
-            budget_allocation.billable_hours_by_task(
-                tasks, now, rounding_policy
-            ).values()
-        )
-        return [], {}, {}, loose, tasks
-
-    query = Task_Item.query.filter(Task_Item.client_id == client_id)
-    if not every_task:
-        window_start = min(b.start_date for b in budgets)
-        window_end = max(b.end_date for b in budgets)
-        budget_ids = [b.id for b in budgets]
-        query = query.filter(
-            db.or_(
-                db.and_(Task_Item.date >= window_start, Task_Item.date <= window_end),
+    task_query = Task_Item.query.filter(Task_Item.client_id == client_id)
+    if every_task:
+        tasks = task_query.all()
+    elif not budgets:
+        tasks = []
+    else:
+        window_start = min(budget.start_date for budget in budgets)
+        window_end = max(budget.end_date for budget in budgets)
+        budget_ids = [budget.id for budget in budgets]
+        pinned_dates = [
+            pinned_date
+            for (pinned_date,) in db.session.query(Task_Item.date).filter(
+                Task_Item.client_id == client_id,
                 Task_Item.budget_id.in_(budget_ids),
-            )
-        )
-
-    tasks = query.all()
-    used, split, unbudgeted = budget_allocation.allocate(
+                or_(
+                    Task_Item.date < window_start,
+                    Task_Item.date > window_end,
+                ),
+            ).distinct().all()
+        ]
+        date_scope = Task_Item.date.between(window_start, window_end)
+        if pinned_dates:
+            date_scope = or_(date_scope, Task_Item.date.in_(pinned_dates))
+        tasks = task_query.filter(date_scope).all()
+    used, split, unbudgeted, days = budget_allocation.allocation_ledger(
         budgets, tasks, now, rounding_policy
     )
-    return budgets, used, split, unbudgeted, tasks
+    return budgets, used, split, unbudgeted, tasks, days
 
 
-def _day_hours_by_budget(split, tasks):
-    """Fold the per-task allocation into ``{budget_id: {date: hours}}``.
-
-    Both the burn chart and the held-hours warning are per-day questions, and
-    `allocate` answers per-task; this is the one place that bridges them, so
-    the two features can't drift into disagreeing about which day an entry
-    landed on. A task that spilled contributes to more than one budget and
-    appears under each with only the hours that landed there.
-    """
-    dates = {t.id: t.date for t in tasks}
+def _day_hours_by_budget_ledger(ledger):
+    """Fold billable destination shares into ``{budget_id: {date: hours}}``."""
     per_budget = {}
-    for task_id, allocations in split.items():
-        day = dates.get(task_id)
-        if day is None:
-            continue
-        for budget_id, hours, _pinned in allocations:
-            if budget_id is None or hours <= 0:
+    for client_day in ledger:
+        for destination in client_day['destinations']:
+            budget_id = destination['budget_id']
+            hours = destination['billable_hours']
+            if destination['kind'] != 'budget' or budget_id is None or hours <= 0:
                 continue
             days = per_budget.setdefault(budget_id, {})
+            day = client_day['date']
             days[day] = days.get(day, 0.0) + hours
     return per_budget
 
@@ -1648,8 +1629,8 @@ def _summarise_one(budget, now=None, today=None):
     what its overlapping neighbours absorbed — so the write endpoints all come
     back through here rather than trying to patch a single row's numbers.
     """
-    budgets, used, split, _unbudgeted, tasks = _client_allocation(budget.client_id, now)
-    day_hours = _day_hours_by_budget(split, tasks)
+    budgets, used, split, _unbudgeted, tasks, ledger = _client_allocation(budget.client_id, now)
+    day_hours = _day_hours_by_budget_ledger(ledger)
     hours_per_day, work_days, overrides, schedule_history = _work_calendar_settings()
     return budget_allocation.summarise(
         budget,
@@ -1666,9 +1647,9 @@ def _summarise_one(budget, now=None, today=None):
 
 def _summarise_client(client_id, now=None, today=None):
     """Every budget for one client, summarised. Cheapest correct unit of work."""
-    budgets, used, split, _unbudgeted, tasks = _client_allocation(client_id, now)
+    budgets, used, split, _unbudgeted, tasks, ledger = _client_allocation(client_id, now)
     hours_per_day, work_days, overrides, schedule_history = _work_calendar_settings()
-    day_hours = _day_hours_by_budget(split, tasks)
+    day_hours = _day_hours_by_budget_ledger(ledger)
     return [
         budget_allocation.summarise(
             b,
@@ -1747,10 +1728,12 @@ def api_get_budget(budget_id):
         return jsonify({'error': 'Budget not found'}), 404
 
     now = datetime.now()
-    budgets, used, split, _unbudgeted, task_rows = _client_allocation(budget.client_id, now)
+    budgets, used, split, _unbudgeted, task_rows, ledger = _client_allocation(
+        budget.client_id, now
+    )
     hours_per_day, work_days, overrides, schedule_history = _work_calendar_settings()
 
-    day_hours = _day_hours_by_budget(split, task_rows).get(budget.id, {})
+    day_hours = _day_hours_by_budget_ledger(ledger).get(budget.id, {})
     summary = budget_allocation.summarise(
         budget,
         used.get(budget.id, 0.0),
@@ -1762,10 +1745,11 @@ def api_get_budget(budget_id):
         schedule_versions=schedule_history,
     )
 
-    # Rebuild the per-task view of this budget's slice. A task that spilled
-    # contributes to two budgets, so it appears in both lists with only the
-    # hours that actually landed here.
+    # Rebuild the per-task view. A task that spilled appears in both budgets,
+    # always with its real raw duration plus the raw slice that landed here;
+    # billable rounding is exposed only on the client-day ledger below.
     tasks = {t.id: t for t in task_rows}
+    raw_hours = budget_allocation.raw_hours_by_task(task_rows, now)
     held = budget_allocation.hold_days(budget.holds)
     entries = []
     for task_id, allocations in split.items():
@@ -1780,7 +1764,13 @@ def api_get_budget(budget_id):
                 'date': task.date.isoformat(),
                 'start_time': task.start_time.strftime('%H:%M') if task.start_time else None,
                 'end_time': task.end_time.strftime('%H:%M') if task.end_time else None,
-                'hours': round(hours, 2),
+                # An entry is always shown as the raw duration the user
+                # recorded. Its billable rounding belongs to the day ledger.
+                'hours': round(raw_hours.get(task.id, 0.0), 6),
+                'raw_hours': round(raw_hours.get(task.id, 0.0), 6),
+                'raw_seconds': int(round(raw_hours.get(task.id, 0.0) * 3600)),
+                'allocated_raw_hours': round(hours, 6),
+                'allocated_raw_seconds': int(round(hours * 3600)),
                 'pinned': pinned,
                 # A task that spilled is the single most confusing thing the
                 # allocator does, so it gets said out loud in the UI.
@@ -1794,24 +1784,19 @@ def api_get_budget(budget_id):
 
     entries.sort(key=lambda e: (e['date'], e['start_time'] or ''), reverse=True)
 
-    excluded_tasks = (
-        Task_Item.query
-        .filter(
-            Task_Item.client_id == budget.client_id,
-            Task_Item.budget_excluded.is_(True),
-        )
-        .order_by(Task_Item.date.desc(), Task_Item.start_time.desc())
-        .all()
-    )
-    excluded_hours = budget_allocation.billable_hours_by_task(
-        excluded_tasks, now, _rounding_policy()
+    excluded_tasks = sorted(
+        (task for task in task_rows if task.budget_excluded),
+        key=lambda task: (task.date, task.start_time, task.id),
+        reverse=True,
     )
     unassigned_entries = [{
         'task_id': task.id,
         'date': task.date.isoformat(),
         'start_time': task.start_time.strftime('%H:%M') if task.start_time else None,
         'end_time': task.end_time.strftime('%H:%M') if task.end_time else None,
-        'hours': round(excluded_hours.get(task.id, 0.0), 2),
+        'hours': round(raw_hours.get(task.id, 0.0), 6),
+        'raw_hours': round(raw_hours.get(task.id, 0.0), 6),
+        'raw_seconds': int(round(raw_hours.get(task.id, 0.0) * 3600)),
         'running': task.end_time is None,
     } for task in excluded_tasks]
 
@@ -1828,6 +1813,9 @@ def api_get_budget(budget_id):
         ),
         'entries': entries,
         'unassigned_entries': unassigned_entries,
+        'rounding_days': budget_allocation.rounding_days_for_budget(
+            ledger, budget.id
+        ),
         # Everything covering this client, so the re-pin dropdown can offer the
         # alternatives without a second request.
         'sibling_budgets': [
@@ -2224,7 +2212,9 @@ def api_unbudgeted_hours(client_id):
     exactly the kind of gap worth knowing about, and it's the kind the scoped
     query is blind to by construction.
     """
-    _b, _used, _split, unbudgeted, _tasks = _client_allocation(client_id, every_task=True)
+    _b, _used, _split, unbudgeted, _tasks, _ledger = _client_allocation(
+        client_id, every_task=True
+    )
     return jsonify({'client_id': client_id, 'unbudgeted_hours': round(unbudgeted, 2)})
 
 

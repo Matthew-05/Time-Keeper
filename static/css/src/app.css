@@ -1486,8 +1486,7 @@
     padding-left: 0.75rem;
   }
 
-  .tk-titlebar-brand svg {
-    color: var(--accent);
+  .tk-titlebar-brand img {
     flex: 0 0 auto;
     height: 0.9375rem;
     width: 0.9375rem;

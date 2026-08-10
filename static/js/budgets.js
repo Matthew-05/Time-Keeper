@@ -1,7 +1,9 @@
 import { TimeKeeper, ready, lockBodyScroll, unlockBodyScroll } from './base.js'
 import {
     STATUS_LABEL,
+    budgetDuration,
     dateRange,
+    exactDurationSeconds,
     headline,
     hours,
     meter,
@@ -49,7 +51,7 @@ class Budgets extends TimeKeeper {
         super()
 
         INSIGHTS.used = this.roundingEnabled
-            ? `Task time allocated to this budget. Each client's daily time uses the global ${this.roundingIntervalMinutes}-minute ${this.roundingDirection} rounding policy.`
+            ? `Billable time allocated to this budget. Entries stay raw; each client-day is rounded once using the global ${this.roundingIntervalMinutes}-minute ${this.roundingDirection} policy, then shared across its budget destinations.`
             : 'Tracked task time allocated to this budget. Rounding is disabled.'
 
         this.list = document.getElementById('budget-list')
@@ -169,8 +171,14 @@ class Budgets extends TimeKeeper {
             return
         }
 
-        const budgeted = active.reduce((sum, b) => sum + b.budgeted_hours, 0)
-        const used = active.reduce((sum, b) => sum + b.used_hours, 0)
+        const budgetedSeconds = active.reduce(
+            (sum, b) => sum + (b.budgeted_seconds ?? b.budgeted_hours * 3600), 0
+        )
+        const usedSeconds = active.reduce(
+            (sum, b) => sum + (b.used_seconds ?? b.used_hours * 3600), 0
+        )
+        const budgeted = budgetedSeconds / 3600
+        const used = usedSeconds / 3600
         const atRisk = active.filter((b) => b.status === 'at_risk')
         const overBudget = active.filter((b) => b.status === 'over')
 
@@ -266,9 +274,9 @@ class Budgets extends TimeKeeper {
 
             <div class="mb-2 flex items-baseline justify-between gap-3">
               <span class="tabular text-sm font-semibold text-text">
-                ${hours(budget.used_hours)}<span class="font-normal text-faint"> / ${hours(budget.budgeted_hours)} hrs.</span>
+                ${budgetDuration(budget, 'used_hours', 'used_seconds', { exact: budget.status === 'over' })}<span class="font-normal text-faint"> / ${hours(budget.budgeted_hours)} hrs.</span>
               </span>
-              <span class="tabular text-sm font-semibold" style="color: var(--status-text)">${percent(budget.percent_used)}</span>
+              <span class="tabular text-sm font-semibold" style="color: var(--status-text)">${percent(budget.percent_used_exact ?? budget.percent_used)}</span>
             </div>
 
             ${meter(budget, { large: true })}
@@ -278,7 +286,7 @@ class Budgets extends TimeKeeper {
             <div class="mt-3 grid grid-cols-4 gap-3 border-t border-border pt-3">
               <div>
                 <div class="tk-stat-label">Remaining</div>
-                <div class="tk-stat-value">${hours(budget.remaining_hours)}<span class="font-normal text-faint"> hrs.</span></div>
+                <div class="tk-stat-value">${budgetDuration(budget, 'remaining_hours', 'remaining_seconds', { floorAtZero: true })}</div>
               </div>
               <div>
                 ${this.insightLabel('Current avg. pace', INSIGHTS.currentPace)}
@@ -646,7 +654,7 @@ class Budgets extends TimeKeeper {
           <div class="tk-budget-card border-0 p-0 shadow-none" data-status="${detail.status}">
             <div class="mb-2 flex items-baseline justify-between gap-3">
               <span class="tabular text-lg font-semibold text-text">
-                ${hours(detail.used_hours)}<span class="font-normal text-faint"> / ${hours(detail.budgeted_hours)} hrs.</span>
+                ${budgetDuration(detail, 'used_hours', 'used_seconds', { exact: detail.status === 'over' })}<span class="font-normal text-faint"> / ${hours(detail.budgeted_hours)} hrs.</span>
               </span>
               <div class="flex items-center gap-1.5">
                 <span class="tk-badge tk-badge-status">${STATUS_LABEL[detail.status]}</span>
@@ -658,8 +666,8 @@ class Budgets extends TimeKeeper {
           </div>
 
           <div class="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border sm:grid-cols-4">
-            ${this.detailStat('Used', `${hours(detail.used_hours)} hrs.`, percent(detail.percent_used), INSIGHTS.used)}
-            ${this.detailStat('Remaining', `${hours(detail.remaining_hours)} hrs.`, `${detail.remaining_business_days} work days`)}
+            ${this.detailStat('Used', budgetDuration(detail, 'used_hours', 'used_seconds', { exact: detail.status === 'over' }), percent(detail.percent_used_exact ?? detail.percent_used), INSIGHTS.used)}
+            ${this.detailStat('Remaining', budgetDuration(detail, 'remaining_hours', 'remaining_seconds', { floorAtZero: true }), `${detail.remaining_business_days} work days`)}
             ${this.detailStat('Current avg. pace', `${hours(detail.projected_hours)} hrs. total`, detail.projected_hours != null && !detail.projection_mature ? `Early estimate · ${percent(detail.projected_percent)}` : percent(detail.projected_percent), INSIGHTS.currentPace)}
             ${this.detailStat('Work period elapsed', percent(detail.percent_elapsed), `${detail.elapsed_business_days}/${detail.total_business_days} days`)}
           </div>
@@ -1105,7 +1113,7 @@ class Budgets extends TimeKeeper {
             return `At risk because the current average pace implies ${hours(budget.projected_hours)} hrs. total (${percent(budget.projected_percent)} of the ${hours(budget.budgeted_hours)}-hr commitment), ${hours(budget.projected_overage)} hrs. over. Pace warnings begin only after 20% of the working period and five working days have elapsed. This budget's threshold is ${hours(budget.risk_threshold_percent)}% over.`
         }
         if (budget.status === 'over') {
-            return `Over budget because ${hours(budget.used_hours)} hrs. have already been used against ${hours(budget.budgeted_hours)} committed, ${hours(budget.over_by)} hrs. over.`
+            return `Over budget because ${budgetDuration(budget, 'used_hours', 'used_seconds', { exact: true })} have already been used against ${hours(budget.budgeted_hours)} hrs. committed, ${budgetDuration(budget, 'over_by', 'over_by_seconds', { exact: true })} over.`
         }
         return null
     }
@@ -1166,8 +1174,12 @@ class Budgets extends TimeKeeper {
                 ),
             ].join('')
 
-        const rows = detail.entries
-            .map(
+        const byDate = this.entriesByDate(detail.entries)
+        const roundingDaysByDate = new Map(
+            (detail.rounding_days ?? []).map((day) => [day.date, day])
+        )
+        const rows = [...byDate.entries()]
+            .map(([date, entries]) => `${entries.map(
                 (entry) => `
           <tr>
             <td class="tk-num whitespace-nowrap">${shortDate(entry.date)}</td>
@@ -1176,8 +1188,8 @@ class Budgets extends TimeKeeper {
               ${entry.running ? '<span class="tk-badge tk-badge-accent ml-1.5">running</span>' : ''}
             </td>
             <td class="tk-num text-right font-medium">
-              ${hours(entry.hours)}
-              ${entry.split ? '<span class="tk-badge tk-badge-neutral ml-1.5" title="This entry was split across more than one budget">split</span>' : ''}
+              <span title="Raw tracked duration">${exactDurationSeconds(entry.raw_seconds)}</span>
+              ${entry.split ? `<span class="tk-badge tk-badge-neutral ml-1.5">split</span>${this.insightIcon(`This entry was split across budgets; ${exactDurationSeconds(entry.allocated_raw_seconds)} raw time landed here`, 'Split allocation details')}` : ''}
               ${entry.held ? '<span class="tk-badge tk-badge-warn ml-1.5" title="Recorded on a day this project was on hold. It still counts — the hold dates may need correcting.">on hold</span>' : ''}
             </td>
             <td class="w-px">
@@ -1187,8 +1199,7 @@ class Budgets extends TimeKeeper {
               </select>
             </td>
           </tr>
-        `
-            )
+        `).join('')}${this.dayRoundingRow(roundingDaysByDate, date, 'budget')}`)
             .join('')
 
         return `
@@ -1198,7 +1209,7 @@ class Budgets extends TimeKeeper {
                 <tr>
                   <th>Date</th>
                   <th>Time</th>
-                  <th class="text-right">Hours</th>
+                  <th class="text-right">Raw time</th>
                   <th>Assigned to</th>
                 </tr>
               </thead>
@@ -1209,7 +1220,10 @@ class Budgets extends TimeKeeper {
     }
 
     unassignedEntriesTable(detail) {
-        if (!detail.unassigned_entries.length) {
+        const noBudgetDays = (detail.rounding_days ?? []).filter(
+            (day) => day.no_budget_raw_seconds > 0
+        )
+        if (!detail.unassigned_entries.length && !noBudgetDays.length) {
             return '<div class="tk-empty py-6">No client time has been explicitly left without a budget.</div>'
         }
 
@@ -1221,28 +1235,99 @@ class Budgets extends TimeKeeper {
             ),
         ].join('')
 
-        const rows = detail.unassigned_entries.map((entry) => `
+        const byDate = this.entriesByDate(detail.unassigned_entries)
+        const roundingDaysByDate = new Map(
+            (detail.rounding_days ?? []).map((day) => [day.date, day])
+        )
+        noBudgetDays.forEach((day) => {
+            if (!byDate.has(day.date)) byDate.set(day.date, [])
+        })
+        const rows = [...byDate.entries()]
+            .sort(([left], [right]) => right.localeCompare(left))
+            .map(([date, entries]) => `${entries.map((entry) => `
           <tr>
             <td class="tk-num whitespace-nowrap">${shortDate(entry.date)}</td>
             <td class="tk-num whitespace-nowrap text-muted">
               ${entry.start_time ? formatClockTime(entry.start_time) : '—'}${entry.end_time ? `–${formatClockTime(entry.end_time)}` : ''}
               ${entry.running ? '<span class="tk-badge tk-badge-accent ml-1.5">running</span>' : ''}
             </td>
-            <td class="tk-num text-right font-medium">${hours(entry.hours)}</td>
+            <td class="tk-num text-right font-medium" title="Raw tracked duration">${exactDurationSeconds(entry.raw_seconds)}</td>
             <td class="w-px">
               <select class="tk-select tk-select-sm w-44" data-task-id="${entry.task_id}"
                       aria-label="Budget for this entry">${options()}</select>
             </td>
           </tr>
-        `).join('')
+        `).join('')}${this.dayRoundingRow(roundingDaysByDate, date, 'no_budget')}`).join('')
 
         return `
           <div class="overflow-hidden rounded-lg border border-border">
             <table class="tk-table tk-table-hover">
-              <thead><tr><th>Date</th><th>Time</th><th class="text-right">Hours</th><th>Assigned to</th></tr></thead>
+              <thead><tr><th>Date</th><th>Time</th><th class="text-right">Raw time</th><th>Assigned to</th></tr></thead>
               <tbody>${rows}</tbody>
             </table>
           </div>
+        `
+    }
+
+    entriesByDate(entries) {
+        return entries.reduce((groups, entry) => {
+            if (!groups.has(entry.date)) groups.set(entry.date, [])
+            groups.get(entry.date).push(entry)
+            return groups
+        }, new Map())
+    }
+
+    dayRoundingRow(roundingDaysByDate, date, destination) {
+        const day = roundingDaysByDate.get(date)
+        if (!day) return ''
+
+        const raw = destination === 'budget'
+            ? day.budget_raw_seconds
+            : day.no_budget_raw_seconds
+        const billable = destination === 'budget'
+            ? day.budget_billable_seconds
+            : day.no_budget_billable_seconds
+        const adjustment = destination === 'budget'
+            ? day.budget_rounding_adjustment_seconds
+            : day.no_budget_rounding_adjustment_seconds
+        const sign = adjustment > 0 ? '+' : adjustment < 0 ? '−' : ''
+        const adjustmentText = sign
+            ? `${sign}${exactDurationSeconds(adjustment)} rounding`
+            : 'no rounding adjustment'
+        const destinationLabel = destination === 'budget' ? 'This budget' : 'No-budget share'
+        const reasons = day.no_budget_reasons ?? {}
+        const reasonText = (label, share) => {
+            const reasonSign = share.rounding_adjustment_seconds > 0
+                ? '+'
+                : share.rounding_adjustment_seconds < 0 ? '−' : ''
+            const reasonAdjustment = reasonSign
+                ? ` (${reasonSign}${exactDurationSeconds(share.rounding_adjustment_seconds)} rounding)`
+                : ''
+            return `${label}: ${exactDurationSeconds(share.raw_seconds)} raw → ${exactDurationSeconds(share.billable_seconds)} billed${reasonAdjustment}`
+        }
+        const reasonBreakdown = destination === 'no_budget'
+            ? [
+                reasons.excluded
+                    ? reasonText('Explicitly excluded (listed)', reasons.excluded)
+                    : '',
+                reasons.coverage_gap
+                    ? reasonText('Coverage gap (not listed above)', reasons.coverage_gap)
+                    : '',
+            ].filter(Boolean).join('<span class="mx-1 text-faint">·</span>')
+            : ''
+
+        return `
+          <tr class="bg-surface-2">
+            <td colspan="4" class="text-xs text-muted">
+              <span class="font-medium text-text">${shortDate(date)} client-day:</span>
+              ${exactDurationSeconds(day.raw_seconds)} raw → ${exactDurationSeconds(day.rounded_seconds)} billed
+              <span class="text-faint">(${adjustmentText})</span>
+              <span class="mx-1 text-faint">·</span>
+              ${destinationLabel}: ${exactDurationSeconds(raw)} raw → ${exactDurationSeconds(billable)} billed
+              ${day.provisional ? `<span class="tk-badge tk-badge-accent ml-1.5">provisional</span>${this.insightIcon('Today can be redistributed when more client time is recorded', 'Provisional client-day details')}` : ''}
+              ${reasonBreakdown ? `<div class="mt-1 text-faint">${reasonBreakdown}</div>` : ''}
+            </td>
+          </tr>
         `
     }
 

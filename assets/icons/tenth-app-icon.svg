@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="tenthAppTitle">
+  <title id="tenthAppTitle">Tenth</title>
+  <rect x="0" y="0" width="512" height="512" rx="114" fill="#3D4EAE"/>
+  <circle cx="256" cy="256" r="150" fill="none" stroke="#FFFFFF" stroke-width="34"/>
+  <path d="M256 256 L256 152 A104 104 0 0 1 317.13 171.86 Z" fill="#F2A93B"/>
+  <circle cx="256" cy="256" r="15" fill="#FFFFFF"/>
+</svg>

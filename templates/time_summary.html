@@ -128,6 +128,9 @@
               color: t.faint,
               ...(roundingEnabled ? {
                 stepSize: roundingIntervalHours,
+                // Preserve the rounding interval as the underlying tick unit,
+                // but avoid labeling every interval on taller time ranges.
+                maxTicksLimit: 10,
                 callback: (value) => formatRoundedTick(value),
               } : {}),
             },

@@ -51,6 +51,19 @@ class ProjectionMaturityTests(unittest.TestCase):
         self.assertFalse(summary['projection_mature'])
         self.assertEqual(summary['status'], 'over')
 
+    def test_sub_centihour_overage_is_not_rounded_out_of_status(self):
+        self.budget.budgeted_hours = 1
+
+        summary = self.summary(1 + 1 / 3600, date(2026, 8, 3))
+
+        self.assertEqual(summary['used_hours'], 1.0)
+        self.assertEqual(summary['percent_used'], 100.0)
+        self.assertEqual(summary['used_seconds'], 3601)
+        self.assertEqual(summary['remaining_seconds'], -1)
+        self.assertEqual(summary['over_by_seconds'], 1)
+        self.assertGreater(summary['percent_used_exact'], 100)
+        self.assertEqual(summary['status'], 'over')
+
 
 if __name__ == '__main__':
     unittest.main()
