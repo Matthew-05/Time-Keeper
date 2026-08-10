@@ -94,44 +94,24 @@
 
         <div class="tk-row">
           <span class="tk-row-label">Day start</span>
-          <div class="flex flex-shrink-0 items-center gap-1.5">
+          <div class="flex flex-shrink-0 flex-col items-start gap-1.5">
             <input type="text" id="day-start-time" class="tk-time-input" placeholder="Select time" readonly />
-            <div id="day-start-actions" class="tk-inline-actions action-buttons-hidden">
-              <button id="save-start-time" class="tk-btn-icon tk-btn-icon-sm is-success" title="Save">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M20 6L9 17l-5-5" />
-                </svg>
-              </button>
-              <button id="cancel-start-time" class="tk-btn-icon tk-btn-icon-sm is-danger" title="Cancel">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
+            <div id="day-start-actions" class="tk-time-text-actions action-buttons-hidden">
+              <button id="save-start-time" class="tk-btn tk-btn-primary tk-btn-sm">Save</button>
+              <button id="cancel-start-time" class="tk-btn tk-btn-secondary tk-btn-sm">Clear</button>
             </div>
           </div>
         </div>
 
         <div class="tk-row">
           <span class="tk-row-label">Day end</span>
-          <div class="flex flex-shrink-0 items-center gap-1.5">
+          <div class="flex flex-shrink-0 flex-col items-start gap-1.5">
             <input type="text" id="day-end-time" class="tk-time-input" placeholder="Select time" readonly />
-            <div id="day-end-actions" class="tk-inline-actions action-buttons-hidden">
-              <button id="save-end-time" class="tk-btn-icon tk-btn-icon-sm is-success" title="Save">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M20 6L9 17l-5-5" />
-                </svg>
-              </button>
-              <button id="cancel-end-time" class="tk-btn-icon tk-btn-icon-sm is-danger" title="Cancel">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
+            <div id="day-end-actions" class="tk-time-text-actions action-buttons-hidden">
+              <button id="save-end-time" class="tk-btn tk-btn-primary tk-btn-sm">Close day</button>
+              <button id="cancel-end-time" class="tk-btn tk-btn-secondary tk-btn-sm">Clear</button>
             </div>
           </div>
-        </div>
-
-        <div id="close-day-container" class="hidden border-b border-border p-3">
-          <button id="close-day-btn" class="tk-btn tk-btn-primary w-full">Close day</button>
         </div>
 
         <div class="tk-row" title="Time logged against a task.">

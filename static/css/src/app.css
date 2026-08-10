@@ -733,6 +733,14 @@
     @apply flex w-14 flex-shrink-0 items-center gap-0.5;
   }
 
+  .tk-time-text-actions {
+    @apply flex items-center gap-1.5;
+  }
+
+  .tk-time-text-actions.action-buttons-hidden {
+    display: none;
+  }
+
   .action-buttons-hidden {
     opacity: 0;
     pointer-events: none;
@@ -1385,9 +1393,9 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Small, focusable explanations for figures whose arithmetic is not obvious
-     from the label alone. The popover is mounted on <body> by budgets.js so it
-     is not clipped by rounded cards, tables, or modal scroll containers. */
+  /* Small, focusable explanations whose details do not belong in the primary
+     layout. The shared popover is mounted on <body> by base.js so it is not
+     clipped by rounded cards, tables, or modal scroll containers. */
   .tk-insight {
     align-items: center;
     border-radius: 999px;

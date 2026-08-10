@@ -105,7 +105,6 @@ class Budgets extends TimeKeeper {
         this.bindFilters()
         this.bindForm()
         this.bindModals()
-        this.bindInsights()
         this.bindTheme()
         document.addEventListener('timeFormatChanged', () => {
             if (this.detailId && this.detail) this.renderDetail(this.detail)
@@ -1447,57 +1446,6 @@ class Budgets extends TimeKeeper {
             if (!this.formModal.classList.contains('hidden')) this.hideModal(this.formModal)
             else if (!this.detailModal.classList.contains('hidden')) this.hideModal(this.detailModal)
         })
-    }
-
-    bindInsights() {
-        this.insightPopover = document.createElement('div')
-        this.insightPopover.className = 'tk-insight-popover hidden'
-        this.insightPopover.setAttribute('role', 'tooltip')
-        document.body.appendChild(this.insightPopover)
-
-        const show = (target) => {
-            this.insightPopover.textContent = target.dataset.insight
-            this.insightPopover.classList.remove('hidden')
-
-            const anchor = target.getBoundingClientRect()
-            const tip = this.insightPopover.getBoundingClientRect()
-            let left = anchor.left + anchor.width / 2 - tip.width / 2
-            left = Math.max(8, Math.min(left, window.innerWidth - tip.width - 8))
-            let top = anchor.top - tip.height - 8
-            if (top < 8) top = anchor.bottom + 8
-
-            this.insightPopover.style.left = `${left}px`
-            this.insightPopover.style.top = `${top}px`
-        }
-        const hide = () => this.insightPopover.classList.add('hidden')
-
-        document.addEventListener('mouseover', (event) => {
-            const target = event.target.closest?.('.tk-insight')
-            if (target) show(target)
-        })
-        document.addEventListener('mouseout', (event) => {
-            const target = event.target.closest?.('.tk-insight')
-            if (target && !target.contains(event.relatedTarget)) hide()
-        })
-        document.addEventListener('focusin', (event) => {
-            const target = event.target.closest?.('.tk-insight')
-            if (target) show(target)
-        })
-        document.addEventListener('focusout', (event) => {
-            if (event.target.closest?.('.tk-insight')) hide()
-        })
-        document.addEventListener('click', (event) => {
-            const target = event.target.closest?.('.tk-insight')
-            if (!target) {
-                hide()
-                return
-            }
-            event.preventDefault()
-            event.stopPropagation()
-            show(target)
-        })
-        document.addEventListener('scroll', hide, true)
-        window.addEventListener('resize', hide)
     }
 
     showModal(modal) {

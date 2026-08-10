@@ -18,6 +18,63 @@ export function ready(fn) {
     }
 }
 
+/**
+ * One delegated popover for every `.tk-insight` help button in the app.
+ * Delegation also covers insight buttons rendered after page load.
+ */
+function bindInsightPopovers() {
+    const popover = document.createElement('div');
+    popover.className = 'tk-insight-popover hidden';
+    popover.setAttribute('role', 'tooltip');
+    document.body.appendChild(popover);
+
+    const show = (target) => {
+        popover.textContent = target.dataset.insight;
+        popover.classList.remove('hidden');
+
+        const anchor = target.getBoundingClientRect();
+        const tip = popover.getBoundingClientRect();
+        let left = anchor.left + anchor.width / 2 - tip.width / 2;
+        left = Math.max(8, Math.min(left, window.innerWidth - tip.width - 8));
+        let top = anchor.top - tip.height - 8;
+        if (top < 8) top = anchor.bottom + 8;
+
+        popover.style.left = `${left}px`;
+        popover.style.top = `${top}px`;
+    };
+    const hide = () => popover.classList.add('hidden');
+
+    document.addEventListener('mouseover', (event) => {
+        const target = event.target.closest?.('.tk-insight');
+        if (target) show(target);
+    });
+    document.addEventListener('mouseout', (event) => {
+        const target = event.target.closest?.('.tk-insight');
+        if (target && !target.contains(event.relatedTarget)) hide();
+    });
+    document.addEventListener('focusin', (event) => {
+        const target = event.target.closest?.('.tk-insight');
+        if (target) show(target);
+    });
+    document.addEventListener('focusout', (event) => {
+        if (event.target.closest?.('.tk-insight')) hide();
+    });
+    document.addEventListener('click', (event) => {
+        const target = event.target.closest?.('.tk-insight');
+        if (!target) {
+            hide();
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        show(target);
+    });
+    document.addEventListener('scroll', hide, true);
+    window.addEventListener('resize', hide);
+}
+
+ready(bindInsightPopovers);
+
 /** Surface anything that escapes a promise chain instead of failing silently. */
 window.addEventListener('unhandledrejection', (event) => {
     console.error('Unhandled promise rejection:', event.reason);
