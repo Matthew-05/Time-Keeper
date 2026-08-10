@@ -1174,7 +1174,7 @@
     background-color: color-mix(in srgb, var(--surface-2) 92%, var(--bg));
     border-bottom: 1px solid var(--border);
     display: grid;
-    grid-template-columns: 8.625rem minmax(0, 1fr) 8.625rem;
+    grid-template-columns: minmax(0, 1fr) auto;
     height: var(--titlebar-h);
     left: 0;
     position: fixed;
@@ -1184,8 +1184,7 @@
     z-index: 50;
   }
 
-  .tk-titlebar-brand,
-  .tk-titlebar-title {
+  .tk-titlebar-brand {
     align-items: center;
     display: flex;
     min-width: 0;
@@ -1209,17 +1208,6 @@
     font-size: 0.75rem;
     font-weight: 600;
     letter-spacing: -0.01em;
-  }
-
-  .tk-titlebar-title {
-    color: var(--muted);
-    font-size: 0.75rem;
-    justify-content: center;
-    overflow: hidden;
-    padding-inline: 1rem;
-    text-align: center;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .tk-window-controls {

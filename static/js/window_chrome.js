@@ -1,5 +1,4 @@
 const titlebar = document.getElementById('window-titlebar')
-const title = document.getElementById('window-title')
 const controls = document.querySelectorAll('[data-window-action]')
 const maximizeButton = document.querySelector('[data-window-action="maximize"]')
 const resizeHandles = document.querySelectorAll('[data-resize-direction]')
@@ -9,11 +8,6 @@ const MIN_WINDOW_HEIGHT = 650
 
 let pendingResize = null
 let resizeRequestInFlight = false
-
-function syncDocumentTitle() {
-  if (!title) return
-  title.textContent = document.title.replace(/\s*\|\s*/g, ' — ').trim()
-}
 
 function setMaximized(maximized) {
   titlebar?.classList.toggle('is-maximized', maximized)
@@ -137,8 +131,6 @@ document.querySelectorAll('.pywebview-drag-region').forEach((region) => {
 })
 
 window.timeKeeperWindowChrome = Object.freeze({ setMaximized })
-
-syncDocumentTitle()
 
 if (window.pywebview?.api) {
   enableControls()
