@@ -940,6 +940,37 @@ def get_tasks(date):
     } for task in tasks]
     return jsonify(tasks_data)
 
+
+@app.route('/api/client-day-total/<date_string>/<int:client_id>')
+def get_client_day_total(date_string, client_id):
+    """Current tracked and billable time for one client-day.
+
+    Today polls this endpoint while a task is running. Keeping the policy
+    application here means every poll reads the latest saved settings and uses
+    the same second-precision arithmetic as summaries and budgets.
+    """
+    try:
+        day = datetime.strptime(date_string, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD.'}), 400
+
+    now = datetime.now()
+    tasks = Task_Item.query.filter_by(date=day, client_id=client_id).all()
+    tracked_seconds = sum(task_duration_seconds(task, now) for task in tasks)
+    policy = _rounding_policy()
+    rounded_hours = round_seconds_to_hours(tracked_seconds, policy)
+    client = db.session.get(Client, client_id)
+
+    return jsonify({
+        'client_name': client.name if client else None,
+        'tracked_minutes': tracked_seconds / 60,
+        'rounded_hours': rounded_hours,
+        'rounding_enabled': policy['enabled'],
+        'rounding_interval_minutes': policy['interval_minutes'],
+        'rounding_direction': policy['direction'],
+    })
+
+
 @app.route('/unfinished_tasks', methods=['GET'])
 def get_unfinished_tasks():
     today = date.today()

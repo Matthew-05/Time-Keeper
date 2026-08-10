@@ -150,11 +150,9 @@ export class TimeKeeperIndex extends TimeKeeper {
      * Total time booked to the running task's client today. When rounding is
      * enabled, also show the policy-adjusted figure and difference.
      *
-     * Derived from `/tasks/<today>` rather than a purpose-built endpoint so it
-     * is by construction the same arithmetic the Task Browser does — that
-     * endpoint substitutes the current time for a task that hasn't ended, so
-     * the in-flight task is counted up to now and the figure climbs as you
-     * work.
+     * A purpose-built endpoint performs the calculation with the server's
+     * current settings and substitutes the current time for an unfinished
+     * task, so the figure climbs while work is in progress.
      */
     async updateClientDayTotal() {
         if (this.currentTaskClientId == null) {
@@ -165,23 +163,24 @@ export class TimeKeeperIndex extends TimeKeeper {
         const clientId = this.currentTaskClientId;
 
         try {
-            const tasks = await this.fetchFromAPI(`/tasks/${this.todayISO()}`);
+            const total = await this.fetchFromAPI(
+                `/api/client-day-total/${this.todayISO()}/${clientId}`
+            );
 
             // The client may have changed while the request was in flight.
             if (clientId !== this.currentTaskClientId) return;
 
-            const mine = tasks.filter(task => task.client_id === clientId);
-            const minutes = mine.reduce(
-                (total, task) => total + this.getMinuteDifference(task.end_time, task.start_time),
-                0
+            // Adopt the exact policy snapshot the server used. This also keeps
+            // Today correct if settings change while the page remains open.
+            this.roundingEnabled = total.rounding_enabled;
+            this.roundingIntervalMinutes = total.rounding_interval_minutes;
+            this.roundingDirection = total.rounding_direction;
+
+            this.renderClientDayTotal(
+                total.tracked_minutes,
+                total.client_name || this.currentTaskClient,
+                total.rounded_hours
             );
-
-            // Name off the same rows the minutes came from, so the label can't
-            // disagree with the figure. currentTaskClient is only the fallback
-            // for the moment before any task exists for this client.
-            const name = mine.length ? mine[0].client_name : this.currentTaskClient;
-
-            this.renderClientDayTotal(minutes, name);
         } catch (error) {
             // Leave the last known figure up rather than blanking it: a stale
             // number for a minute is better than a gap where one used to be.
@@ -190,7 +189,7 @@ export class TimeKeeperIndex extends TimeKeeper {
     }
 
 
-    renderClientDayTotal(minutes, name = null) {
+    renderClientDayTotal(minutes, name = null, roundedHours = null) {
         const element = this.clientDayTotal;
         if (!element) return;
 
@@ -201,7 +200,7 @@ export class TimeKeeperIndex extends TimeKeeper {
             return;
         }
 
-        const fractionalHours = this.totalTimeSpentToFractionalHours(minutes);
+        const fractionalHours = roundedHours ?? this.totalTimeSpentToFractionalHours(minutes);
         const difference = Math.round(fractionalHours * 60 - minutes);
 
         // inline-block + truncate: a long client name would otherwise push the

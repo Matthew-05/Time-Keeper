@@ -272,6 +272,20 @@
       </div>
     </section>
 
+    <section class="tk-card mt-4">
+      <div class="tk-card-header">
+        <h2 class="tk-card-title">About</h2>
+      </div>
+
+      <div class="flex items-center justify-between gap-4 p-4">
+        <div>
+          <span class="tk-label mb-0.5 block">Time Keeper</span>
+          <p class="text-sm text-muted">Application version</p>
+        </div>
+        <span id="version-display" class="tk-badge tk-badge-neutral tabular">v{{ app_version }}</span>
+      </div>
+    </section>
+
     {% if dev_mode %}
       <!-- Source builds only — inject_version sets dev_mode from DEV_MODE, so
            this section doesn't exist at all in a packaged app. -->
