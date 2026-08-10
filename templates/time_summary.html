@@ -69,6 +69,7 @@
     let chart
     let dailyChart
     const roundingEnabled = {{ 'true' if settings.rounding_enabled else 'false' }}
+    const roundingIntervalHours = {{ settings.rounding_interval_minutes }} / 60
     const valueLabel = roundingEnabled ? 'Billable hours' : 'Logged time'
 
     /** Pull live theme tokens so charts repaint correctly on theme switch. */
@@ -118,7 +119,10 @@
           y: {
             beginAtZero: true,
             title: { display: true, text: valueLabel, color: t.muted },
-            ticks: { color: t.faint },
+            ticks: {
+              color: t.faint,
+              ...(roundingEnabled ? { stepSize: roundingIntervalHours } : {}),
+            },
             grid: { color: t.border, drawBorder: false },
           },
         },
