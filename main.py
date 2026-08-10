@@ -960,11 +960,11 @@ def get_tasks(date):
 
 @app.route('/api/client-day-total/<date_string>/<int:client_id>')
 def get_client_day_total(date_string, client_id):
-    """Current tracked and billable time for one client-day.
+    """Logged and still-running time for one client-day.
 
-    Today polls this endpoint while a task is running. Keeping the policy
-    application here means every poll reads the latest saved settings and uses
-    the same second-precision arithmetic as summaries and budgets.
+    Today polls this endpoint while a task is running. Separating completed
+    tasks from the active one keeps the header honest: elapsed time on the
+    current task has not been logged yet.
     """
     try:
         day = datetime.strptime(date_string, '%Y-%m-%d').date()
@@ -973,13 +973,21 @@ def get_client_day_total(date_string, client_id):
 
     now = datetime.now()
     tasks = Task_Item.query.filter_by(date=day, client_id=client_id).all()
-    tracked_seconds = sum(task_duration_seconds(task, now) for task in tasks)
+    logged_seconds = sum(
+        task_duration_seconds(task, now) for task in tasks if task.end_time is not None
+    )
+    unlogged_seconds = sum(
+        task_duration_seconds(task, now) for task in tasks if task.end_time is None
+    )
+    tracked_seconds = logged_seconds + unlogged_seconds
     policy = _rounding_policy()
     rounded_hours = round_seconds_to_hours(tracked_seconds, policy)
     client = db.session.get(Client, client_id)
 
     return jsonify({
         'client_name': client.name if client else None,
+        'logged_minutes': logged_seconds / 60,
+        'unlogged_minutes': unlogged_seconds / 60,
         'tracked_minutes': tracked_seconds / 60,
         'rounded_hours': rounded_hours,
         'rounding_enabled': policy['enabled'],

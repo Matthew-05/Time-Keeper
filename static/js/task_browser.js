@@ -2,6 +2,7 @@ import { TimeKeeper, ready, clientColor, clientForeground, lockBodyScroll, unloc
 import { WorksList, fetchWorks, joinWorks } from './works.js';
 import {
     clockTimeToDate,
+    clockTimeToSeconds,
     currentClockTime,
     flatpickrTimeFormat,
     flatpickrTimeOptions,
@@ -9,6 +10,31 @@ import {
     serializeClockTime,
     visTimelineTimeFormat,
 } from './time_format.js';
+
+/**
+ * Collapse touching task ranges for the same active client into one visual
+ * range. The input is chronological and the returned objects are copies, so
+ * the task table and summary can continue using the original records.
+ */
+export function mergeAdjacentClientTasks(tasks) {
+    return tasks.reduce((ranges, task) => {
+        const previous = ranges[ranges.length - 1];
+        const sameClient = previous
+            && task.client_id != null
+            && previous.client_id === task.client_id;
+        const rangesTouch = sameClient
+            && clockTimeToSeconds(previous.end_time) === clockTimeToSeconds(task.start_time);
+
+        if (sameClient && rangesTouch) {
+            previous.end_time = task.end_time;
+            previous.is_ongoing = Boolean(task.is_ongoing);
+            return ranges;
+        }
+
+        ranges.push({ ...task });
+        return ranges;
+    }, []);
+}
 
 export class TaskBrowser extends TimeKeeper {
     constructor() {
@@ -531,6 +557,21 @@ export class TaskBrowser extends TimeKeeper {
 
     async #loadTasks() {
         const date = this.selectedDate.value;
+        const timelineContainer = document.getElementById('timeline');
+
+        if (this.timeline) {
+            this.timeline.destroy();
+            this.timeline = null;
+        }
+        if (timelineContainer) {
+            timelineContainer.setAttribute('aria-busy', 'true');
+            timelineContainer.innerHTML = `
+                <div class="tk-loading tk-timeline-loading" role="status">
+                    <span class="tk-spinner" aria-hidden="true"></span>
+                    <span>Loading timeline&hellip;</span>
+                </div>
+            `;
+        }
 
         this.showTasksMessage('<div class="tk-loading"><span class="tk-spinner"></span> Loading tasks…</div>');
 
@@ -556,7 +597,10 @@ export class TaskBrowser extends TimeKeeper {
             );
 
             const timeline = document.getElementById('timeline');
-            if (timeline) timeline.innerHTML = '';
+            if (timeline) {
+                timeline.innerHTML = '';
+                timeline.removeAttribute('aria-busy');
+            }
 
             this.scheduleReload();
         }
@@ -788,7 +832,7 @@ export class TaskBrowser extends TimeKeeper {
                     <th class="tk-task-time-heading">Start</th>
                     <th class="tk-task-time-heading">End</th>
                     <th class="tk-num">Duration</th>
-                    <th class="tk-task-actions-heading">Actions</th>
+                    <th class="tk-task-actions-heading"><span class="sr-only">Actions</span></th>
                 </tr>
             </thead>
             <tbody>
@@ -914,9 +958,6 @@ export class TaskBrowser extends TimeKeeper {
 
     renderTimeline(tasks, selectedDate) {
         const container = document.getElementById('timeline');
-        container.innerHTML = `
-        <div class="tk-loading h-full"><span class="tk-spinner"></span> Loading timeline…</div>
-    `;
 
         // Colour comes from clientColor() in base.js, keyed on the client's
         // name, so a client is the same colour here and on the Summary charts.
@@ -924,19 +965,19 @@ export class TaskBrowser extends TimeKeeper {
         // which meant the colours disagreed between the two pages and ignored
         // the theme entirely.
         //
-        // Generated background and foreground colours stay paired inline. Each
-        // task is a range on the same track: overlapping tasks are rejected by
-        // the API, so extra rows and vertical scrolling only obscure detail.
+        // Generated background and foreground colours stay paired inline.
+        // Touching tasks for one client become a single visual range; all other
+        // tasks share the same track because the API rejects overlaps.
         const sortedTasks = [...tasks].sort((a, b) =>
             this.timeStringToMinutes(a.start_time) - this.timeStringToMinutes(b.start_time)
         );
-        const items = sortedTasks.map(task => {
+        const timelineTasks = mergeAdjacentClientTasks(sortedTasks);
+        const items = timelineTasks.map(task => {
             const startLabel = formatClockTime(task.start_time);
             const endLabel = formatClockTime(task.end_time);
             const durationMinutes = this.getMinuteDifference(task.end_time, task.start_time);
             const durationLabel = this.formatDurationMinutes(durationMinutes);
             const clientName = this.escapeHtml(task.client_name);
-            const ongoingLabel = task.is_ongoing ? '<span class="tk-timeline-item-live">Live</span>' : '';
 
             return {
                 id: task.id,
@@ -944,8 +985,6 @@ export class TaskBrowser extends TimeKeeper {
                 content: `
                     <span class="tk-timeline-item">
                         <span class="tk-timeline-item-client">${clientName}</span>
-                        <span class="tk-timeline-item-detail">${startLabel}–${endLabel} · ${durationLabel}</span>
-                        ${ongoingLabel}
                     </span>
                 `,
                 title: `
@@ -1046,11 +1085,19 @@ export class TaskBrowser extends TimeKeeper {
                 followMouse: true,
                 overflowMethod: 'cap',
             },
+            onInitialDrawComplete: () => {
+                // vis-timeline fires this after its redraw loop has finished.
+                // Removing the overlay in the next frame keeps the spinner up
+                // until the completed timeline is ready for the same paint.
+                requestAnimationFrame(() => {
+                    container.querySelector('.tk-timeline-loading')?.remove();
+                    container.removeAttribute('aria-busy');
+                });
+            },
         };
 
-        container.innerHTML = '';
-
-        if (this.timeline) this.timeline.destroy()
+        // The loader is an overlay, so vis-timeline can build underneath it.
+        // onInitialDrawComplete removes it only after the first full redraw.
         const timeline = new vis.Timeline(
             container,
             new vis.DataSet(items),
@@ -1063,10 +1110,6 @@ export class TaskBrowser extends TimeKeeper {
             const formattedTime = formatClockTime(clockTime);
             timeline.addCustomTime(`${selectedDate}T${clockTime}`, id);
             timeline.setCustomTimeTitle(`${label}: ${formattedTime}`, id);
-            timeline.setCustomTimeMarker(
-                `<span>${label}<strong>${formattedTime}</strong></span>`,
-                id
-            );
         };
 
         addDayBoundary(this.originalStartTime, 'tk-day-start', 'Start');

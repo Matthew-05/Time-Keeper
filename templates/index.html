@@ -16,9 +16,9 @@
     <section class="tk-card overflow-visible">
       <div class="tk-card-header">
         <span class="tk-card-title">Time tracking</span>
-        <!-- Tracked time for the running task's client today. When rounding is
-             enabled, timekeeper.js also shows the adjusted value and diff. -->
-        <span id="client-day-total" class="tabular hidden text-sm font-semibold text-text"></span>
+        <!-- Completed time plus the current task's not-yet-logged time for the
+             running task's client today. Hidden when nothing is running. -->
+        <span id="client-day-total" class="tabular hidden max-w-full flex-wrap items-center justify-end gap-x-2 gap-y-1 text-sm"></span>
       </div>
 
       <div class="space-y-5 p-5">
@@ -139,10 +139,6 @@
               role="status"
               aria-live="polite"
             >
-              <div id="task-rounded-duration" class="tk-task-duration-metric hidden">
-                <span class="tk-task-duration-label">Rounded</span>
-                <span id="task-rounded-duration-value" class="tabular font-semibold text-text"></span>
-              </div>
               <div class="tk-task-duration-metric">
                 <span class="tk-task-duration-label">Actual</span>
                 <span id="task-actual-duration-value" class="tabular font-semibold text-text"></span>

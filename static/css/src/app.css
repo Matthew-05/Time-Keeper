@@ -1076,11 +1076,25 @@
   .tk-task-edit-controls {
     align-items: center;
     display: flex;
-    gap: 0.375rem;
     justify-content: flex-end;
   }
 
+  /* Match Today's Works list: completed rows read as content first, with the
+     secondary/danger actions revealed only when the row is engaged. Keeping
+     focus-within alongside hover makes the same controls usable by keyboard. */
+  .tk-task-view-actions {
+    gap: 0.25rem;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+
+  .tk-task-table tbody tr:hover .tk-task-view-actions,
+  .tk-task-table tbody tr:focus-within .tk-task-view-actions {
+    opacity: 1;
+  }
+
   .tk-task-edit-controls {
+    gap: 0.375rem;
     min-width: 18rem;
   }
 
@@ -2494,10 +2508,19 @@ span.flatpickr-weekday {
 .tk-timeline {
   height: 132px;
   overflow: hidden;
+  position: relative;
   border: 1px solid var(--border);
   border-radius: 10px;
   background-color: var(--timeline-canvas);
   box-shadow: var(--timeline-inset-shadow);
+}
+
+.tk-timeline-loading {
+  background-color: var(--timeline-canvas);
+  inset: 0;
+  padding: 0;
+  position: absolute;
+  z-index: 20;
 }
 
 .vis-timeline {
@@ -2546,8 +2569,7 @@ span.flatpickr-weekday {
   width: 1px !important;
 }
 
-/* Day boundaries are read-only custom times. Their small flags make the line
-   meaningful without requiring a legend, while pointer-events prevents the
+/* Day boundaries are read-only custom times. Pointer-events prevents the
    draggable behaviour vis-timeline assigns to custom times by default. */
 .tk-timeline .vis-custom-time.tk-day-start,
 .tk-timeline .vis-custom-time.tk-day-close {
@@ -2562,36 +2584,6 @@ span.flatpickr-weekday {
 
 .tk-timeline .vis-custom-time.tk-day-close {
   background-color: var(--warn);
-}
-
-.tk-timeline .vis-custom-time > .vis-custom-time-marker {
-  background-color: var(--surface);
-  border: 1px solid currentColor;
-  bottom: 0.35rem;
-  border-radius: 999px;
-  box-shadow: var(--shadow-sm);
-  color: inherit;
-  font-size: 0.625rem;
-  font-weight: 600;
-  line-height: 1;
-  padding: 0.25rem 0.4rem;
-  top: auto;
-  transform: translateX(-50%);
-}
-
-.tk-timeline .vis-custom-time.tk-day-start > .vis-custom-time-marker {
-  color: var(--success);
-}
-
-.tk-timeline .vis-custom-time.tk-day-close > .vis-custom-time-marker {
-  color: var(--warn);
-}
-
-.tk-timeline .vis-custom-time-marker strong {
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-  font-weight: 650;
-  margin-left: 0.25rem;
 }
 
 .vis-item {
@@ -2640,12 +2632,8 @@ span.flatpickr-weekday {
 }
 
 .tk-timeline-item {
-  display: grid;
   min-width: 0;
   width: 100%;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
-  column-gap: 0.4rem;
   line-height: 1.15;
 }
 
@@ -2655,30 +2643,6 @@ span.flatpickr-weekday {
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.tk-timeline-item-detail {
-  grid-column: 1 / -1;
-  overflow: hidden;
-  margin-top: 0.2rem;
-  font-size: 0.625rem;
-  font-weight: 550;
-  opacity: 0.82;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tk-timeline-item-live {
-  grid-column: 2;
-  grid-row: 1;
-  align-self: center;
-  border-radius: 999px;
-  padding: 0.08rem 0.32rem;
-  background: rgb(255 255 255 / 0.25);
-  font-size: 0.5625rem;
-  font-weight: 750;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .tk-timeline .vis-tooltip > div {

@@ -76,8 +76,6 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.taskStartTimeDisplay = document.getElementById('task-start-time');
         this.taskStartTimeValue = document.getElementById('task-start-time-value');
         this.taskDurationPreview = document.getElementById('task-duration-preview');
-        this.taskRoundedDuration = document.getElementById('task-rounded-duration');
-        this.taskRoundedDurationValue = document.getElementById('task-rounded-duration-value');
         this.taskActualDurationValue = document.getElementById('task-actual-duration-value');
         this.recentTaskEndTime = document.getElementById('recent-task-end-time');
         this.recentTaskTimeValue = document.getElementById('recent-task-time-value');
@@ -150,14 +148,7 @@ export class TimeKeeperIndex extends TimeKeeper {
     }
 
 
-    /**
-     * Total time booked to the running task's client today. When rounding is
-     * enabled, also show the policy-adjusted figure and difference.
-     *
-     * A purpose-built endpoint performs the calculation with the server's
-     * current settings and substitutes the current time for an unfinished
-     * task, so the figure climbs while work is in progress.
-     */
+    /** Completed client time and elapsed time on the current, unlogged task. */
     async updateClientDayTotal() {
         if (this.currentTaskClientId == null) {
             this.renderClientDayTotal(null);
@@ -182,7 +173,8 @@ export class TimeKeeperIndex extends TimeKeeper {
             this.renderTaskDurationPreview();
 
             this.renderClientDayTotal(
-                total.tracked_minutes,
+                total.logged_minutes,
+                total.unlogged_minutes,
                 total.client_name || this.currentTaskClient
             );
         } catch (error) {
@@ -193,73 +185,50 @@ export class TimeKeeperIndex extends TimeKeeper {
     }
 
 
-    renderClientDayTotal(minutes, name = null) {
+    renderClientDayTotal(loggedMinutes, unloggedMinutes = 0, name = null) {
         const element = this.clientDayTotal;
         if (!element) return;
 
-        if (minutes == null) {
+        if (loggedMinutes == null) {
             element.classList.add('hidden');
+            element.classList.remove('inline-flex');
             element.innerHTML = '';
             element.removeAttribute('title');
             return;
         }
 
-        // Calculate from the policy snapshot adopted immediately before this
-        // render, so enabled/interval/direction settings always control the
-        // header rather than a separately formatted value.
-        const fractionalHours = this.totalTimeSpentToFractionalHours(minutes);
-
-        // inline-block + truncate: a long client name would otherwise push the
-        // figure out of the header, and the figure is the point.
-        const label = name
-            ? `<span class="inline-block max-w-[12rem] truncate align-bottom text-muted">${this.escapeHtml(name)}</span>`
-              + '<span class="font-normal text-faint"> · </span>'
+        const logged = this.formatDurationMinutes(loggedMinutes);
+        const unlogged = this.formatDurationMinutes(unloggedMinutes);
+        const separator = '<span class="text-faint" aria-hidden="true">·</span>';
+        const client = name
+            ? `<span class="inline-block max-w-[12rem] truncate font-semibold text-muted">${this.escapeHtml(name)}</span>${separator}`
             : '';
 
-        element.innerHTML = label + this.formatClientDayTotal(fractionalHours, minutes);
-        if (this.roundingEnabled) {
-            const directionLabel = this.roundingDirection === 'nearest'
-                ? 'to the nearest'
-                : `${this.roundingDirection} to`;
-            element.title = `${name || 'This client'} — rounded ${directionLabel} `
-                + `${this.roundingIntervalMinutes} minutes, today`;
-        } else {
-            element.title = `${name || 'This client'} — tracked time today`;
-        }
+        element.innerHTML = `${client}
+            <span class="inline-flex items-baseline gap-1 whitespace-nowrap">
+                <span class="text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-accent">Unlogged</span>
+                <span class="font-semibold text-text">${unlogged}</span>
+            </span>
+            ${separator}
+            <span class="inline-flex items-baseline gap-1 whitespace-nowrap">
+                <span class="text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-faint">Logged</span>
+                <span class="font-semibold text-text">${logged}</span>
+            </span>`;
+        element.title = `${name || 'This client'} — current task unlogged: ${unlogged}; logged today: ${logged}`;
+        element.classList.add('inline-flex');
         element.classList.remove('hidden');
     }
 
 
-    /** Client header format: rounded decimal hours plus the rounding adjustment. */
-    formatClientDayTotal(fractionalHours, totalMinutes) {
-        if (!this.roundingEnabled) {
-            return this.formatDurationMinutes(totalMinutes);
-        }
-
-        const difference = Math.round(fractionalHours * 60 - totalMinutes);
-        const colorClass = difference > 0 ? 'text-success' : 'text-danger';
-        const diffDisplay = difference !== 0
-            ? `<span class="${colorClass} ml-1 text-xs font-medium">`
-                + `${difference > 0 ? '+' : '−'}${Math.abs(difference)}m</span>`
-            : '';
-
-        return `${this.formatDecimalHours(fractionalHours)}`
-            + `<span class="text-faint font-normal"> hrs</span>${diffDisplay}`;
-    }
-
-
-    /** Preview the active task's duration using its start and entered end time. */
+    /** Preview the active task's actual duration using its start and entered end time. */
     renderTaskDurationPreview() {
         const hide = () => {
             this.taskDurationPreview?.classList.add('hidden');
             if (this.taskActualDurationValue) this.taskActualDurationValue.textContent = '';
-            if (this.taskRoundedDurationValue) this.taskRoundedDurationValue.textContent = '';
         };
 
         if (
             !this.taskDurationPreview ||
-            !this.taskRoundedDuration ||
-            !this.taskRoundedDurationValue ||
             !this.taskActualDurationValue ||
             this.uiState !== 'taskInProgress' ||
             !this.runningTaskStartTime ||
@@ -279,22 +248,6 @@ export class TimeKeeperIndex extends TimeKeeper {
 
             const actualMinutes = Math.floor((endSeconds - startSeconds) / 60);
             this.taskActualDurationValue.textContent = this.formatDurationMinutes(actualMinutes);
-
-            this.taskRoundedDuration.classList.toggle('hidden', !this.roundingEnabled);
-            if (this.roundingEnabled) {
-                const roundedHours = this.totalTimeSpentToFractionalHours(actualMinutes);
-                const roundedMinutes = Math.round(roundedHours * 60);
-                this.taskRoundedDurationValue.textContent =
-                    this.formatDurationMinutes(roundedMinutes);
-                const directionLabel = this.roundingDirection === 'nearest'
-                    ? 'to the nearest'
-                    : `${this.roundingDirection} to`;
-                this.taskRoundedDuration.title =
-                    `Rounded ${directionLabel} ${this.roundingIntervalMinutes} minutes`;
-            } else {
-                this.taskRoundedDurationValue.textContent = '';
-                this.taskRoundedDuration.removeAttribute('title');
-            }
 
             this.taskDurationPreview.classList.remove('hidden');
         } catch {

@@ -167,6 +167,11 @@ export function formatDurationMinutes(minutes) {
         + `${remainingMinutes} ${remainingMinutes === 1 ? 'min' : 'mins'}`;
 }
 
+/** Decimal-hour display for policy-rounded values, without trailing zeroes. */
+export function formatDecimalHours(hours) {
+    return Number(Number(hours).toFixed(2)).toString();
+}
+
 export class TimeKeeper {
     constructor() {
         const root = document.documentElement.dataset;
@@ -389,7 +394,7 @@ export class TimeKeeper {
     }
 
     formatDecimalHours(hours) {
-        return Number(hours.toFixed(2)).toString();
+        return formatDecimalHours(hours);
     }
 
     /**

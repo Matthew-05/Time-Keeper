@@ -64,7 +64,7 @@
 {% block page_scripts %}
   <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.min.js') }}"></script>
   <script type="module">
-    import { ready, clientColor, formatDurationMinutes } from "{{ url_for('static', filename='js/base.js') }}"
+    import { ready, clientColor, formatDecimalHours, formatDurationMinutes } from "{{ url_for('static', filename='js/base.js') }}"
 
     let chart
     let dailyChart
@@ -72,13 +72,9 @@
     const roundingIntervalHours = {{ settings.rounding_interval_minutes }} / 60
     const valueLabel = roundingEnabled ? 'Billable hours' : 'Logged time'
 
-    /** Keep rounded-axis labels exact; Chart.js otherwise turns .25 into .3. */
+    /** Rounded values always use the app's decimal-hours display. */
     function formatRoundedTick(hours) {
-      const minutes = Math.round(Number(hours) * 60)
-      const wholeHours = Math.floor(minutes / 60)
-      const remainingMinutes = minutes % 60
-      if (!wholeHours) return `${remainingMinutes}m`
-      return remainingMinutes ? `${wholeHours}h ${remainingMinutes}m` : `${wholeHours}h`
+      return `${formatDecimalHours(hours)} hrs.`
     }
 
     /** Pull live theme tokens so charts repaint correctly on theme switch. */
@@ -104,7 +100,7 @@
           tooltip: {
             callbacks: {
               label: (ctx) => roundingEnabled
-                ? `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)} hrs.`
+                ? `${ctx.dataset.label}: ${formatDecimalHours(ctx.parsed.y)} hrs.`
                 : `${ctx.dataset.label}: ${formatDurationMinutes(ctx.parsed.y * 60)}`,
               afterLabel: (ctx) => {
                 if (!roundingEnabled) return undefined
@@ -245,11 +241,11 @@
       const canvas = ensureCanvas('client-tab', canvasId)
 
       data.sort((a, b) => b.total_hours - a.total_hours)
-      const totalHours = data.reduce((sum, item) => sum + item.total_hours, 0).toFixed(2)
+      const totalHours = data.reduce((sum, item) => sum + item.total_hours, 0)
 
       const displayedTotal = roundingEnabled
-        ? `${totalHours} hrs.`
-        : formatDurationMinutes(Number(totalHours) * 60)
+        ? `${formatDecimalHours(totalHours)} hrs.`
+        : formatDurationMinutes(totalHours * 60)
       const options = baseChartOptions(`${title} — ${displayedTotal} total`)
       options.plugins.legend.display = false
 
