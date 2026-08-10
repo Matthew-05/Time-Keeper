@@ -10,7 +10,7 @@
 
 /** Words for a status, in the order of how alarming they are. */
 export const STATUS_LABEL = {
-    on_track: 'On track',
+    on_track: 'Within budget',
     at_risk: 'At risk',
     over: 'Over budget',
     upcoming: 'Upcoming',
@@ -33,6 +33,14 @@ export function hours(value) {
 /** A percentage with no decimal — nothing here is precise enough to warrant one. */
 export function percent(value) {
     return value == null ? '—' : `${Math.round(value)}%`
+}
+
+function escapeAttribute(value) {
+    return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('"', '&quot;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
 }
 
 /** "Aug 7" / "Aug 7, 2025" — the year only when it isn't the current one. */
@@ -61,7 +69,8 @@ export function dateRange(budget) {
  * already has the numbers; what a glance needs is the interpretation, and the
  * interpretation is different in kind depending on the status — an over-budget
  * engagement needs a total, a live one needs a landing point, an upcoming one
- * needs a start date.
+ * needs a start date. A live budget that has not crossed a mature pace warning
+ * leads with the hard remaining-hours figure instead of a volatile estimate.
  */
 export function headline(budget) {
     if (budget.status === 'upcoming') {
@@ -91,15 +100,11 @@ export function headline(budget) {
             : `Finished ${hours(-left)} hrs. over budget`
     }
 
-    if (budget.projected_hours == null) {
-        return `${hours(budget.remaining_hours)} hrs. remaining`
+    if (budget.status === 'at_risk') {
+        return `Current average pace points to ${hours(budget.projected_hours)} hrs. — ${hours(budget.projected_overage)} over budget`
     }
 
-    const overshoot = budget.projected_overage
-    if (overshoot > 0.05) {
-        return `Projected over budget at ${hours(budget.projected_hours)} hrs. — which is ${hours(overshoot)} over`
-    }
-    return `Projected on pace for ${hours(budget.projected_hours)} hrs. — leaving ${hours(-overshoot)} to spare`
+    return `${hours(budget.remaining_hours)} hrs. remaining`
 }
 
 /**
@@ -108,21 +113,45 @@ export function headline(budget) {
  *
  * Both are clamped to 100% of the track. An over-budget bar is drawn full and
  * hatched rather than allowed to overflow its container — the exact magnitude
- * of the overage is a number, and it's already in the headline; what the bar is
- * for is being readable at a glance from across the room.
+ * of the overage is a number, and it's explained in the hover breakdown; what
+ * the bar is for is being readable at a glance from across the room.
  */
-export function meter(budget, { large = false } = {}) {
+export function meterBreakdown(budget, { showPeriodMarker = true } = {}) {
+    const usage = `Used: ${hours(budget.used_hours)} of ${hours(budget.budgeted_hours)} hrs. (${percent(budget.percent_used)}).`
+    const remaining =
+        budget.remaining_hours == null
+            ? ''
+            : budget.remaining_hours < 0
+              ? ` Over budget: ${hours(-budget.remaining_hours)} hrs.`
+              : ` Remaining: ${hours(budget.remaining_hours)} hrs.`
+    const capped = (budget.percent_used ?? 0) > 100
+        ? ' The filled bar is capped at 100%.'
+        : ''
+    const elapsed = !showPeriodMarker
+        ? ''
+        : budget.status === 'upcoming'
+            ? ' The budget period has not started.'
+            : budget.percent_elapsed == null
+              ? ' No elapsed-period marker is available.'
+              : ` Period marker: ${percent(budget.percent_elapsed)} elapsed.`
+
+    return usage + remaining + capped + elapsed
+}
+
+export function meter(budget, { large = false, showPeriodMarker = true } = {}) {
     const used = Math.min(100, Math.max(0, budget.percent_used ?? 0))
     const elapsed = budget.percent_elapsed
     const over = (budget.percent_used ?? 0) > 100
+    const breakdown = meterBreakdown(budget, { showPeriodMarker })
 
     const marker =
-        elapsed == null || budget.status === 'upcoming'
+        !showPeriodMarker || elapsed == null || budget.status === 'upcoming'
             ? ''
-            : `<span class="tk-meter-marker" style="left: ${Math.min(100, elapsed)}%"
-                     title="${Math.round(elapsed)}% of the period has gone"></span>`
+            : `<span class="tk-meter-marker" style="left: ${Math.min(100, elapsed)}%"></span>`
 
-    return `<div class="tk-meter${large ? ' tk-meter-lg' : ''}">`
+    return `<div class="tk-meter tk-meter-tooltip${large ? ' tk-meter-lg' : ''}"
+                 data-insight="${escapeAttribute(breakdown)}" role="img"
+                 aria-label="${escapeAttribute(`Budget progress. ${breakdown}`)}" title="">`
         + `<div class="tk-meter-fill${over ? ' tk-meter-overflow' : ''}" style="width: ${used}%"></div>`
         + marker
         + '</div>'

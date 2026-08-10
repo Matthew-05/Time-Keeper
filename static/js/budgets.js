@@ -40,8 +40,8 @@ const FILTERS = {
 
 const INSIGHTS = {
     used: '',
-    projected: 'Estimated total at the end date if your capacity-weighted pace so far continues. Days off and held days are excluded.',
-    pace: 'Average hours used per elapsed working day. Days off and held days are excluded.',
+    currentPace: 'End total implied by your current average pace. It stays informational until at least 20% of the working period and five working days have elapsed. Days off and held days are excluded.',
+    dailyAverage: 'Average hours used per elapsed working day. Days off and held days are excluded.',
 }
 
 class Budgets extends TimeKeeper {
@@ -281,11 +281,12 @@ class Budgets extends TimeKeeper {
                 <div class="tk-stat-value">${hours(budget.remaining_hours)}<span class="font-normal text-faint"> hrs.</span></div>
               </div>
               <div>
-                ${this.insightLabel('Projected', INSIGHTS.projected)}
-                <div class="tk-stat-value">${hours(budget.projected_hours)}<span class="font-normal text-faint"> hrs.</span></div>
+                ${this.insightLabel('Current avg. pace', INSIGHTS.currentPace)}
+                <div class="tk-stat-value">${hours(budget.projected_hours)}<span class="font-normal text-faint"> hrs. total</span></div>
+                ${budget.projected_hours != null && !budget.projection_mature ? '<div class="mt-0.5 text-[0.625rem] font-medium text-faint">Early estimate</div>' : ''}
               </div>
               <div>
-                ${this.insightLabel('Pace', INSIGHTS.pace)}
+                ${this.insightLabel('Daily average', INSIGHTS.dailyAverage)}
                 <div class="tk-stat-value">${hours(budget.pace_hours_per_day)}<span class="font-normal text-faint"> /day</span></div>
               </div>
               <div>
@@ -659,8 +660,8 @@ class Budgets extends TimeKeeper {
           <div class="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border sm:grid-cols-4">
             ${this.detailStat('Used', `${hours(detail.used_hours)} hrs.`, percent(detail.percent_used), INSIGHTS.used)}
             ${this.detailStat('Remaining', `${hours(detail.remaining_hours)} hrs.`, `${detail.remaining_business_days} work days`)}
-            ${this.detailStat('Projected', `${hours(detail.projected_hours)} hrs.`, percent(detail.projected_percent), INSIGHTS.projected)}
-            ${this.detailStat('Period gone', percent(detail.percent_elapsed), `${detail.elapsed_business_days}/${detail.total_business_days} days`)}
+            ${this.detailStat('Current avg. pace', `${hours(detail.projected_hours)} hrs. total`, detail.projected_hours != null && !detail.projection_mature ? `Early estimate · ${percent(detail.projected_percent)}` : percent(detail.projected_percent), INSIGHTS.currentPace)}
+            ${this.detailStat('Work period elapsed', percent(detail.percent_elapsed), `${detail.elapsed_business_days}/${detail.total_business_days} days`)}
           </div>
 
           <!-- The capacity read is the insight the settings figure buys: it
@@ -1101,7 +1102,7 @@ class Budgets extends TimeKeeper {
 
     diagnosisInsight(budget) {
         if (budget.status === 'at_risk') {
-            return `At risk because the current pace projects ${hours(budget.projected_hours)} hrs. (${percent(budget.projected_percent)} of the ${hours(budget.budgeted_hours)}-hr commitment), ${hours(budget.projected_overage)} hrs. over. This budget's threshold is ${hours(budget.risk_threshold_percent)}% over.`
+            return `At risk because the current average pace implies ${hours(budget.projected_hours)} hrs. total (${percent(budget.projected_percent)} of the ${hours(budget.budgeted_hours)}-hr commitment), ${hours(budget.projected_overage)} hrs. over. Pace warnings begin only after 20% of the working period and five working days have elapsed. This budget's threshold is ${hours(budget.risk_threshold_percent)}% over.`
         }
         if (budget.status === 'over') {
             return `Over budget because ${hours(budget.used_hours)} hrs. have already been used against ${hours(budget.budgeted_hours)} committed, ${hours(budget.over_by)} hrs. over.`

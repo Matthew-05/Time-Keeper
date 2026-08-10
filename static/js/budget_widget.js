@@ -103,11 +103,11 @@ export class BudgetWidget {
             <div class="mb-1.5 flex items-baseline justify-between gap-2">
               <span class="min-w-0 truncate text-sm font-semibold text-text">${this.escape(budget.name)}</span>
               <span class="tabular flex-shrink-0 text-sm font-semibold" style="color: var(--status-text)">
-                ${percent(budget.percent_used)}
+                ${percent(budget.percent_used)} used
               </span>
             </div>
 
-            ${meter(budget)}
+            ${meter(budget, { showPeriodMarker: false })}
 
             <div class="mt-1.5 flex items-baseline justify-between gap-2 text-xs">
               <span class="tabular text-muted">
@@ -116,7 +116,9 @@ export class BudgetWidget {
               </span>
               <span class="flex-shrink-0 text-right" style="color: var(--status-text)">
                 ${
-                    budget.status === 'on_track'
+                    budget.status === 'at_risk' || budget.status === 'over'
+                        ? this.warningBadge(budget)
+                        : budget.status === 'on_track'
                         ? this.escape(`${hours(budget.remaining_hours)} hrs. left`)
                         // The full paused headline carries dates and a resume
                         // date and is far too long for one line here. On this
@@ -131,6 +133,15 @@ export class BudgetWidget {
             </div>
           </a>
         `
+    }
+
+    warningBadge(budget) {
+        const label = budget.status === 'over' ? 'Over budget' : 'Pace at risk'
+        const detail = headline(budget)
+
+        return `<span class="tk-badge tk-badge-status tk-insight tk-budget-warning"
+                      data-insight="${this.escape(detail)}"
+                      aria-label="${this.escape(`${label}: ${detail}`)}">${label}</span>`
     }
 
     escape(value) {

@@ -1256,7 +1256,6 @@
   }
 
   .tk-modal-backdrop.tk-unsaved-backdrop {
-    inset: 0;
     z-index: 75;
   }
 
@@ -1316,8 +1315,9 @@
     align-items: center;
     background-color: rgb(15 23 42 / 0.45);
     display: flex;
-    /* Keep the app chrome visible and usable while page content is modal. */
-    inset: var(--chrome-h) 0 0;
+    /* Dim the navigation toolbar and page content while leaving the native
+       window title bar visible and usable. */
+    inset: var(--titlebar-h) 0 0;
     justify-content: center;
     padding: 1.5rem;
     position: fixed;
@@ -1853,6 +1853,10 @@
     height: 0.75rem;
   }
 
+  .tk-meter-tooltip {
+    cursor: help;
+  }
+
   .tk-meter-fill {
     background-color: var(--status);
     border-radius: 999px;
@@ -1992,6 +1996,22 @@
     --status: var(--faint);
     --status-soft: var(--surface-3);
     --status-text: var(--muted);
+  }
+
+  /* Warning consequences stay compact on Today; hovering the badge reveals
+     the projected total or exact overage through the shared insight popover. */
+  .tk-budget-warning {
+    background-color: var(--status-soft);
+    color: var(--status-text);
+    height: auto;
+    line-height: 1.2;
+    padding: 0.125rem 0.5rem;
+    width: auto;
+  }
+
+  .tk-budget-warning:hover {
+    background-color: color-mix(in srgb, var(--status) 14%, var(--control-fill));
+    color: var(--status-text);
   }
 
   /* ---- Work calendar ---- */

@@ -492,6 +492,13 @@ def allocate(budgets, tasks, now=None, rounding_policy=None):
 # --------------------------------------------------------------------------
 
 
+# A straight-line pace estimate is too volatile during kickoff. Both gates are
+# required before it is allowed to drive an at-risk warning; the raw estimate
+# remains available to the detailed Budgets page as clearly labelled context.
+MIN_PROJECTION_ELAPSED_PERCENT = 20.0
+MIN_PROJECTION_ELAPSED_DAYS = 5
+
+
 def _safe_divide(numerator, denominator):
     return None if not denominator else numerator / denominator
 
@@ -503,14 +510,15 @@ def status_for(
     ended,
     paused=False,
     risk_threshold_percent=10.0,
+    projection_mature=False,
 ):
     """One word for where a budget stands. Drives colour everywhere in the UI.
 
     ``over`` is about what has already happened; ``at_risk`` is about where the
-    current pace lands. Keeping them separate matters — a budget at 40% on day
-    three of a month is fine, and the same 40% on day twenty-five is not, and
-    only the projection can tell them apart. Each budget supplies its own
-    tolerated projected overage, defaulting to 10%.
+    current average pace lands after it has enough history to be meaningful.
+    Keeping them separate matters — a budget at 40% on day three of a month is
+    fine, and the same 40% on day twenty-five is not. Each budget supplies its
+    own tolerated pace-based overage, defaulting to 10%.
 
     ``paused`` sits between the calendar facts and the pace verdict, and the
     order is the design:
@@ -535,7 +543,8 @@ def status_for(
     if paused:
         return 'paused'
     if (
-        projected_percent is not None
+        projection_mature
+        and projected_percent is not None
         and projected_percent > 100 + risk_threshold_percent
     ):
         return 'at_risk'
@@ -643,6 +652,16 @@ def summarise(
         )
         if started
         else 0
+    )
+    percent_elapsed = (
+        round(elapsed_capacity / total_capacity * 100, 1)
+        if total_capacity
+        else None
+    )
+    projection_mature = (
+        percent_elapsed is not None
+        and percent_elapsed >= MIN_PROJECTION_ELAPSED_PERCENT
+        and elapsed_days >= MIN_PROJECTION_ELAPSED_DAYS
     )
     # Today is spent, so tomorrow is the first day still available.
     remaining_days = business_days_between(
@@ -758,9 +777,8 @@ def summarise(
         'total_business_days': total_days,
         'elapsed_business_days': elapsed_days,
         'remaining_business_days': remaining_days,
-        'percent_elapsed': (
-            round(elapsed_capacity / total_capacity * 100, 1) if total_capacity else None
-        ),
+        'percent_elapsed': percent_elapsed,
+        'projection_mature': projection_mature,
 
         'started': started,
         'ended': ended,
@@ -777,6 +795,7 @@ def summarise(
             ended,
             paused,
             risk_threshold,
+            projection_mature,
         ),
 
         'is_paused': paused,

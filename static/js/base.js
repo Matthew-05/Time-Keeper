@@ -19,8 +19,22 @@ export function ready(fn) {
 }
 
 /**
- * One delegated popover for every `.tk-insight` help button in the app.
- * Delegation also covers insight buttons rendered after page load.
+ * Page templates render their modal markup inside <main>, whose fixed-position
+ * stacking context sits below the title bar and navigation. Mounting backdrops
+ * directly under <body> lets their z-index cover the complete app chrome, just
+ * like the dynamically-created unsaved-changes confirmation.
+ */
+function mountModalBackdrops() {
+    document.querySelectorAll('main .tk-modal-backdrop').forEach((backdrop) => {
+        document.body.appendChild(backdrop);
+    });
+}
+
+ready(mountModalBackdrops);
+
+/**
+ * One delegated popover for every insight control and budget meter in the app.
+ * Delegation also covers elements rendered after page load.
  */
 function bindInsightPopovers() {
     const popover = document.createElement('div');
@@ -45,19 +59,19 @@ function bindInsightPopovers() {
     const hide = () => popover.classList.add('hidden');
 
     document.addEventListener('mouseover', (event) => {
-        const target = event.target.closest?.('.tk-insight');
+        const target = event.target.closest?.('.tk-insight, .tk-meter-tooltip');
         if (target) show(target);
     });
     document.addEventListener('mouseout', (event) => {
-        const target = event.target.closest?.('.tk-insight');
+        const target = event.target.closest?.('.tk-insight, .tk-meter-tooltip');
         if (target && !target.contains(event.relatedTarget)) hide();
     });
     document.addEventListener('focusin', (event) => {
-        const target = event.target.closest?.('.tk-insight');
+        const target = event.target.closest?.('.tk-insight, .tk-meter-tooltip');
         if (target) show(target);
     });
     document.addEventListener('focusout', (event) => {
-        if (event.target.closest?.('.tk-insight')) hide();
+        if (event.target.closest?.('.tk-insight, .tk-meter-tooltip')) hide();
     });
     document.addEventListener('click', (event) => {
         const target = event.target.closest?.('.tk-insight');
