@@ -380,22 +380,110 @@
     padding: 0.3125rem 0.5rem;
   }
 
-  /* For a field sitting on a --surface-2 panel rather than on a card, where
-     .tk-input's own --surface-2 fill would be the exact same colour as its
-     container (#timepicker inside #timepicker-container, both themes). */
-  .tk-input-raised {
-    background-color: var(--field);
-  }
-
-  .tk-input-raised:focus {
-    background-color: var(--field-focus);
-  }
-
   /* Compact time shortcut shown on Today when the previous task's end can be
      reused. It is a control, so its resting boundary matches other fields. */
   .tk-previous-time {
     background-color: var(--control-fill);
     border-color: var(--control-border);
+    cursor: pointer;
+  }
+
+  .tk-previous-time:hover {
+    background-color: var(--control-hover);
+    border-color: var(--control-border);
+  }
+
+  .tk-time-panel {
+    @apply rounded-lg border p-3;
+    background-color: var(--control-fill);
+    border-color: var(--control-border);
+  }
+
+  .tk-time-control-row {
+    @apply flex flex-wrap items-end gap-2.5;
+  }
+
+  .tk-time-field {
+    flex: 1 1 10rem;
+    max-width: 13rem;
+    min-width: 10rem;
+  }
+
+  .tk-time-context {
+    @apply flex items-end gap-2 px-0.5 text-sm text-muted;
+    min-height: 2.625rem;
+  }
+
+  .tk-time-context-value {
+    @apply flex items-center text-2xl font-semibold tracking-[-0.01em] text-text;
+    min-height: 3.125rem;
+  }
+
+  .tk-time-context-arrow {
+    @apply flex items-center text-base text-faint;
+    min-height: 3.125rem;
+  }
+
+  #time-actions {
+    margin-left: auto;
+  }
+
+  .tk-action-control {
+    position: relative;
+    display: inline-flex;
+    cursor: not-allowed;
+  }
+
+  /* Let the wrapper own hover while its button is disabled. Native disabled
+     controls are inconsistent about dispatching hover events themselves. */
+  .tk-action-control > .tk-btn:disabled {
+    pointer-events: none;
+  }
+
+  .tk-action-tooltip {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 0.5rem);
+    z-index: 60;
+    width: max-content;
+    max-width: min(17rem, 80vw);
+    padding: 0.4rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background-color: var(--surface);
+    box-shadow: var(--shadow-pop);
+    color: var(--text);
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.25;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(0.2rem);
+    transition:
+      opacity 0.12s ease,
+      transform 0.12s ease,
+      visibility 0.12s ease;
+    visibility: hidden;
+    white-space: normal;
+  }
+
+  .tk-action-tooltip:empty {
+    display: none;
+  }
+
+  .tk-action-control:hover .tk-action-tooltip:not(:empty),
+  .tk-action-control:focus-within .tk-action-tooltip:not(:empty) {
+    opacity: 1;
+    transform: translateY(0);
+    visibility: visible;
+  }
+
+  .tk-time-guidance {
+    @apply mt-2;
+  }
+
+  .tk-time-guidance:empty {
+    display: none;
   }
 
   /* ---- Buttons ---- */
@@ -461,7 +549,7 @@
   }
 
   .tk-btn-ghost:hover:not(:disabled) {
-    background-color: var(--surface-2);
+    background-color: var(--control-hover);
     color: var(--text);
   }
 
@@ -695,7 +783,7 @@
   }
 
   .tk-copyable:hover {
-    background-color: var(--accent-soft);
+    background-color: var(--control-hover);
   }
 
   .tk-empty {
@@ -1132,12 +1220,8 @@
   }
 
   .tk-work-row:hover {
-    background-color: var(--surface-2);
-    border-color: var(--border);
-  }
-
-  .tk-works-panel .tk-work-row:hover {
-    background-color: var(--surface-3);
+    background-color: var(--control-hover);
+    border-color: var(--control-border);
   }
 
   .tk-work-text {
@@ -1652,7 +1736,11 @@
     width: 0.875rem;
   }
 
-  .tk-insight:hover,
+  .tk-insight:hover {
+    background-color: var(--control-hover);
+    color: var(--text);
+  }
+
   .tk-insight:focus-visible {
     background-color: var(--accent-soft);
     color: var(--accent-text);
@@ -1702,7 +1790,7 @@
 
   .tk-budget-strip:hover {
     background-color: var(--control-hover);
-    border-color: var(--accent);
+    border-color: var(--control-border);
   }
 
   .tk-budget-strip[data-status='on_track'] {
@@ -1830,7 +1918,7 @@
 
   .tk-work-calendar-day:hover {
     background-color: var(--control-hover);
-    border-color: var(--accent);
+    border-color: var(--control-border);
   }
 
   .tk-work-calendar-day:focus-visible {
@@ -2234,6 +2322,14 @@ span.flatpickr-weekday {
 
 /* ---- vis-timeline (daily timeline) ---- */
 
+.tk-timeline {
+  height: 132px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background-color: var(--surface-2);
+}
+
 .vis-timeline {
   background: transparent;
   border: none !important;
@@ -2244,6 +2340,14 @@ span.flatpickr-weekday {
 .vis-panel,
 .vis-panel .vis-content {
   border-color: var(--border) !important;
+}
+
+.tk-timeline .vis-panel.vis-top {
+  background-color: var(--surface);
+}
+
+.tk-timeline .vis-panel.vis-center {
+  background-color: var(--surface-2);
 }
 
 .vis-time-axis .vis-text {
@@ -2284,6 +2388,88 @@ span.flatpickr-weekday {
 
 .vis-item .vis-item-content {
   padding: 0.25rem 0.5rem;
+}
+
+/* History is a single chronological track: the backend prevents task
+   overlap, so every range can use one roomy, information-dense lane. */
+.tk-timeline .vis-item.tk-timeline-range {
+  height: 48px;
+  border-radius: 8px !important;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.14),
+    inset 0 0 0 1px rgb(255 255 255 / 0.22);
+}
+
+.tk-timeline .vis-item.tk-timeline-range.is-ongoing {
+  box-shadow:
+    0 0 0 2px var(--surface-2),
+    0 0 0 4px var(--accent);
+}
+
+.tk-timeline .vis-item.tk-timeline-range .vis-item-overflow,
+.tk-timeline .vis-item.tk-timeline-range .vis-item-content {
+  width: 100%;
+  height: 100%;
+}
+
+.tk-timeline .vis-item.tk-timeline-range .vis-item-content {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding: 0.35rem 0.6rem;
+}
+
+.tk-timeline-item {
+  display: grid;
+  min-width: 0;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 0.4rem;
+  line-height: 1.15;
+}
+
+.tk-timeline-item-client {
+  overflow: hidden;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tk-timeline-item-detail {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  margin-top: 0.2rem;
+  font-size: 0.625rem;
+  font-weight: 550;
+  opacity: 0.82;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tk-timeline-item-live {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+  border-radius: 999px;
+  padding: 0.08rem 0.32rem;
+  background: rgb(255 255 255 / 0.25);
+  font-size: 0.5625rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tk-timeline .vis-tooltip > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 9rem;
+}
+
+.tk-timeline .vis-tooltip > div span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .vis-tooltip {

@@ -915,7 +915,7 @@ export class TaskBrowser extends TimeKeeper {
     renderTimeline(tasks, selectedDate) {
         const container = document.getElementById('timeline');
         container.innerHTML = `
-        <div class="tk-loading h-[200px]"><span class="tk-spinner"></span> Loading timeline…</div>
+        <div class="tk-loading h-full"><span class="tk-spinner"></span> Loading timeline…</div>
     `;
 
         // Colour comes from clientColor() in base.js, keyed on the client's
@@ -924,53 +924,117 @@ export class TaskBrowser extends TimeKeeper {
         // which meant the colours disagreed between the two pages and ignored
         // the theme entirely.
         //
-        // Generated background and foreground colours stay paired inline.
-        // Border-radius and padding remain owned by .vis-item /
-        // .vis-item-content in app.css.
-        const items = tasks.map(task => ({
-            id: task.id,
-            content: task.client_name,
-            start: `${selectedDate}T${task.start_time}`,
-            end: task.end_time ? `${selectedDate}T${task.end_time}` : undefined,
-            style: `background-color: ${clientColor(task.client_name)}; color: ${clientForeground(task.client_name)};`
-        }));
+        // Generated background and foreground colours stay paired inline. Each
+        // task is a range on the same track: overlapping tasks are rejected by
+        // the API, so extra rows and vertical scrolling only obscure detail.
+        const sortedTasks = [...tasks].sort((a, b) =>
+            this.timeStringToMinutes(a.start_time) - this.timeStringToMinutes(b.start_time)
+        );
+        const items = sortedTasks.map(task => {
+            const startLabel = formatClockTime(task.start_time);
+            const endLabel = formatClockTime(task.end_time);
+            const durationMinutes = this.getMinuteDifference(task.end_time, task.start_time);
+            const durationLabel = this.formatDurationMinutes(durationMinutes);
+            const clientName = this.escapeHtml(task.client_name);
+            const ongoingLabel = task.is_ongoing ? '<span class="tk-timeline-item-live">Live</span>' : '';
 
-        // Calculate a view centered on the current time
+            return {
+                id: task.id,
+                className: task.is_ongoing ? 'tk-timeline-range is-ongoing' : 'tk-timeline-range',
+                content: `
+                    <span class="tk-timeline-item">
+                        <span class="tk-timeline-item-client">${clientName}</span>
+                        <span class="tk-timeline-item-detail">${startLabel}–${endLabel} · ${durationLabel}</span>
+                        ${ongoingLabel}
+                    </span>
+                `,
+                title: `
+                    <div class="tk-timeline-tooltip">
+                        <strong>${clientName}</strong>
+                        <span>${startLabel}–${endLabel}</span>
+                        <span>${durationLabel}${task.is_ongoing ? ' · Ongoing' : ''}</span>
+                    </div>
+                `,
+                start: `${selectedDate}T${task.start_time}`,
+                end: `${selectedDate}T${task.end_time}`,
+                style: `background-color: ${clientColor(task.client_name)}; color: ${clientForeground(task.client_name)};`
+            };
+        });
+
+        const summary = document.getElementById('timeline-summary');
+        if (summary) {
+            const totalMinutes = sortedTasks.reduce(
+                (total, task) => total + this.getMinuteDifference(task.end_time, task.start_time),
+                0
+            );
+            const taskCount = sortedTasks.length;
+            if (taskCount === 0) {
+                summary.textContent = 'No tracked tasks';
+            } else {
+                const firstStart = formatClockTime(sortedTasks[0].start_time);
+                const lastEnd = formatClockTime(sortedTasks[sortedTasks.length - 1].end_time);
+                summary.textContent = `${taskCount} ${taskCount === 1 ? 'task' : 'tasks'} · ${this.formatDurationMinutes(totalMinutes)} · ${firstStart}–${lastEnd}`;
+            }
+        }
+
+        // Keep an eight-hour minimum for useful context, but expand and center
+        // the window around the day's actual tasks. The previous noon-centered
+        // window could completely hide early or late historical work.
         const now = new Date();
         const today = this.getLocalDateString();
         const isSelectedDateToday = selectedDate === today;
+        const minimumViewMinutes = 8 * 60;
+        let viewStartMinutes;
+        let viewEndMinutes;
 
-        // Set the view duration (how many hours to show)
-        const viewDuration = 8; // Show 8 hours
-
-        let centerHour;
-        if (isSelectedDateToday) {
-            // If viewing today, center on current hour
-            centerHour = now.getHours();
+        if (sortedTasks.length > 0) {
+            const earliestStart = this.timeStringToMinutes(sortedTasks[0].start_time);
+            const latestEnd = Math.max(...sortedTasks.map(task => this.timeStringToMinutes(task.end_time)));
+            const occupiedMinutes = Math.max(1, latestEnd - earliestStart);
+            const viewMinutes = Math.min(24 * 60 - 1, Math.max(minimumViewMinutes, occupiedMinutes + 60));
+            const centerMinutes = (earliestStart + latestEnd) / 2;
+            viewStartMinutes = Math.max(0, Math.min(24 * 60 - 1 - viewMinutes, centerMinutes - viewMinutes / 2));
+            viewEndMinutes = viewStartMinutes + viewMinutes;
         } else {
-            // If viewing another day, center on midday (12 PM)
-            centerHour = 12;
+            const centerMinutes = isSelectedDateToday
+                ? now.getHours() * 60 + now.getMinutes()
+                : 12 * 60;
+            viewStartMinutes = Math.max(0, Math.min(24 * 60 - 1 - minimumViewMinutes, centerMinutes - minimumViewMinutes / 2));
+            viewEndMinutes = viewStartMinutes + minimumViewMinutes;
         }
 
-        // Calculate start and end times to center the view on the current hour
-        const startHour = Math.max(0, centerHour - Math.floor(viewDuration / 2));
-        const endHour = Math.min(23, startHour + viewDuration);
+        const dateTimeAtMinute = (minutes) => {
+            const boundedMinutes = Math.max(0, Math.min(24 * 60 - 1, Math.round(minutes)));
+            const hours = String(Math.floor(boundedMinutes / 60)).padStart(2, '0');
+            const mins = String(boundedMinutes % 60).padStart(2, '0');
+            return `${selectedDate}T${hours}:${mins}:00`;
+        };
 
-        const startTime = `${selectedDate}T${String(startHour).padStart(2, '0')}:00:00`;
-        const endTime = `${selectedDate}T${String(endHour).padStart(2, '0')}:00:00`;
+        const startTime = dateTimeAtMinute(viewStartMinutes);
+        const endTime = dateTimeAtMinute(viewEndMinutes);
 
         const options = {
             start: startTime,
             end: endTime,
-            timeAxis: { scale: 'hour', step: 1 },
             orientation: 'top',
             stack: false,
-            verticalScroll: true,
+            verticalScroll: false,
             zoomKey: 'ctrlKey',
-            height: '200px',
+            height: '132px',
+            margin: {
+                axis: 10,
+                item: { horizontal: 2, vertical: 12 },
+            },
+            showCurrentTime: isSelectedDateToday,
+            zoomMin: 30 * 60 * 1000,
+            zoomMax: 24 * 60 * 60 * 1000,
             min: `${selectedDate}T00:00:00`,
             max: `${selectedDate}T23:59:59`,
             format: visTimelineTimeFormat(),
+            tooltip: {
+                followMouse: true,
+                overflowMethod: 'cap',
+            },
         };
 
         container.innerHTML = '';

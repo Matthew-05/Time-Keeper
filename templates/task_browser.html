@@ -50,12 +50,19 @@
       <div class="min-w-0 space-y-6">
         <!-- Timeline -->
         <section class="tk-card">
-          <div class="tk-card-header">
-            <span class="tk-card-title">Timeline</span>
-            <span class="text-[0.6875rem] text-faint">Ctrl + scroll to zoom</span>
+          <div class="tk-card-header items-start">
+            <div>
+              <span class="tk-card-title">Timeline</span>
+              <p id="timeline-summary" class="mt-0.5 text-xs text-muted" aria-live="polite">No tracked tasks</p>
+            </div>
+            <span class="mt-0.5 text-[0.6875rem] text-faint">Drag to pan · Ctrl + scroll to zoom</span>
           </div>
           <div class="p-4">
-            <div id="timeline" class="h-[200px]"></div>
+            <div
+              id="timeline"
+              class="tk-timeline"
+              aria-label="Tasks arranged chronologically on a single track"
+            ></div>
             <div id="tooltip" class="tk-tooltip"></div>
           </div>
         </section>

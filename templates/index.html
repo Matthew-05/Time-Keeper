@@ -46,93 +46,107 @@
           <div id="works-list" class="tk-works-panel"></div>
         </section>
 
-        <!-- Time -->
-        <div id="timepicker-container" class="rounded-lg border border-border bg-surface-2 px-4 py-5">
-          <div class="flex flex-wrap items-center justify-center gap-2.5">
-            <div id="task-start-time" class="tabular hidden text-lg font-medium text-muted"></div>
+        <!-- Time and the action that consumes it stay together. The action row
+             remains hidden until the state-specific prerequisites are met. -->
+        <section id="timepicker-container" aria-labelledby="time-heading">
+          <h2 id="time-heading" class="tk-label">Time</h2>
+          <div class="tk-time-panel">
+            <div class="tk-time-control-row">
+              <div id="task-start-time" class="tk-time-context hidden">
+                <div>
+                  <span class="mb-1 block text-xs font-medium text-muted">Start time</span>
+                  <span id="task-start-time-value" class="tk-time-context-value tabular"></span>
+                </div>
+                <span class="tk-time-context-arrow" aria-hidden="true">&rarr;</span>
+              </div>
 
-            <button
-              type="button"
-              id="recent-task-end-time"
-              class="tk-previous-time hidden rounded-lg border px-3 py-1.5 text-left transition-colors hover:border-accent hover:bg-accent-soft"
-              title="Click to use this time"
-            >
-              <div class="text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-faint">Previous end</div>
-              <div class="tabular text-sm font-semibold leading-tight text-text" id="recent-task-time-value"></div>
-            </button>
+              <button
+                type="button"
+                id="recent-task-end-time"
+                class="tk-previous-time hidden rounded-lg border px-3 py-1.5 text-left transition-colors"
+                title="Click to use this time"
+              >
+                <div class="text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-faint">Previous end</div>
+                <div class="tabular text-sm font-semibold leading-tight text-text" id="recent-task-time-value"></div>
+              </button>
 
-            <!-- tk-input-raised, not plain tk-input: this container is
-                 bg-surface-2 and so is .tk-input's fill, which made the field
-                 invisible against it in both themes. -->
-            <label for="timepicker" class="sr-only">Task time</label>
-            <input
-              type="text"
-              id="timepicker"
-              class="tk-input tk-input-raised tk-time w-40 py-2 text-center text-2xl font-semibold tracking-[-0.01em]"
-            />
+              <div class="tk-time-field">
+                <label id="time-field-label" for="timepicker" class="mb-1 block text-xs font-medium text-muted">Time</label>
+                <input
+                  type="text"
+                  id="timepicker"
+                  class="tk-input tk-time w-full py-2 text-center text-2xl font-semibold tracking-[-0.01em]"
+                />
+              </div>
 
-            <button type="button" id="current-time-button" class="tk-btn tk-btn-secondary">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="9" />
-                <path d="M12 7v5l3 2" />
-              </svg>
-              Now
-            </button>
+              <button type="button" id="current-time-button" class="tk-btn tk-btn-secondary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 7v5l3 2" />
+                </svg>
+                Now
+              </button>
+
+              <div id="time-actions" class="hidden flex-wrap items-center justify-end gap-2">
+                <span class="tk-action-control hidden">
+                  <button id="start-button" class="tk-btn tk-btn-primary tk-btn-lg" aria-describedby="start-button-tooltip">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <polygon points="6 4 19 12 6 20 6 4" fill="currentColor" stroke="none" />
+                    </svg>
+                    Start task
+                  </button>
+                  <span id="start-button-tooltip" class="tk-action-tooltip" role="tooltip"></span>
+                </span>
+
+                <span class="tk-action-control hidden">
+                  <button id="complete-button" class="tk-btn tk-btn-primary tk-btn-lg" aria-describedby="complete-button-tooltip">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M20 6L9 17l-5-5" />
+                    </svg>
+                    Complete task
+                  </button>
+                  <span id="complete-button-tooltip" class="tk-action-tooltip" role="tooltip"></span>
+                </span>
+
+                <span class="tk-action-control hidden">
+                  <button id="start-day-button" class="tk-btn tk-btn-primary tk-btn-lg" aria-describedby="start-day-button-tooltip">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="3" y="5" width="18" height="16" rx="2" />
+                      <path d="M16 3v4M8 3v4M3 11h18" />
+                    </svg>
+                    Start day
+                  </button>
+                  <span id="start-day-button-tooltip" class="tk-action-tooltip" role="tooltip"></span>
+                </span>
+
+                <span class="tk-action-control hidden">
+                  <button id="end-day-button" class="tk-btn tk-btn-secondary tk-btn-lg" aria-describedby="end-day-button-tooltip">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
+                    </svg>
+                    End day
+                  </button>
+                  <span id="end-day-button-tooltip" class="tk-action-tooltip" role="tooltip"></span>
+                </span>
+              </div>
+            </div>
+
+            <div id="lowestTimeAllowed" class="tk-time-guidance tabular text-xs text-faint"></div>
           </div>
-          <div id="lowestTimeAllowed" class="tabular mt-3 text-center text-xs text-faint"></div>
-        </div>
+        </section>
       </div>
 
-      <!-- Actions -->
-      <div class="tk-card-footer">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="flex flex-wrap gap-2">
-            <button id="start-button" class="tk-btn tk-btn-primary tk-btn-lg hidden">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polygon points="6 4 19 12 6 20 6 4" fill="currentColor" stroke="none" />
-              </svg>
-              Start task
-            </button>
-
-            <button id="complete-button" class="tk-btn tk-btn-primary tk-btn-lg hidden">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M20 6L9 17l-5-5" />
-              </svg>
-              Complete task
-            </button>
-
-            <button id="action-button" class="tk-btn tk-btn-primary tk-btn-lg hidden">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-              Add task
-            </button>
-          </div>
-
-          <div class="flex flex-wrap gap-2">
-            <button id="start-day-button" class="tk-btn tk-btn-primary tk-btn-lg hidden">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="5" width="18" height="16" rx="2" />
-                <path d="M16 3v4M8 3v4M3 11h18" />
-              </svg>
-              Start day
-            </button>
-
-            <button id="end-day-button" class="tk-btn tk-btn-secondary tk-btn-lg hidden">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
-              </svg>
-              End day
-            </button>
-
-            <button id="reopen-day-button" class="tk-btn tk-btn-warn tk-btn-lg hidden">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3 12a9 9 0 109-9 9 9 0 00-6.36 2.64L3 8" />
-                <path d="M3 3v5h5" />
-              </svg>
-              Re-open day
-            </button>
-          </div>
+      <!-- Re-opening is the only action that exists after the Time section is
+           gone, so it keeps a separate ended-state footer. -->
+      <div id="ended-day-actions" class="tk-card-footer hidden">
+        <div class="flex justify-end">
+          <button id="reopen-day-button" class="tk-btn tk-btn-warn tk-btn-lg hidden">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12a9 9 0 109-9 9 9 0 00-6.36 2.64L3 8" />
+              <path d="M3 3v5h5" />
+            </svg>
+            Re-open day
+          </button>
         </div>
       </div>
     </section>

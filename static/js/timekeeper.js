@@ -14,6 +14,7 @@ import {
 export class TimeKeeperIndex extends TimeKeeper {
     constructor() {
         super();
+        this.uiState = null;
         this.initializeElements();
         this.initializeTimePicker();
         this.bindEvents();
@@ -61,15 +62,19 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.clientInput = document.getElementById('autocomplete-input');
         this.worksContainer = document.getElementById('works-container');
         this.clientDayTotal = document.getElementById('client-day-total');
-        this.actionButton = document.getElementById('action-button');
         this.completeButton = document.getElementById('complete-button');
         this.startButton = document.getElementById('start-button');
         this.startDayButton = document.getElementById('start-day-button');
         this.endDayButton = document.getElementById('end-day-button');
         this.reopenDayButton = document.getElementById('reopen-day-button');
+        this.timeContainer = document.getElementById('timepicker-container');
+        this.timeActions = document.getElementById('time-actions');
+        this.timeFieldLabel = document.getElementById('time-field-label');
+        this.endedDayActions = document.getElementById('ended-day-actions');
         this.timePicker = document.getElementById('timepicker');
         this.currentTimeButton = document.getElementById('current-time-button');
         this.taskStartTimeDisplay = document.getElementById('task-start-time');
+        this.taskStartTimeValue = document.getElementById('task-start-time-value');
         this.recentTaskEndTime = document.getElementById('recent-task-end-time');
         this.recentTaskTimeValue = document.getElementById('recent-task-time-value');
 
@@ -216,10 +221,12 @@ export class TimeKeeperIndex extends TimeKeeper {
 
     initializeTimePicker() {
         const now = new Date();
-        this.timePickerInstance = flatpickr(this.timePicker, flatpickrTimeOptions({
+        const options = flatpickrTimeOptions({
             defaultHour: now.getHours(),
             defaultMinute: now.getMinutes(),
-        }));
+        });
+        options.onChange = () => this.syncContextualActions();
+        this.timePickerInstance = flatpickr(this.timePicker, options);
     }
 
 
@@ -232,6 +239,9 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.reopenDayButton.addEventListener('click', () => this.handleReopenDay());
         this.currentTimeButton.addEventListener('click', () => this.setCurrentTime());
         this.recentTaskEndTime.addEventListener('click', () => this.useRecentTaskEndTime());
+        this.timePicker.addEventListener('input', () => this.syncContextualActions());
+        this.timePicker.addEventListener('change', () => this.syncContextualActions());
+        this.clientInput.addEventListener('change', () => this.syncContextualActions());
         document.addEventListener('timeFormatChanged', () => this.handleTimeFormatChanged());
 
     }
@@ -251,14 +261,15 @@ export class TimeKeeperIndex extends TimeKeeper {
                 `Earliest allowed: ${formatClockTime(this.earliestAllowedTime)}`
         }
         if (this.runningTaskStartTime && !this.taskStartTimeDisplay.classList.contains('hidden')) {
-            this.taskStartTimeDisplay.textContent = `${formatClockTime(this.runningTaskStartTime)} -`
+            this.taskStartTimeValue.textContent = formatClockTime(this.runningTaskStartTime)
         }
     }
 
 
     setCurrentTime() {
         const now = new Date();
-        this.timePickerInstance.setDate(now);
+        this.timePickerInstance.setDate(now, true);
+        this.syncContextualActions();
         this.showToast('Time set to current time', 'success');
     }
 
@@ -275,6 +286,7 @@ export class TimeKeeperIndex extends TimeKeeper {
                 this.recentTaskEndTime.classList.add('hidden');
                 this.storedRecentTaskEndTime = null;
             }
+            this.syncContextualActions();
         } catch (error) {
             console.error('Failed to get recent task end time:', error);
             this.recentTaskEndTime.classList.add('hidden');
@@ -283,7 +295,8 @@ export class TimeKeeperIndex extends TimeKeeper {
 
     useRecentTaskEndTime() {
         if (this.storedRecentTaskEndTime) {
-            this.timePickerInstance.setDate(clockTimeToDate(this.storedRecentTaskEndTime));
+            this.timePickerInstance.setDate(clockTimeToDate(this.storedRecentTaskEndTime), true);
+            this.syncContextualActions();
             this.showToast('Time set to previous task end time', 'success');
         }
     }
@@ -522,6 +535,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.currentTaskClientId = null;
         // Clear the time picker
         this.timePickerInstance.clear();
+        this.syncContextualActions();
     }
 
 
@@ -554,12 +568,10 @@ export class TimeKeeperIndex extends TimeKeeper {
             this.showToast(`Task completed successfully for client: ${this.clientInput.value}`, 'green');
             this.clearInputs();
             if (this.autocomplete) this.autocomplete.removeActiveItems();
-            this.completeButton.style.display = 'none';
-            this.startButton.style.display = 'inline-flex';
 
             // Hide the task start time display
             this.taskStartTimeDisplay.classList.add('hidden');
-            this.taskStartTimeDisplay.textContent = '';
+            this.taskStartTimeValue.textContent = '';
 
             // Stop and reset the timer in the navbar
             if (window.stopAndResetTimer) {
@@ -591,6 +603,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         // Create the handler as a class property so we can reference it for removal
         this.handleClientChange = (event) => {
             const selectedValue = event.detail.value;
+            this.syncContextualActions();
             // Ignore echoes from programmatic selection (e.g. autofilling the
             // running task's client), which would otherwise fire a redundant
             // /update_task_client POST and a bogus toast on every page load.
@@ -659,6 +672,8 @@ export class TimeKeeperIndex extends TimeKeeper {
             );
             this.autocomplete.setChoiceByValue(clientName);
         }
+
+        this.syncContextualActions();
     }
 
 
@@ -759,13 +774,12 @@ export class TimeKeeperIndex extends TimeKeeper {
 
     // UI State Management Methods
     handleOpenDayState(unfinishedTasksExist) {
+        this.timeContainer.style.display = 'block';
         if (unfinishedTasksExist) {
             this.updateButtonVisibility('taskInProgress');
             this.showTaskCompletionForm();
         } else {
-            // When day is started but no tasks are in progress, show both start task and end day options
-            this.startButton.style.display = 'inline-flex';
-            this.endDayButton.style.display = 'inline-flex';
+            this.updateButtonVisibility('dayStarted');
             this.showStartTaskForm();
         }
     }
@@ -779,7 +793,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.setWorksVisible(false);
 
         // Show the time picker for selecting start time
-        document.getElementById('timepicker-container').style.display = 'block';
+        this.timeContainer.style.display = 'block';
         
         // Hide recent task end time when day hasn't started
         this.recentTaskEndTime.classList.add('hidden');
@@ -799,7 +813,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         }
 
         // Hide the time picker container as well
-        document.getElementById('timepicker-container').style.display = 'none';
+        this.timeContainer.style.display = 'none';
         
         // Hide recent task end time when day has ended
         this.recentTaskEndTime.classList.add('hidden');
@@ -826,9 +840,10 @@ export class TimeKeeperIndex extends TimeKeeper {
         if (task && task.start_time) {
             this.runningTaskStartTime = serializeClockTime(task.start_time)
             const formattedTime = formatClockTime(this.runningTaskStartTime);
-            this.taskStartTimeDisplay.textContent = `${formattedTime} -`;
+            this.taskStartTimeValue.textContent = formattedTime;
             this.taskStartTimeDisplay.classList.remove('hidden');
         }
+        this.syncContextualActions();
     }
 
 
@@ -846,8 +861,9 @@ export class TimeKeeperIndex extends TimeKeeper {
 
         // Hide the task start time display
         this.taskStartTimeDisplay.classList.add('hidden');
-        this.taskStartTimeDisplay.textContent = '';
+        this.taskStartTimeValue.textContent = '';
         this.runningTaskStartTime = null;
+        this.syncContextualActions();
     }
 
     hideInputFields() {
@@ -860,36 +876,106 @@ export class TimeKeeperIndex extends TimeKeeper {
     }
 
     updateButtonVisibility(state) {
-        const buttons = {
-            action: this.actionButton,
-            complete: this.completeButton,
-            start: this.startButton,
-            startDay: this.startDayButton,
-            endDay: this.endDayButton,
-            reopenDay: this.reopenDayButton
+        this.uiState = state;
+        this.reopenDayButton.style.display = state === 'dayEnded' ? 'inline-flex' : 'none';
+        this.endedDayActions.classList.toggle('hidden', state !== 'dayEnded');
+        this.syncContextualActions();
+    }
+
+    /**
+     * Keep every action relevant to the current state visible. Missing inputs
+     * disable the button instead of making it jump in and out of the layout;
+     * its adjacent tooltip explains exactly what is still required.
+     */
+    syncContextualActions() {
+        if (!this.uiState) return;
+
+        const contextualButtons = [
+            this.startDayButton,
+            this.startButton,
+            this.completeButton,
+            this.endDayButton,
+        ];
+        const configureButton = (button, { visible = false, reason = '' } = {}) => {
+            const control = button.closest('.tk-action-control');
+            const tooltip = control?.querySelector('.tk-action-tooltip');
+
+            if (control) control.style.display = visible ? 'inline-flex' : 'none';
+            button.style.display = 'inline-flex';
+            button.disabled = Boolean(reason);
+            button.title = reason;
+            if (tooltip) tooltip.textContent = reason;
+        };
+        contextualButtons.forEach(button => configureButton(button));
+
+        const hasTime = Boolean(this.timePicker.value.trim());
+        const selectedClient = this.autocomplete
+            ? this.autocomplete.getValue(true)
+            : this.clientInput.value;
+        const hasClient = Boolean(selectedClient);
+        let visibleCount = 0;
+        let fieldLabel = 'Time';
+
+        const show = (button, reason = '') => {
+            configureButton(button, { visible: true, reason });
+            visibleCount += 1;
         };
 
-        // Hide all buttons first
-        Object.values(buttons).forEach(button => {
-            if (button) button.style.display = 'none';
-        });
+        const disabledTimeReason = (timeLabel, actionLabel) => {
+            const article = /^[aeiou]/i.test(timeLabel) ? 'an' : 'a';
+            if (!hasTime) return `Choose ${article} ${timeLabel} to ${actionLabel}.`;
 
-        // Show relevant buttons based on state
-        switch (state) {
+            try {
+                const selectedSeconds = clockTimeToSeconds(this.timePicker.value);
+                const nowSeconds = clockTimeToSeconds(currentClockTime({ includeSeconds: true }));
+                if (selectedSeconds > nowSeconds) {
+                    return `Choose ${article} ${timeLabel} that isn't in the future.`;
+                }
+
+                const minimumTime = this.uiState === 'taskInProgress'
+                    ? this.runningTaskStartTime
+                    : this.uiState === 'dayStarted'
+                        ? this.storedRecentTaskEndTime
+                        : null;
+                if (minimumTime && selectedSeconds < clockTimeToSeconds(minimumTime)) {
+                    return `Choose ${article} ${timeLabel} at or after ${formatClockTime(minimumTime)}.`;
+                }
+            } catch {
+                return `Enter a valid ${timeLabel} to ${actionLabel}.`;
+            }
+
+            return '';
+        };
+
+        switch (this.uiState) {
             case 'dayNotStarted':
-                buttons.startDay.style.display = 'flex';
+                fieldLabel = 'Start time';
+                show(this.startDayButton, disabledTimeReason('start time', 'start the day'));
                 break;
-            case 'dayStarted':
-                buttons.start.style.display = 'flex';
-                buttons.endDay.style.display = 'flex';
+            case 'dayStarted': {
+                fieldLabel = 'Start time';
+                let startTaskReason = disabledTimeReason('start time', 'start a task');
+                if (!hasClient && !hasTime) {
+                    startTaskReason = 'Choose a client and start time to start a task.';
+                } else if (!hasClient) {
+                    startTaskReason = 'Choose a client to start a task.';
+                }
+                show(this.startButton, startTaskReason);
+                show(this.endDayButton, disabledTimeReason('end time', 'end the day'));
                 break;
+            }
             case 'taskInProgress':
-                buttons.complete.style.display = 'flex';
+                fieldLabel = 'End time';
+                show(this.completeButton, disabledTimeReason('end time', 'complete the task'));
                 break;
             case 'dayEnded':
-                buttons.reopenDay.style.display = 'flex';
+                fieldLabel = 'Time';
                 break;
         }
+
+        this.timeFieldLabel.textContent = fieldLabel;
+        this.timeActions.classList.toggle('hidden', visibleCount === 0);
+        this.timeActions.style.display = visibleCount ? 'flex' : 'none';
     }
 
 
@@ -955,7 +1041,7 @@ export class TimeKeeperIndex extends TimeKeeper {
 
             // If successful, show a success message
             this.showToast('Day reopened successfully', 'success');
-            document.getElementById('reopen-day-button').style.display = 'none';
+            this.reopenDayButton.style.display = 'none';
 
             // Check for unfinished tasks
             const tasks = await this.fetchFromAPI('/unfinished_tasks');
@@ -984,7 +1070,7 @@ export class TimeKeeperIndex extends TimeKeeper {
                 if (clientContainer) clientContainer.style.display = 'block';
 
                 // Show the time picker
-                document.getElementById('timepicker-container').style.display = 'block';
+                this.timeContainer.style.display = 'block';
             }
 
             // Update day status to reflect changes
