@@ -1372,6 +1372,13 @@
     @apply flex items-center gap-2 rounded-lg border border-transparent px-2 py-1.5;
   }
 
+  /* The inline Today list reads like a short work log. Give each entry a
+     visible bullet without changing the shared Works modal in History. */
+  #works-list .tk-work-row::before {
+    content: "\2022";
+    @apply flex-shrink-0 text-muted;
+  }
+
   .tk-work-row:hover {
     background-color: var(--control-hover);
     border-color: var(--control-border);
