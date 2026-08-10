@@ -1,6 +1,9 @@
 import unittest
 from datetime import date, time
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import budgets
 import settings
@@ -48,6 +51,34 @@ class SettingsTests(unittest.TestCase):
         self.assertFalse(clean['rounding_enabled'])
         self.assertEqual(clean['rounding_interval_minutes'], 7)
         self.assertEqual(clean['rounding_direction'], 'down')
+
+    def test_preview_settings_does_not_write_and_matches_schedule_semantics(self):
+        with TemporaryDirectory() as directory:
+            settings_path = Path(directory) / 'settings.json'
+            with patch.object(settings, 'SETTINGS_PATH', str(settings_path)):
+                preview = settings.preview_settings(
+                    {'work_hours_per_day': 6, 'work_days': [0, 2, 4]},
+                    effective_date=date(2026, 8, 10),
+                )
+
+            self.assertFalse(settings_path.exists())
+            self.assertEqual(preview['work_hours_per_day'], 6)
+            self.assertEqual(preview['work_days'], [0, 2, 4])
+            self.assertEqual(
+                preview['work_schedule_history'],
+                [
+                    {
+                        'effective_from': date.min.isoformat(),
+                        'hours_per_day': 8,
+                        'work_days': [0, 1, 2, 3, 4],
+                    },
+                    {
+                        'effective_from': '2026-08-10',
+                        'hours_per_day': 6,
+                        'work_days': [0, 2, 4],
+                    },
+                ],
+            )
 
 
 class BudgetRoundingTests(unittest.TestCase):

@@ -311,13 +311,14 @@ def api_update_settings():
     return jsonify(saved)
 
 
-@app.route('/api/work-calendar', methods=['GET'])
+@app.route('/api/work-calendar', methods=['GET', 'POST'])
 def api_work_calendar():
     """Resolved capacity for a requested calendar window.
 
     Returning evaluated days keeps the calendar display and budget projections
     on exactly the same rules, including overlapping ranges where later rules
-    win one field at a time.
+    win one field at a time. POST evaluates an unsaved editor draft without
+    mutating the settings file.
     """
     try:
         start = date.fromisoformat(request.args.get('start', ''))
@@ -330,7 +331,23 @@ def api_work_calendar():
     if (end - start).days > 370:
         return jsonify({'error': 'Calendar windows are limited to one year.'}), 400
 
-    settings = user_settings.load_settings()
+    if request.method == 'POST':
+        changes = request.get_json(silent=True)
+        if not isinstance(changes, dict):
+            return jsonify({'error': 'Expected a JSON object'}), 400
+        allowed = {
+            'work_hours_per_day',
+            'work_days',
+            'work_calendar_overrides',
+        }
+        unknown = [key for key in changes if key not in allowed]
+        if unknown:
+            return jsonify({
+                'error': f'Unknown calendar setting(s): {", ".join(sorted(unknown))}'
+            }), 400
+        settings = user_settings.preview_settings(changes)
+    else:
+        settings = user_settings.load_settings()
     hours = settings['work_hours_per_day']
     work_days = settings['work_days']
     overrides = settings['work_calendar_overrides']

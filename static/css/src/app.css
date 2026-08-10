@@ -111,6 +111,21 @@
      already there, rather than a flat colour that has to win a specificity
      fight against every state class. See .tk-table-hover. */
   --hover-tint: rgb(15 23 42 / 0.045);
+
+  /* History needs more separation than the general surface ladder provides in
+     light mode. These stay component-scoped so the already-balanced dark
+     theme can keep using its existing surface and line colours. */
+  --timeline-canvas: #ffffff;
+  --timeline-axis: #f4f6f9;
+  --timeline-grid-minor: #d5dce7;
+  --timeline-grid-major: #aeb9c8;
+  --timeline-minor-line-style: dashed;
+  --timeline-inset-shadow: inset 0 1px 0 rgb(15 23 42 / 0.03);
+  --history-detail-shell: #edf1f6;
+  --history-detail-bg: #ffffff;
+  --history-detail-header: #e8edf4;
+  --history-detail-border: #d2dae5;
+  --history-detail-inset: var(--accent);
 }
 
 .dark {
@@ -154,6 +169,18 @@
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
   --shadow-md: 0 4px 16px -4px rgb(0 0 0 / 0.55);
   --shadow-pop: 0 12px 32px -8px rgb(0 0 0 / 0.7);
+
+  --timeline-canvas: var(--surface-2);
+  --timeline-axis: var(--surface);
+  --timeline-grid-minor: var(--border);
+  --timeline-grid-major: var(--border-strong);
+  --timeline-minor-line-style: solid;
+  --timeline-inset-shadow: none;
+  --history-detail-shell: var(--surface-2);
+  --history-detail-bg: var(--surface-2);
+  --history-detail-header: var(--surface-3);
+  --history-detail-border: var(--border);
+  --history-detail-inset: transparent;
 }
 
 /* Expose the tokens to Tailwind. `inline` means utilities compile to
@@ -486,6 +513,18 @@
     display: none;
   }
 
+  .tk-task-duration-preview {
+    @apply mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border pt-3 text-sm;
+  }
+
+  .tk-task-duration-metric {
+    @apply flex items-baseline gap-2;
+  }
+
+  .tk-task-duration-label {
+    @apply text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-faint;
+  }
+
   /* ---- Buttons ---- */
 
   .tk-btn {
@@ -551,6 +590,100 @@
   .tk-btn-ghost:hover:not(:disabled) {
     background-color: var(--control-hover);
     color: var(--text);
+  }
+
+  /* ---- Page-level save confirmation ---- */
+
+  .tk-save-changes {
+    align-items: center;
+    background-color: var(--surface);
+    background-image: linear-gradient(
+      color-mix(in srgb, var(--accent-soft) 72%, transparent),
+      color-mix(in srgb, var(--accent-soft) 72%, transparent)
+    );
+    border: 2px solid var(--accent);
+    border-radius: 12px;
+    bottom: 1.25rem;
+    box-shadow: var(--shadow-pop), 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+    left: 50%;
+    max-width: calc(100vw - 2rem);
+    padding: 0.75rem;
+    position: fixed;
+    transform: translateX(-50%);
+    width: min(31rem, calc(100vw - 2rem));
+  }
+
+  .tk-save-changes[hidden] {
+    display: none;
+  }
+
+  .tk-save-changes-content {
+    @apply flex min-w-0 items-center gap-3;
+  }
+
+  .tk-save-changes-icon {
+    @apply flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg;
+    background-color: var(--accent);
+    color: var(--accent-fg);
+  }
+
+  .tk-save-changes-icon svg {
+    height: 1.125rem;
+    width: 1.125rem;
+  }
+
+  .tk-save-changes-copy {
+    @apply flex min-w-0 flex-col pl-1 text-sm;
+  }
+
+  .tk-save-changes-copy strong {
+    @apply font-semibold text-text;
+    letter-spacing: -0.01em;
+  }
+
+  .tk-save-changes-copy span {
+    @apply text-xs text-muted;
+  }
+
+  .tk-save-changes-actions {
+    @apply flex flex-shrink-0 items-center gap-1;
+  }
+
+  .tk-unsaved-modal {
+    max-width: 27rem;
+  }
+
+  .tk-unsaved-modal-actions {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tk-unsaved-modal-actions > .tk-btn {
+    width: 100%;
+  }
+
+  .tk-save-changes-visible .tk-page {
+    padding-bottom: 8rem;
+  }
+
+  @media (max-width: 420px) {
+    .tk-save-changes {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .tk-save-changes-actions > .tk-btn {
+      flex: 1;
+    }
+
+    .tk-save-changes-visible .tk-page {
+      padding-bottom: 11rem;
+    }
+
   }
 
   /* Status buttons are tinted rather than saturated — they read as
@@ -769,11 +902,13 @@
   }
 
   .tk-table-nested thead th {
-    background-color: var(--surface-3);
+    background-color: var(--history-detail-header);
+    border-bottom-color: var(--history-detail-border);
     padding: 0.4375rem 1rem;
   }
 
   .tk-table-nested tbody td {
+    border-bottom-color: var(--history-detail-border);
     padding: 0.5rem 1rem;
   }
 
@@ -985,8 +1120,16 @@
   }
 
   .detail-row > td {
-    background-color: var(--surface-2);
+    background-color: var(--history-detail-shell);
     padding: 0 !important;
+  }
+
+  .detail-row .tk-table-nested {
+    background-color: var(--history-detail-bg);
+    box-shadow:
+      inset 3px 0 var(--history-detail-inset),
+      inset 0 1px var(--history-detail-border),
+      inset 0 -1px var(--history-detail-border);
   }
 
   .tk-row-ongoing > td {
@@ -1084,7 +1227,8 @@
        40  nav bar
        50  dropdowns (Choices)
        60  modal backdrops, tooltips
-       70  flatpickr calendars (vendor ships 99999; clamped in the overrides)
+       70  flatpickr calendars, page-level save bar
+       75  unsaved-navigation interruption
        80  toasts
 
      Toasts sit on top of all of it deliberately. They're the only channel for
@@ -1092,6 +1236,15 @@
      modal or with a date picker open — exactly the layers that would otherwise
      cover the message. Nothing should be added above 80 without moving toasts
      with it. */
+
+  .tk-save-changes {
+    z-index: 70;
+  }
+
+  .tk-modal-backdrop.tk-unsaved-backdrop {
+    inset: 0;
+    z-index: 75;
+  }
 
   .tk-toast-container {
     z-index: 80;
@@ -2336,7 +2489,8 @@ span.flatpickr-weekday {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background-color: var(--surface-2);
+  background-color: var(--timeline-canvas);
+  box-shadow: var(--timeline-inset-shadow);
 }
 
 .vis-timeline {
@@ -2352,11 +2506,11 @@ span.flatpickr-weekday {
 }
 
 .tk-timeline .vis-panel.vis-top {
-  background-color: var(--surface);
+  background-color: var(--timeline-axis);
 }
 
 .tk-timeline .vis-panel.vis-center {
-  background-color: var(--surface-2);
+  background-color: var(--timeline-canvas);
 }
 
 .vis-time-axis .vis-text {
@@ -2370,17 +2524,67 @@ span.flatpickr-weekday {
   font-weight: 600;
 }
 
-.vis-time-axis .vis-grid.vis-minor {
-  border-color: var(--border) !important;
+.tk-timeline .vis-time-axis .vis-grid.vis-minor {
+  border-color: var(--timeline-grid-minor) !important;
+  border-left-style: var(--timeline-minor-line-style);
 }
 
-.vis-time-axis .vis-grid.vis-major {
-  border-color: var(--border-strong) !important;
+.tk-timeline .vis-time-axis .vis-grid.vis-major {
+  border-color: var(--timeline-grid-major) !important;
+  border-left-style: solid;
 }
 
 .vis-current-time {
   background-color: var(--danger) !important;
   width: 1px !important;
+}
+
+/* Day boundaries are read-only custom times. Their small flags make the line
+   meaningful without requiring a legend, while pointer-events prevents the
+   draggable behaviour vis-timeline assigns to custom times by default. */
+.tk-timeline .vis-custom-time.tk-day-start,
+.tk-timeline .vis-custom-time.tk-day-close {
+  pointer-events: none;
+  width: 2px;
+  z-index: 4;
+}
+
+.tk-timeline .vis-custom-time.tk-day-start {
+  background-color: var(--success);
+}
+
+.tk-timeline .vis-custom-time.tk-day-close {
+  background-color: var(--warn);
+}
+
+.tk-timeline .vis-custom-time > .vis-custom-time-marker {
+  background-color: var(--surface);
+  border: 1px solid currentColor;
+  bottom: 0.35rem;
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
+  color: inherit;
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0.25rem 0.4rem;
+  top: auto;
+  transform: translateX(-50%);
+}
+
+.tk-timeline .vis-custom-time.tk-day-start > .vis-custom-time-marker {
+  color: var(--success);
+}
+
+.tk-timeline .vis-custom-time.tk-day-close > .vis-custom-time-marker {
+  color: var(--warn);
+}
+
+.tk-timeline .vis-custom-time-marker strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  margin-left: 0.25rem;
 }
 
 .vis-item {

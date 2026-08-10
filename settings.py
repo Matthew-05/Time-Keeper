@@ -389,58 +389,72 @@ def get_setting(key):
     return load_settings().get(key, DEFAULTS.get(key))
 
 
+def _merge_settings(current, changes, effective_date=None):
+    """Return validated merged settings, including schedule history updates."""
+    if not isinstance(changes, dict):
+        changes = {}
+
+    merged = dict(current)
+    merged.update({k: v for k, v in changes.items() if k in _SCHEMA})
+    clean = _coerce(merged)
+
+    schedule_changed = (
+        clean['work_hours_per_day'] != current['work_hours_per_day']
+        or clean['work_days'] != current['work_days']
+    )
+    if schedule_changed:
+        effective_date = effective_date or date.today()
+        effective_iso = effective_date.isoformat()
+        history = [dict(item) for item in current['work_schedule_history']]
+
+        # The first change needs a baseline for every earlier date. Later
+        # changes already have one, so they only add/replace today's row.
+        if not history:
+            history.append({
+                'effective_from': date.min.isoformat(),
+                'hours_per_day': current['work_hours_per_day'],
+                'work_days': list(current['work_days']),
+            })
+
+        version = {
+            'effective_from': effective_iso,
+            'hours_per_day': clean['work_hours_per_day'],
+            'work_days': list(clean['work_days']),
+        }
+        existing = next(
+            (
+                index
+                for index, item in enumerate(history)
+                if item['effective_from'] == effective_iso
+            ),
+            None,
+        )
+        if existing is None:
+            history.append(version)
+        else:
+            history[existing] = version
+        history.sort(key=lambda item: item['effective_from'])
+        clean['work_schedule_history'] = history
+
+    return clean
+
+
+def preview_settings(changes, effective_date=None):
+    """Validate a settings merge without writing it to disk."""
+    with _lock:
+        current = _coerce(_read_file())
+        return _merge_settings(current, changes, effective_date)
+
+
 def update_settings(changes, effective_date=None):
     """Merge `changes` into the stored settings and persist.
 
     Unknown keys are ignored and invalid values fall back to the default, so a
     malformed request can't corrupt the file. Returns the resulting settings.
     """
-    if not isinstance(changes, dict):
-        changes = {}
-
     with _lock:
         current = _coerce(_read_file())
-        merged = dict(current)
-        merged.update({k: v for k, v in changes.items() if k in _SCHEMA})
-        clean = _coerce(merged)
-
-        schedule_changed = (
-            clean['work_hours_per_day'] != current['work_hours_per_day']
-            or clean['work_days'] != current['work_days']
-        )
-        if schedule_changed:
-            effective_date = effective_date or date.today()
-            effective_iso = effective_date.isoformat()
-            history = [dict(item) for item in current['work_schedule_history']]
-
-            # The first change needs a baseline for every earlier date. Later
-            # changes already have one, so they only add/replace today's row.
-            if not history:
-                history.append({
-                    'effective_from': date.min.isoformat(),
-                    'hours_per_day': current['work_hours_per_day'],
-                    'work_days': list(current['work_days']),
-                })
-
-            version = {
-                'effective_from': effective_iso,
-                'hours_per_day': clean['work_hours_per_day'],
-                'work_days': list(clean['work_days']),
-            }
-            existing = next(
-                (
-                    index
-                    for index, item in enumerate(history)
-                    if item['effective_from'] == effective_iso
-                ),
-                None,
-            )
-            if existing is None:
-                history.append(version)
-            else:
-                history[existing] = version
-            history.sort(key=lambda item: item['effective_from'])
-            clean['work_schedule_history'] = history
+        clean = _merge_settings(current, changes, effective_date)
 
         if clean != current or not os.path.exists(SETTINGS_PATH):
             _write_file(clean)

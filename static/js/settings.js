@@ -1,14 +1,14 @@
 import { TimeKeeper, ready } from './base.js'
 import { applyTheme, currentMode } from './theme.js'
 import { applyTimeFormat, currentTimeFormat } from './time_format.js'
+import { SaveChangesBar } from './save_changes.js'
 
 /**
  * Settings page.
  *
- * Each control applies its change immediately and saves in the background —
- * there's no Save button to forget to press, and with a local backend the write
- * is effectively instant. The optimistic apply is rolled back if the write
- * fails, so what you see always matches what's on disk.
+ * Each control updates a local draft. The floating save/cancel bar is the only
+ * path that writes settings, so the UI can be previewed and then confirmed or
+ * restored as one change set.
  *
  * Nothing here fetches the current settings: every control is rendered at its
  * stored value by Jinja, so the page is already correct before this module
@@ -18,10 +18,6 @@ import { applyTimeFormat, currentTimeFormat } from './time_format.js'
 
 const INTERVAL_PRESETS = [15, 30, 60]
 const ROUNDING_INTERVAL_PRESETS = [5, 10, 15, 30, 60]
-
-// Typing "45" into a number field fires three input events. Wait for a pause
-// before writing, but save on blur/Enter regardless so a change is never lost.
-const TYPING_PAUSE_MS = 600
 
 class Settings extends TimeKeeper {
     constructor() {
@@ -49,6 +45,7 @@ class Settings extends TimeKeeper {
 
         // Last server-confirmed values, seeded from what the server rendered.
         this.saved = {
+            theme: currentMode(),
             time_format: currentTimeFormat(),
             rounding_enabled: this.roundingToggle.getAttribute('aria-checked') === 'true',
             rounding_interval_minutes: Number(this.roundingIntervalInput.value),
@@ -57,10 +54,11 @@ class Settings extends TimeKeeper {
             reminder_interval_minutes: Number(this.intervalInput.value),
             reminder_snooze_minutes: Number(this.snoozeInput.value),
         }
-
-        this.pendingSaves = new Map()
-        this.timeFormatSaveQueue = Promise.resolve()
-        this.timeFormatIntent = 0
+        this.draft = { ...this.saved }
+        this.saveBar = new SaveChangesBar({
+            onSave: () => this.saveChanges(),
+            onCancel: () => this.cancelChanges(),
+        })
     }
 
     init() {
@@ -109,28 +107,11 @@ class Settings extends TimeKeeper {
         })
     }
 
-    async setTheme(mode) {
-        const previous = currentMode()
-        if (mode === previous) return
-
-        // Apply first: the point of a theme switch is seeing it happen.
+    setTheme(mode) {
+        if (mode === currentMode()) return
         applyTheme(mode)
         this.markThemeSelected(mode)
-
-        try {
-            const saved = await this.save({ theme: mode })
-            // Trust the server's answer over ours — it validated the value.
-            if (saved.theme !== mode) {
-                applyTheme(saved.theme)
-                this.markThemeSelected(saved.theme)
-            }
-        } catch (error) {
-            // The write failed, so the file still says `previous`. Put the page
-            // back in sync with it instead of leaving a theme that won't
-            // survive a reload.
-            applyTheme(previous)
-            this.markThemeSelected(previous)
-        }
+        this.stage('theme', mode)
     }
 
     // -- time format ------------------------------------------------------
@@ -169,32 +150,11 @@ class Settings extends TimeKeeper {
         })
     }
 
-    async setTimeFormat(timeFormat) {
+    setTimeFormat(timeFormat) {
         if (timeFormat === currentTimeFormat()) return
-        const intent = ++this.timeFormatIntent
-
         applyTimeFormat(timeFormat)
         this.markTimeFormatSelected(timeFormat)
-
-        // Serialize writes so the server's final value follows the user's click
-        // order. The intent token prevents an older response from repainting a
-        // newer optimistic choice while rapid toggles are still queued.
-        const request = this.timeFormatSaveQueue.then(() => this.save({ time_format: timeFormat }))
-        this.timeFormatSaveQueue = request.catch(() => {})
-
-        try {
-            const saved = await request
-            this.saved.time_format = saved.time_format
-            if (intent === this.timeFormatIntent) {
-                applyTimeFormat(saved.time_format)
-                this.markTimeFormatSelected(saved.time_format)
-            }
-        } catch (error) {
-            if (intent === this.timeFormatIntent) {
-                applyTimeFormat(this.saved.time_format)
-                this.markTimeFormatSelected(this.saved.time_format)
-            }
-        }
+        this.stage('time_format', timeFormat)
     }
 
     // -- rounding ---------------------------------------------------------
@@ -222,17 +182,10 @@ class Settings extends TimeKeeper {
         )
     }
 
-    async toggleRounding() {
+    toggleRounding() {
         const enabled = !(this.roundingToggle.getAttribute('aria-checked') === 'true')
         this.markRoundingEnabled(enabled)
-
-        try {
-            const saved = await this.save({ rounding_enabled: enabled })
-            this.saved.rounding_enabled = saved.rounding_enabled
-            this.markRoundingEnabled(saved.rounding_enabled)
-        } catch (error) {
-            this.markRoundingEnabled(this.saved.rounding_enabled)
-        }
+        this.stage('rounding_enabled', enabled)
     }
 
     markRoundingEnabled(enabled) {
@@ -278,17 +231,10 @@ class Settings extends TimeKeeper {
         })
     }
 
-    async setRoundingDirection(direction) {
-        if (direction === this.saved.rounding_direction) return
+    setRoundingDirection(direction) {
+        if (direction === this.draft.rounding_direction) return
         this.markRoundingDirection(direction)
-
-        try {
-            const saved = await this.save({ rounding_direction: direction })
-            this.saved.rounding_direction = saved.rounding_direction
-            this.markRoundingDirection(saved.rounding_direction)
-        } catch (error) {
-            this.markRoundingDirection(this.saved.rounding_direction)
-        }
+        this.stage('rounding_direction', direction)
     }
 
     bindRoundingDirectionKeys() {
@@ -298,7 +244,7 @@ class Settings extends TimeKeeper {
                 ...this.roundingDirectionGroup.querySelectorAll('[data-rounding-direction]'),
             ]
             const index = options.findIndex(
-                (button) => button.dataset.roundingDirection === this.saved.rounding_direction
+                (button) => button.dataset.roundingDirection === this.draft.rounding_direction
             )
             const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
             const next = options[(index + step + options.length) % options.length]
@@ -326,17 +272,10 @@ class Settings extends TimeKeeper {
         this.bindNumberField(this.snoozeInput, 'reminder_snooze_minutes')
     }
 
-    async toggleReminder() {
+    toggleReminder() {
         const enabled = !(this.reminderToggle.getAttribute('aria-checked') === 'true')
         this.markReminderEnabled(enabled)
-
-        try {
-            const saved = await this.save({ reminder_enabled: enabled })
-            this.saved.reminder_enabled = saved.reminder_enabled
-            this.markReminderEnabled(saved.reminder_enabled)
-        } catch (error) {
-            this.markReminderEnabled(this.saved.reminder_enabled)
-        }
+        this.stage('reminder_enabled', enabled)
     }
 
     markReminderEnabled(enabled) {
@@ -384,7 +323,7 @@ class Settings extends TimeKeeper {
         this.intervalCustom.classList.toggle('flex', !isPreset)
     }
 
-    /** Wire a number input: debounced while typing, immediate on blur/Enter. */
+    /** Wire a valid number input into the current draft. */
     bindNumberField(input, key, onCommit) {
         const commit = () => {
             const value = this.readNumber(input)
@@ -394,16 +333,12 @@ class Settings extends TimeKeeper {
         }
 
         input.addEventListener('input', () => {
-            clearTimeout(this.pendingSaves.get(key))
-            this.pendingSaves.set(key, setTimeout(commit, TYPING_PAUSE_MS))
+            commit()
         })
 
         // `change` covers blur and the spinner arrows; Enter is explicit because
         // there's no form to submit.
-        input.addEventListener('change', () => {
-            clearTimeout(this.pendingSaves.get(key))
-            commit()
-        })
+        input.addEventListener('change', commit)
         input.addEventListener('keydown', (event) => {
             if (event.key === 'Enter') input.blur()
         })
@@ -411,7 +346,7 @@ class Settings extends TimeKeeper {
         // A field left empty or out of range would otherwise sit there looking
         // like a saved value. Snap it back to what's actually stored.
         input.addEventListener('blur', () => {
-            if (this.readNumber(input) === null) input.value = String(this.saved[key])
+            if (this.readNumber(input) === null) input.value = String(this.draft[key])
         })
     }
 
@@ -423,28 +358,10 @@ class Settings extends TimeKeeper {
         return value
     }
 
-    /** Persist one key, rolling the field back to the stored value on failure. */
-    async commit(key, value, input) {
-        if (this.saved[key] === value) return
-
-        try {
-            const saved = await this.save({ [key]: value })
-            this.saved[key] = saved[key]
-            // The server clamps and validates; show what it actually stored.
-            if (saved[key] !== value) {
-                input.value = String(saved[key])
-                if (input === this.intervalInput) this.markInterval(saved[key])
-                if (input === this.roundingIntervalInput) {
-                    this.markRoundingInterval(saved[key])
-                }
-            }
-        } catch (error) {
-            input.value = String(this.saved[key])
-            if (input === this.intervalInput) this.markInterval(this.saved[key])
-            if (input === this.roundingIntervalInput) {
-                this.markRoundingInterval(this.saved[key])
-            }
-        }
+    /** Stage one validated numeric value. */
+    commit(key, value) {
+        if (this.draft[key] === value) return
+        this.stage(key, value)
     }
 
     // -- dev tools ---------------------------------------------------------
@@ -534,15 +451,52 @@ class Settings extends TimeKeeper {
         })
     }
 
-    // -- persistence -------------------------------------------------------
+    // -- draft and persistence --------------------------------------------
 
-    /** PUT a partial settings object. Not retried — see fetchFromAPI. */
-    save(changes) {
-        return this.fetchFromAPI('/api/settings', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(changes),
-        })
+    stage(key, value) {
+        this.draft[key] = value
+        this.saveBar.setDirty(JSON.stringify(this.draft) !== JSON.stringify(this.saved))
+    }
+
+    applyState(state) {
+        applyTheme(state.theme)
+        this.markThemeSelected(state.theme)
+        applyTimeFormat(state.time_format)
+        this.markTimeFormatSelected(state.time_format)
+        this.markRoundingEnabled(state.rounding_enabled)
+        this.roundingIntervalInput.value = String(state.rounding_interval_minutes)
+        this.markRoundingInterval(state.rounding_interval_minutes)
+        this.markRoundingDirection(state.rounding_direction)
+        this.markReminderEnabled(state.reminder_enabled)
+        this.intervalInput.value = String(state.reminder_interval_minutes)
+        this.markInterval(state.reminder_interval_minutes)
+        this.snoozeInput.value = String(state.reminder_snooze_minutes)
+    }
+
+    cancelChanges() {
+        this.draft = { ...this.saved }
+        this.applyState(this.draft)
+        return true
+    }
+
+    async saveChanges() {
+        try {
+            const response = await this.fetchFromAPI('/api/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.draft),
+            })
+            const confirmed = Object.fromEntries(
+                Object.keys(this.saved).map((key) => [key, response[key]])
+            )
+            this.saved = confirmed
+            this.draft = { ...confirmed }
+            this.applyState(confirmed)
+            this.showToast('Settings saved.')
+            return true
+        } catch (error) {
+            return false
+        }
     }
 }
 

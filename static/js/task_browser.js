@@ -978,18 +978,29 @@ export class TaskBrowser extends TimeKeeper {
         }
 
         // Keep an eight-hour minimum for useful context, but expand and center
-        // the window around the day's actual tasks. The previous noon-centered
-        // window could completely hide early or late historical work.
+        // the window around the day's tasks and its start/close boundaries. A
+        // boundary must remain visible even when it falls before the first task
+        // or after the last one.
         const now = new Date();
         const today = this.getLocalDateString();
         const isSelectedDateToday = selectedDate === today;
         const minimumViewMinutes = 8 * 60;
+        const boundaryMinutes = [this.originalStartTime, this.originalEndTime]
+            .filter(Boolean)
+            .map(time => this.timeStringToMinutes(time));
+        const occupiedPoints = [
+            ...sortedTasks.flatMap(task => [
+                this.timeStringToMinutes(task.start_time),
+                this.timeStringToMinutes(task.end_time),
+            ]),
+            ...boundaryMinutes,
+        ];
         let viewStartMinutes;
         let viewEndMinutes;
 
-        if (sortedTasks.length > 0) {
-            const earliestStart = this.timeStringToMinutes(sortedTasks[0].start_time);
-            const latestEnd = Math.max(...sortedTasks.map(task => this.timeStringToMinutes(task.end_time)));
+        if (occupiedPoints.length > 0) {
+            const earliestStart = Math.min(...occupiedPoints);
+            const latestEnd = Math.max(...occupiedPoints);
             const occupiedMinutes = Math.max(1, latestEnd - earliestStart);
             const viewMinutes = Math.min(24 * 60 - 1, Math.max(minimumViewMinutes, occupiedMinutes + 60));
             const centerMinutes = (earliestStart + latestEnd) / 2;
@@ -1045,6 +1056,21 @@ export class TaskBrowser extends TimeKeeper {
             new vis.DataSet(items),
             options
         );
+
+        const addDayBoundary = (clockTime, id, label) => {
+            if (!clockTime) return;
+
+            const formattedTime = formatClockTime(clockTime);
+            timeline.addCustomTime(`${selectedDate}T${clockTime}`, id);
+            timeline.setCustomTimeTitle(`${label}: ${formattedTime}`, id);
+            timeline.setCustomTimeMarker(
+                `<span>${label}<strong>${formattedTime}</strong></span>`,
+                id
+            );
+        };
+
+        addDayBoundary(this.originalStartTime, 'tk-day-start', 'Start');
+        addDayBoundary(this.originalEndTime, 'tk-day-close', 'Close');
 
         this.timeline = timeline
         return timeline;

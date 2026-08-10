@@ -1,4 +1,5 @@
 import { TimeKeeper, ready } from './base.js'
+import { SaveChangesBar } from './save_changes.js'
 
 const MONTH_FORMAT = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' })
 const RANGE_FORMAT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
@@ -43,6 +44,9 @@ class WorkCalendar extends TimeKeeper {
         this.month = new Date(now.getFullYear(), now.getMonth(), 1)
         this.today = isoDate(now)
         this.settings = null
+        this.savedSettings = null
+        this.draft = null
+        this.loadIntent = 0
         this.days = new Map()
         this.selectionStart = null
         this.selectionEnd = null
@@ -67,7 +71,10 @@ class WorkCalendar extends TimeKeeper {
         this.saveButton = document.getElementById('calendar-save-override')
         this.rules = document.getElementById('calendar-rules')
         this.ruleCount = document.getElementById('calendar-rule-count')
-        this.defaultsStatus = document.getElementById('defaults-status')
+        this.saveBar = new SaveChangesBar({
+            onSave: () => this.saveChanges(),
+            onCancel: () => this.cancelChanges(),
+        })
     }
 
     async init() {
@@ -115,23 +122,47 @@ class WorkCalendar extends TimeKeeper {
         this.saveButton.addEventListener('click', () => this.saveOverride())
     }
 
-    async loadMonth() {
+    async loadMonth({ resetDraft = false } = {}) {
         const start = startOfCalendar(this.month)
         const end = endOfCalendar(this.month)
+        const intent = ++this.loadIntent
         this.monthTitle.textContent = MONTH_FORMAT.format(this.month)
 
         try {
-            const payload = await this.fetchFromAPI(
-                `/api/work-calendar?start=${isoDate(start)}&end=${isoDate(end)}`
-            )
+            const endpoint = `/api/work-calendar?start=${isoDate(start)}&end=${isoDate(end)}`
+            const payload = this.draft && !resetDraft
+                ? await this.fetchFromAPI(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.draft),
+                })
+                : await this.fetchFromAPI(endpoint)
+            if (intent !== this.loadIntent) return false
+
+            if (!this.savedSettings || resetDraft) {
+                this.savedSettings = this.settingsDraft(payload)
+                this.draft = structuredClone(this.savedSettings)
+                this.saveBar.setDirty(false)
+            }
             this.settings = payload
             this.days = new Map(payload.days.map((day) => [day.date, day]))
             this.renderMonthCapacity(payload.days)
             this.renderDefaults()
             this.renderCalendar(start, end)
             this.renderRules()
+            return true
         } catch (error) {
+            if (intent !== this.loadIntent) return false
             this.grid.innerHTML = '<div class="tk-empty col-span-7 py-12">Could not load the work calendar.</div>'
+            return false
+        }
+    }
+
+    settingsDraft(payload) {
+        return {
+            work_hours_per_day: payload.work_hours_per_day,
+            work_days: [...payload.work_days],
+            work_calendar_overrides: structuredClone(payload.overrides),
         }
     }
 
@@ -312,7 +343,7 @@ class WorkCalendar extends TimeKeeper {
             const end = this.selectionEnd || this.selectionStart
             this.selectionLabel.textContent = this.formatRange(this.selectionStart, end)
         }
-        this.saveButton.textContent = this.editingId ? 'Update override' : 'Save override'
+        this.saveButton.textContent = this.editingId ? 'Apply update' : 'Apply override'
         this.markEditorChoices()
     }
 
@@ -335,52 +366,35 @@ class WorkCalendar extends TimeKeeper {
             && this.statusChoice === 'default'
             && this.hoursChoice === 'default'
         this.saveButton.textContent = resetting
-            ? 'Reset to no override'
-            : this.editingId ? 'Update override' : 'Save override'
+            ? 'Apply reset'
+            : this.editingId ? 'Apply update' : 'Apply override'
     }
 
     async saveDailyHours() {
         const value = Number(this.dailyHours.value)
         if (!Number.isFinite(value) || value < 0.25 || value > 24) {
-            this.dailyHours.value = String(this.settings.work_hours_per_day)
+            this.dailyHours.value = String(this.draft.work_hours_per_day)
             this.showToast('Daily hours must be between 0.25 and 24.', 'error')
             return
         }
-        await this.saveSettings(
-            { work_hours_per_day: Math.round(value * 100) / 100 },
-            'Daily capacity saved from today.'
-        )
+        await this.stageSettings({ work_hours_per_day: Math.round(value * 100) / 100 })
     }
 
     async toggleWorkday(weekday) {
-        const next = this.settings.work_days.includes(weekday)
-            ? this.settings.work_days.filter((day) => day !== weekday)
-            : [...this.settings.work_days, weekday].sort((a, b) => a - b)
+        const next = this.draft.work_days.includes(weekday)
+            ? this.draft.work_days.filter((day) => day !== weekday)
+            : [...this.draft.work_days, weekday].sort((a, b) => a - b)
         if (!next.length) {
             this.showToast('Keep at least one usual workday.', 'warning')
             return
         }
-        await this.saveSettings({ work_days: next }, 'Usual workdays saved from today.')
+        await this.stageSettings({ work_days: next })
     }
 
-    async saveSettings(changes, message) {
-        this.defaultsStatus.textContent = 'Saving…'
-        try {
-            await this.fetchFromAPI('/api/settings', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(changes),
-            })
-            this.defaultsStatus.textContent = message
-            await this.loadMonth()
-            setTimeout(() => {
-                if (this.defaultsStatus.textContent === message) this.defaultsStatus.textContent = ''
-            }, 1800)
-            return true
-        } catch (error) {
-            this.defaultsStatus.textContent = ''
-            return false
-        }
+    async stageSettings(changes) {
+        this.draft = { ...this.draft, ...structuredClone(changes) }
+        this.updateDirtyState()
+        return this.loadMonth()
     }
 
     async saveOverride() {
@@ -407,18 +421,13 @@ class WorkCalendar extends TimeKeeper {
             reset_workday: resetWorkday,
             reset_hours: resetHours,
         }
-        const next = [...this.settings.overrides]
+        const next = structuredClone(this.draft.work_calendar_overrides)
         const index = next.findIndex((item) => item.id === rule.id)
         if (index === -1) next.push(rule)
         else next[index] = rule
 
         this.saveButton.disabled = true
-        const saved = await this.saveSettings(
-            { work_calendar_overrides: next },
-            resetWorkday && resetHours
-                ? 'Date reset to no override.'
-                : index === -1 ? 'Date override saved.' : 'Date override updated.'
-        )
+        const saved = await this.stageSettings({ work_calendar_overrides: next })
         this.saveButton.disabled = false
         if (saved) this.clearSelection()
     }
@@ -510,10 +519,43 @@ class WorkCalendar extends TimeKeeper {
         })
     }
 
+    updateDirtyState() {
+        const dirty = JSON.stringify(this.draft) !== JSON.stringify(this.savedSettings)
+        this.saveBar.setDirty(dirty)
+    }
+
+    async saveChanges() {
+        try {
+            const saved = await this.fetchFromAPI('/api/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.draft),
+            })
+            this.savedSettings = {
+                work_hours_per_day: saved.work_hours_per_day,
+                work_days: [...saved.work_days],
+                work_calendar_overrides: structuredClone(saved.work_calendar_overrides),
+            }
+            this.draft = structuredClone(this.savedSettings)
+            await this.loadMonth({ resetDraft: true })
+            this.showToast('Work calendar saved.')
+            return true
+        } catch (error) {
+            return false
+        }
+    }
+
+    async cancelChanges() {
+        this.draft = structuredClone(this.savedSettings)
+        const loaded = await this.loadMonth({ resetDraft: true })
+        if (loaded) this.clearSelection()
+        return loaded
+    }
+
     async removeRule(rule) {
         if (!window.confirm(`Remove the override for ${this.formatRange(rule.start_date, rule.end_date)}?`)) return
-        const next = this.settings.overrides.filter((item) => item.id !== rule.id)
-        const saved = await this.saveSettings({ work_calendar_overrides: next }, 'Date override removed.')
+        const next = this.draft.work_calendar_overrides.filter((item) => item.id !== rule.id)
+        const saved = await this.stageSettings({ work_calendar_overrides: next })
         if (saved && this.editingId === rule.id) this.clearSelection()
     }
 

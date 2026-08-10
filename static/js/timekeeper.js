@@ -75,6 +75,10 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.currentTimeButton = document.getElementById('current-time-button');
         this.taskStartTimeDisplay = document.getElementById('task-start-time');
         this.taskStartTimeValue = document.getElementById('task-start-time-value');
+        this.taskDurationPreview = document.getElementById('task-duration-preview');
+        this.taskRoundedDuration = document.getElementById('task-rounded-duration');
+        this.taskRoundedDurationValue = document.getElementById('task-rounded-duration-value');
+        this.taskActualDurationValue = document.getElementById('task-actual-duration-value');
         this.recentTaskEndTime = document.getElementById('recent-task-end-time');
         this.recentTaskTimeValue = document.getElementById('recent-task-time-value');
 
@@ -175,11 +179,11 @@ export class TimeKeeperIndex extends TimeKeeper {
             this.roundingEnabled = total.rounding_enabled;
             this.roundingIntervalMinutes = total.rounding_interval_minutes;
             this.roundingDirection = total.rounding_direction;
+            this.renderTaskDurationPreview();
 
             this.renderClientDayTotal(
                 total.tracked_minutes,
-                total.client_name || this.currentTaskClient,
-                total.rounded_hours
+                total.client_name || this.currentTaskClient
             );
         } catch (error) {
             // Leave the last known figure up rather than blanking it: a stale
@@ -189,7 +193,7 @@ export class TimeKeeperIndex extends TimeKeeper {
     }
 
 
-    renderClientDayTotal(minutes, name = null, roundedHours = null) {
+    renderClientDayTotal(minutes, name = null) {
         const element = this.clientDayTotal;
         if (!element) return;
 
@@ -200,8 +204,10 @@ export class TimeKeeperIndex extends TimeKeeper {
             return;
         }
 
-        const fractionalHours = roundedHours ?? this.totalTimeSpentToFractionalHours(minutes);
-        const difference = Math.round(fractionalHours * 60 - minutes);
+        // Calculate from the policy snapshot adopted immediately before this
+        // render, so enabled/interval/direction settings always control the
+        // header rather than a separately formatted value.
+        const fractionalHours = this.totalTimeSpentToFractionalHours(minutes);
 
         // inline-block + truncate: a long client name would otherwise push the
         // figure out of the header, and the figure is the point.
@@ -210,11 +216,90 @@ export class TimeKeeperIndex extends TimeKeeper {
               + '<span class="font-normal text-faint"> · </span>'
             : '';
 
-        element.innerHTML = label + this.formatTimeWithDifference(fractionalHours, minutes, difference);
-        element.title = this.roundingEnabled
-            ? `${name || 'This client'} — rounded · tracked · rounding difference, today`
-            : `${name || 'This client'} — tracked time today`;
+        element.innerHTML = label + this.formatClientDayTotal(fractionalHours, minutes);
+        if (this.roundingEnabled) {
+            const directionLabel = this.roundingDirection === 'nearest'
+                ? 'to the nearest'
+                : `${this.roundingDirection} to`;
+            element.title = `${name || 'This client'} — rounded ${directionLabel} `
+                + `${this.roundingIntervalMinutes} minutes, today`;
+        } else {
+            element.title = `${name || 'This client'} — tracked time today`;
+        }
         element.classList.remove('hidden');
+    }
+
+
+    /** Client header format: rounded decimal hours plus the rounding adjustment. */
+    formatClientDayTotal(fractionalHours, totalMinutes) {
+        if (!this.roundingEnabled) {
+            return this.formatDurationMinutes(totalMinutes);
+        }
+
+        const difference = Math.round(fractionalHours * 60 - totalMinutes);
+        const colorClass = difference > 0 ? 'text-success' : 'text-danger';
+        const diffDisplay = difference !== 0
+            ? `<span class="${colorClass} ml-1 text-xs font-medium">`
+                + `${difference > 0 ? '+' : '−'}${Math.abs(difference)}m</span>`
+            : '';
+
+        return `${this.formatDecimalHours(fractionalHours)}`
+            + `<span class="text-faint font-normal"> hrs</span>${diffDisplay}`;
+    }
+
+
+    /** Preview the active task's duration using its start and entered end time. */
+    renderTaskDurationPreview() {
+        const hide = () => {
+            this.taskDurationPreview?.classList.add('hidden');
+            if (this.taskActualDurationValue) this.taskActualDurationValue.textContent = '';
+            if (this.taskRoundedDurationValue) this.taskRoundedDurationValue.textContent = '';
+        };
+
+        if (
+            !this.taskDurationPreview ||
+            !this.taskRoundedDuration ||
+            !this.taskRoundedDurationValue ||
+            !this.taskActualDurationValue ||
+            this.uiState !== 'taskInProgress' ||
+            !this.runningTaskStartTime ||
+            !this.timePicker.value.trim()
+        ) {
+            hide();
+            return;
+        }
+
+        try {
+            const startSeconds = clockTimeToSeconds(this.runningTaskStartTime);
+            const endSeconds = clockTimeToSeconds(this.timePicker.value);
+            if (endSeconds < startSeconds) {
+                hide();
+                return;
+            }
+
+            const actualMinutes = Math.floor((endSeconds - startSeconds) / 60);
+            this.taskActualDurationValue.textContent = this.formatDurationMinutes(actualMinutes);
+
+            this.taskRoundedDuration.classList.toggle('hidden', !this.roundingEnabled);
+            if (this.roundingEnabled) {
+                const roundedHours = this.totalTimeSpentToFractionalHours(actualMinutes);
+                const roundedMinutes = Math.round(roundedHours * 60);
+                this.taskRoundedDurationValue.textContent =
+                    this.formatDurationMinutes(roundedMinutes);
+                const directionLabel = this.roundingDirection === 'nearest'
+                    ? 'to the nearest'
+                    : `${this.roundingDirection} to`;
+                this.taskRoundedDuration.title =
+                    `Rounded ${directionLabel} ${this.roundingIntervalMinutes} minutes`;
+            } else {
+                this.taskRoundedDurationValue.textContent = '';
+                this.taskRoundedDuration.removeAttribute('title');
+            }
+
+            this.taskDurationPreview.classList.remove('hidden');
+        } catch {
+            hide();
+        }
     }
 
 
@@ -888,6 +973,7 @@ export class TimeKeeperIndex extends TimeKeeper {
      */
     syncContextualActions() {
         if (!this.uiState) return;
+        this.renderTaskDurationPreview();
 
         const contextualButtons = [
             this.startDayButton,
