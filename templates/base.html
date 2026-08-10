@@ -52,6 +52,7 @@
   </head>
 
   <body class="min-h-full">
+    {% include 'titlebar.html' %}
     {% include 'navbar.html' %}
 
     <main>
@@ -65,6 +66,7 @@
     <script src="{{ url_for('static', filename='vendor/flatpickr/flatpickr.min.js') }}"></script>
     <script src="{{ url_for('static', filename='vendor/choices/choices.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/base.js') }}" type="module"></script>
+    <script src="{{ url_for('static', filename='js/window_chrome.js') }}" type="module"></script>
     <script src="{{ url_for('static', filename='js/theme.js') }}" type="module"></script>
 
     {% block page_scripts %}

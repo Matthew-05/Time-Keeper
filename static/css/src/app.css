@@ -53,9 +53,11 @@
 :root {
   color-scheme: light;
 
-  /* Fixed navbar height — referenced by .tk-nav and .tk-page's top padding
-     so the two can never drift apart. */
+  /* Fixed desktop chrome heights — shared by the two bars and page padding so
+     the shell can never overlap its content. */
+  --titlebar-h: 2.25rem;
   --nav-h: 3.25rem;
+  --chrome-h: calc(var(--titlebar-h) + var(--nav-h));
 
   /* Surfaces, from furthest back to closest */
   --bg: #f6f7f9;
@@ -70,7 +72,7 @@
   /* Type */
   --text: #0f172a;
   --muted: #59626f;
-  --faint: #949dab;
+  --faint: #5f6977;
 
   /* Accent */
   --accent: #3057e3;
@@ -79,17 +81,21 @@
   --accent-soft: #e9eefc;
   --accent-text: #2444c2;
 
-  /* Input fill for fields that sit on a --surface-2 panel rather than on a
-     card. --surface-2 on --surface-2 is invisible, so those fields need a
-     value that reads as raised in both themes. */
-  --field: #ffffff;
-  --field-focus: #ffffff;
+  /* Interactive surfaces stay legible even when nested in a card or panel.
+     Fill, boundary and hover are paired so components do not have to guess
+     which surrounding surface they happen to sit on. */
+  --control-fill: #ffffff;
+  --control-border: #7a8493;
+  --control-hover: #eef1f5;
+  --field: var(--control-fill);
+  --field-focus: var(--control-fill);
 
   /* Status */
-  --success: #12855a;
+  --success: #11724f;
   --success-soft: #e4f5ec;
   --danger: #c9372c;
   --danger-soft: #fceceb;
+  --danger-fg: #ffffff;
   --warn: #a15c07;
   --warn-soft: #fbf0dd;
 
@@ -120,7 +126,7 @@
 
   --text: #e8eaee;
   --muted: #99a2b0;
-  --faint: #6b7482;
+  --faint: #a1aab8;
 
   --accent: #6d8dff;
   --accent-hover: #8ba6ff;
@@ -128,9 +134,10 @@
   --accent-soft: #1a2340;
   --accent-text: #9db3ff;
 
-  /* Deliberately clear of both --surface and --surface-2, which sit within a
-     few shades of each other down here. */
-  --field: #2a2e37;
+  --control-fill: #2a2e37;
+  --control-border: #7b8797;
+  --control-hover: #333846;
+  --field: var(--control-fill);
   --field-focus: #333846;
 
   /* Darkening a dark UI reads as "disabled", not "hovered" — lighten. */
@@ -140,6 +147,7 @@
   --success-soft: #12291f;
   --danger: #f07a72;
   --danger-soft: #2e1a19;
+  --danger-fg: #0b0e14;
   --warn: #e5a44b;
   --warn-soft: #2c2415;
 
@@ -193,6 +201,8 @@
   }
 
   html {
+    height: 100%;
+    overflow: hidden;
     -webkit-text-size-adjust: 100%;
   }
 
@@ -201,8 +211,21 @@
     color: var(--text);
     font-family: var(--font-sans);
     font-feature-settings: 'cv05' 1, 'ss03' 1;
+    height: 100%;
     -webkit-font-smoothing: antialiased;
+    overflow: hidden;
     text-rendering: optimizeLegibility;
+  }
+
+  main {
+    bottom: 0;
+    left: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    position: fixed;
+    right: 0;
+    scrollbar-gutter: stable;
+    top: var(--chrome-h);
   }
 
   /* Anything that shows a clock reading, duration or count lines up in a
@@ -262,7 +285,7 @@
   /* ---- Layout ---- */
 
   .tk-page {
-    @apply mx-auto w-full max-w-[1400px] px-5 pb-16 pt-[calc(var(--nav-h)+1.75rem)] sm:px-8;
+    @apply mx-auto w-full max-w-[1400px] px-5 pb-16 pt-7 sm:px-8;
   }
 
   .tk-page-narrow {
@@ -310,8 +333,8 @@
 
   .tk-input,
   .tk-select {
-    background-color: var(--surface-2);
-    border: 1px solid var(--border);
+    background-color: var(--control-fill);
+    border: 1px solid var(--control-border);
     border-radius: 8px;
     color: var(--text);
     font-size: 0.9375rem;
@@ -327,9 +350,9 @@
     color: var(--faint);
   }
 
-  .tk-input:hover:not(:focus),
-  .tk-select:hover:not(:focus) {
-    border-color: var(--border-strong);
+  .tk-input:hover:not(:focus):not(:disabled),
+  .tk-select:hover:not(:focus):not(:disabled) {
+    background-color: var(--control-hover);
   }
 
   .tk-input:focus,
@@ -416,14 +439,13 @@
 
   /* Neutral default: a bordered surface button. The workhorse. */
   .tk-btn-secondary {
-    background-color: var(--surface);
-    border-color: var(--border);
+    background-color: var(--control-fill);
+    border-color: var(--control-border);
     color: var(--text);
   }
 
   .tk-btn-secondary:hover:not(:disabled) {
-    background-color: var(--surface-2);
-    border-color: var(--border-strong);
+    background-color: var(--control-hover);
   }
 
   .tk-btn-ghost {
@@ -472,7 +494,7 @@
   .tk-btn-danger-armed {
     background-color: var(--danger);
     border-color: var(--danger);
-    color: #fff;
+    color: var(--danger-fg);
     font-weight: 600;
   }
 
@@ -500,8 +522,8 @@
 
   .tk-btn-icon {
     align-items: center;
-    background-color: transparent;
-    border: 1px solid var(--border);
+    background-color: var(--control-fill);
+    border: 1px solid var(--control-border);
     border-radius: 8px;
     color: var(--muted);
     cursor: pointer;
@@ -516,18 +538,22 @@
     width: 2.25rem;
   }
 
-  .tk-btn-icon:hover {
-    background-color: var(--surface-2);
-    border-color: var(--border-strong);
+  .tk-btn-icon:hover:not(:disabled) {
+    background-color: var(--control-hover);
     color: var(--text);
+  }
+
+  .tk-btn-icon:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 
   /* For an icon button that navigates somewhere — marks the current page,
      matching how .tk-nav-link-active reads in the same bar. */
   .tk-btn-icon.is-active {
-    background-color: var(--surface-2);
-    border-color: var(--border-strong);
-    color: var(--text);
+    background-color: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-text);
   }
 
   .tk-btn-icon svg {
@@ -759,8 +785,8 @@
      it sits on the card *and* inside --surface-2 detail rows; --surface-2
      would make it disappear against the latter. */
   .tk-time-input {
-    background-color: var(--field);
-    border: 1px solid var(--border);
+    background-color: var(--control-fill);
+    border: 1px solid var(--control-border);
     border-radius: 6px;
     color: var(--text);
     cursor: pointer;
@@ -775,8 +801,8 @@
     width: 6.5rem;
   }
 
-  .tk-time-input:hover {
-    border-color: var(--border-strong);
+  .tk-time-input:hover:not(:disabled) {
+    background-color: var(--control-hover);
   }
 
   .tk-time-input:focus {
@@ -1020,8 +1046,7 @@
   /* Applied to <html> while a modal is open (see lockBodyScroll in base.js)
      so the page behind the backdrop can't be scrolled by wheel/touch/keyboard
      while it's covered. */
-  html.tk-scroll-locked,
-  html.tk-scroll-locked body {
+  html.tk-scroll-locked main {
     overflow: hidden;
   }
 
@@ -1143,6 +1168,198 @@
     }
   }
 
+  /* ---- Desktop window chrome ---- */
+
+  .tk-titlebar {
+    background-color: color-mix(in srgb, var(--surface-2) 92%, var(--bg));
+    border-bottom: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: 8.625rem minmax(0, 1fr) 8.625rem;
+    height: var(--titlebar-h);
+    left: 0;
+    position: fixed;
+    right: 0;
+    top: 0;
+    user-select: none;
+    z-index: 50;
+  }
+
+  .tk-titlebar-brand,
+  .tk-titlebar-title {
+    align-items: center;
+    display: flex;
+    min-width: 0;
+  }
+
+  .tk-titlebar-brand {
+    color: var(--muted);
+    gap: 0.4375rem;
+    padding-left: 0.75rem;
+  }
+
+  .tk-titlebar-brand svg {
+    color: var(--accent);
+    flex: 0 0 auto;
+    height: 0.9375rem;
+    width: 0.9375rem;
+  }
+
+  .tk-titlebar-brand-name {
+    color: var(--text);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .tk-titlebar-title {
+    color: var(--muted);
+    font-size: 0.75rem;
+    justify-content: center;
+    overflow: hidden;
+    padding-inline: 1rem;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tk-window-controls {
+    display: flex;
+    height: 100%;
+    justify-self: end;
+  }
+
+  .tk-window-control {
+    align-items: center;
+    color: var(--muted);
+    cursor: default;
+    display: flex;
+    height: 100%;
+    justify-content: center;
+    transition: background-color 100ms ease, color 100ms ease;
+    width: 2.875rem;
+  }
+
+  .tk-window-control:disabled {
+    opacity: 0.45;
+  }
+
+  .tk-window-control:not(:disabled):hover {
+    background-color: var(--surface-3);
+    color: var(--text);
+  }
+
+  .tk-window-control:not(:disabled):active {
+    background-color: var(--border-strong);
+  }
+
+  .tk-window-control-close:not(:disabled):hover,
+  .tk-window-control-close:not(:disabled):active {
+    background-color: #c42b1c;
+    color: #ffffff;
+  }
+
+  .tk-window-control svg {
+    height: 0.75rem;
+    pointer-events: none;
+    width: 0.75rem;
+  }
+
+  .tk-window-restore-icon,
+  .tk-titlebar.is-maximized .tk-window-maximize-icon {
+    display: none;
+  }
+
+  .tk-titlebar.is-maximized .tk-window-restore-icon {
+    display: block;
+  }
+
+  .tk-resize-handle {
+    pointer-events: none;
+    position: fixed;
+    touch-action: none;
+    z-index: 60;
+  }
+
+  .pywebview-ready .tk-resize-handle {
+    pointer-events: auto;
+  }
+
+  .tk-window-maximized .tk-resize-handle {
+    display: none;
+  }
+
+  .tk-window-resizing,
+  .tk-window-resizing * {
+    user-select: none !important;
+  }
+
+  .tk-resize-handle-n,
+  .tk-resize-handle-s {
+    height: 10px;
+    left: 10px;
+    right: 10px;
+  }
+
+  .tk-resize-handle-n {
+    cursor: ns-resize;
+    top: -5px;
+  }
+
+  .tk-resize-handle-s {
+    bottom: -5px;
+    cursor: ns-resize;
+  }
+
+  .tk-resize-handle-e,
+  .tk-resize-handle-w {
+    bottom: 10px;
+    top: 10px;
+    width: 10px;
+  }
+
+  .tk-resize-handle-e {
+    cursor: ew-resize;
+    right: -5px;
+  }
+
+  .tk-resize-handle-w {
+    cursor: ew-resize;
+    left: -5px;
+  }
+
+  .tk-resize-handle-ne,
+  .tk-resize-handle-se,
+  .tk-resize-handle-sw,
+  .tk-resize-handle-nw {
+    height: 12px;
+    width: 12px;
+    z-index: 61;
+  }
+
+  .tk-resize-handle-ne {
+    cursor: nesw-resize;
+    right: -6px;
+    top: -6px;
+  }
+
+  .tk-resize-handle-se {
+    bottom: -6px;
+    cursor: nwse-resize;
+    right: -6px;
+  }
+
+  .tk-resize-handle-sw {
+    bottom: -6px;
+    cursor: nesw-resize;
+    left: -6px;
+  }
+
+  .tk-resize-handle-nw {
+    cursor: nwse-resize;
+    left: -6px;
+    top: -6px;
+  }
+
   /* ---- Navbar ---- */
 
   .tk-nav {
@@ -1153,7 +1370,7 @@
     left: 0;
     position: fixed;
     right: 0;
-    top: 0;
+    top: var(--titlebar-h);
     z-index: 40;
   }
 
@@ -1180,8 +1397,8 @@
 
   .tk-segmented {
     @apply inline-flex gap-0.5 rounded-lg p-0.5;
-    background-color: var(--surface-2);
-    border: 1px solid var(--border);
+    background-color: var(--control-fill);
+    border: 1px solid var(--control-border);
   }
 
   .tk-segment {
@@ -1190,14 +1407,20 @@
     color: var(--muted);
   }
 
-  .tk-segment:hover {
+  .tk-segment:hover:not(:disabled) {
+    background-color: var(--control-hover);
     color: var(--text);
   }
 
   .tk-segment.active {
-    background-color: var(--surface);
-    box-shadow: var(--shadow-sm);
-    color: var(--text);
+    background-color: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px var(--accent), var(--shadow-sm);
+    color: var(--accent-text);
+  }
+
+  .tk-segment:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 
   /* ---- Switch ----
@@ -1484,11 +1707,12 @@
 
   .tk-day-toggle {
     @apply min-w-12 cursor-pointer rounded-lg border border-border px-3 py-2 text-sm font-medium text-muted transition-colors;
-    background-color: var(--surface-2);
+    background-color: var(--control-fill);
+    border-color: var(--control-border);
   }
 
-  .tk-day-toggle:hover {
-    border-color: var(--border-strong);
+  .tk-day-toggle:hover:not(:disabled) {
+    background-color: var(--control-hover);
     color: var(--text);
   }
 
@@ -1496,6 +1720,11 @@
     background-color: var(--accent-soft);
     border-color: var(--accent);
     color: var(--accent-text);
+  }
+
+  .tk-day-toggle:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 
   .tk-work-calendar-weekdays,
@@ -1526,10 +1755,16 @@
       color 0.12s ease;
   }
 
-  .tk-work-calendar-weekdays button:hover,
+  .tk-work-calendar-weekdays button:hover {
+    background-color: var(--control-hover);
+    border-color: var(--control-border);
+    color: var(--text);
+  }
+
   .tk-work-calendar-weekdays button:focus-visible {
-    background-color: var(--surface-2);
-    border-color: var(--border);
+    background-color: var(--control-hover);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--ring);
     color: var(--text);
     outline: none;
   }
@@ -1546,8 +1781,8 @@
 
   .tk-work-calendar-day {
     align-items: flex-start;
-    background-color: var(--surface);
-    border: 1px solid var(--border);
+    background-color: var(--control-fill);
+    border: 1px solid var(--control-border);
     border-radius: 9px;
     color: var(--text);
     cursor: pointer;
@@ -1564,9 +1799,14 @@
       box-shadow 0.12s ease;
   }
 
-  .tk-work-calendar-day:hover,
+  .tk-work-calendar-day:hover {
+    background-color: var(--control-hover);
+    border-color: var(--accent);
+  }
+
   .tk-work-calendar-day:focus-visible {
     border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--ring);
     outline: none;
   }
 
@@ -1858,14 +2098,22 @@ span.flatpickr-weekday {
 }
 
 .flatpickr-day {
+  background: var(--control-fill);
+  border-color: var(--control-border);
   border-radius: 7px;
   color: var(--text);
 }
 
-.flatpickr-day:hover,
-.flatpickr-day:focus {
-  background: var(--surface-2);
-  border-color: transparent;
+.flatpickr-day:hover {
+  background: var(--control-hover);
+  border-color: var(--control-border);
+}
+
+.flatpickr-day:focus-visible {
+  background: var(--control-hover);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+  outline: none;
 }
 
 .flatpickr-day.today {
@@ -1893,6 +2141,8 @@ span.flatpickr-weekday {
 .flatpickr-day.flatpickr-disabled,
 .flatpickr-day.prevMonthDay,
 .flatpickr-day.nextMonthDay {
+  background: transparent;
+  border-color: transparent;
   color: var(--faint);
 }
 
@@ -1992,7 +2242,7 @@ span.flatpickr-weekday {
 .vis-item {
   border: none !important;
   border-radius: 6px !important;
-  color: #fff;
+  color: var(--text);
   font-size: 0.75rem;
   font-weight: 500;
 }
@@ -2013,4 +2263,16 @@ span.flatpickr-weekday {
   color: var(--text) !important;
   font-family: var(--font-sans) !important;
   font-size: 0.8125rem !important;
+}
+
+/* Preserve ordinary state transitions while removing the five audited
+   keyframe effects for people who request reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .tk-dot-pulse,
+  .tk-editable.is-invalid,
+  .tk-row-new > td,
+  .tk-spinner,
+  .tk-skeleton {
+    animation: none;
+  }
 }

@@ -1,4 +1,4 @@
-import { TimeKeeper, ready, clientColor, lockBodyScroll, unlockBodyScroll } from './base.js';
+import { TimeKeeper, ready, clientColor, clientForeground, lockBodyScroll, unlockBodyScroll } from './base.js';
 import { WorksList, fetchWorks, joinWorks } from './works.js';
 import {
     clockTimeToDate,
@@ -924,15 +924,15 @@ export class TaskBrowser extends TimeKeeper {
         // which meant the colours disagreed between the two pages and ignored
         // the theme entirely.
         //
-        // Only background-color is set inline: border-radius and padding are
-        // owned by .vis-item / .vis-item-content in app.css, and setting them
-        // here either lost to an !important or double-padded the content.
+        // Generated background and foreground colours stay paired inline.
+        // Border-radius and padding remain owned by .vis-item /
+        // .vis-item-content in app.css.
         const items = tasks.map(task => ({
             id: task.id,
             content: task.client_name,
             start: `${selectedDate}T${task.start_time}`,
             end: task.end_time ? `${selectedDate}T${task.end_time}` : undefined,
-            style: `background-color: ${clientColor(task.client_name)};`
+            style: `background-color: ${clientColor(task.client_name)}; color: ${clientForeground(task.client_name)};`
         }));
 
         // Calculate a view centered on the current time

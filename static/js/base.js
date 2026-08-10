@@ -112,9 +112,9 @@ export function unlockBodyScroll() {
  * different colour on each page. Hashing the name makes it agree everywhere and
  * survive a client being added or removed.
  *
- * Saturation and lightness are fixed rather than tokenised: these are
- * categorical chips with white text baked in, and they have to stay legible in
- * both themes without re-rendering on `themeChanged`.
+ * Saturation and lightness are fixed rather than tokenised: these categorical
+ * chips use clientForeground() to stay legible in both themes without
+ * re-rendering on `themeChanged`.
  */
 export function clientColor(name) {
     const key = String(name ?? '');
@@ -123,6 +123,39 @@ export function clientColor(name) {
         hash = (Math.imul(hash, 31) + key.charCodeAt(i)) | 0;
     }
     return `hsl(${Math.abs(hash) % 360}, 62%, 58%)`;
+}
+
+/**
+ * Readable foreground paired with clientColor(). The generated background has
+ * fixed saturation/lightness, so deriving its RGB luminance from the same
+ * stable hue lets History choose the stronger of a light or dark label without
+ * depending on the current theme.
+ */
+export function clientForeground(name) {
+    const match = clientColor(name).match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+    const hue = Number(match[1]) / 360;
+    const saturation = Number(match[2]) / 100;
+    const lightness = Number(match[3]) / 100;
+    const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+    const section = hue * 6;
+    const x = chroma * (1 - Math.abs(section % 2 - 1));
+    const channels = section < 1 ? [chroma, x, 0]
+        : section < 2 ? [x, chroma, 0]
+            : section < 3 ? [0, chroma, x]
+                : section < 4 ? [0, x, chroma]
+                    : section < 5 ? [x, 0, chroma]
+                        : [chroma, 0, x];
+    const offset = lightness - chroma / 2;
+    const luminance = channels
+        .map((channel) => channel + offset)
+        .map((channel) => channel <= 0.04045
+            ? channel / 12.92
+            : ((channel + 0.055) / 1.055) ** 2.4)
+        .reduce((total, channel, index) => total + channel * [0.2126, 0.7152, 0.0722][index], 0);
+
+    const darkContrast = (luminance + 0.05) / 0.05;
+    const lightContrast = 1.05 / (luminance + 0.05);
+    return darkContrast >= lightContrast ? '#000000' : '#ffffff';
 }
 
 /** Human-readable logged duration with both units and correct plurals. */

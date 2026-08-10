@@ -22,9 +22,9 @@
     </div>
 
     <div class="mb-4">
-      <div class="tk-segmented">
-        <button class="tk-segment active" data-tab="client">By client</button>
-        <button class="tk-segment" data-tab="daily">By day</button>
+      <div class="tk-segmented" role="tablist" aria-label="Summary view">
+        <button type="button" id="client-tab-button" class="tk-segment active" role="tab" aria-selected="true" aria-controls="client-tab" tabindex="0" data-tab="client">By client</button>
+        <button type="button" id="daily-tab-button" class="tk-segment" role="tab" aria-selected="false" aria-controls="daily-tab" tabindex="-1" data-tab="daily">By day</button>
       </div>
     </div>
 
@@ -45,13 +45,13 @@
       </div>
 
       <div class="p-4">
-        <div class="tab-content" id="client-tab">
+        <div class="tab-content" id="client-tab" role="tabpanel" aria-labelledby="client-tab-button">
           <div class="h-[60vh] min-h-[320px]">
             <canvas id="timeChart"></canvas>
           </div>
         </div>
 
-        <div class="tab-content hidden" id="daily-tab">
+        <div class="tab-content hidden" id="daily-tab" role="tabpanel" aria-labelledby="daily-tab-button" hidden>
           <div class="h-[60vh] min-h-[320px]">
             <canvas id="dailyTimeChart"></canvas>
           </div>
@@ -322,12 +322,31 @@
 
       document.querySelectorAll('.tk-segment').forEach((button) => {
         button.addEventListener('click', () => {
-          document.querySelectorAll('.tk-segment').forEach((b) => b.classList.remove('active'))
-          document.querySelectorAll('.tab-content').forEach((c) => c.classList.add('hidden'))
+          document.querySelectorAll('.tk-segment').forEach((b) => {
+            const selected = b === button
+            b.classList.toggle('active', selected)
+            b.setAttribute('aria-selected', selected ? 'true' : 'false')
+            b.tabIndex = selected ? 0 : -1
+          })
+          document.querySelectorAll('.tab-content').forEach((panel) => {
+            const selected = panel.id === `${button.dataset.tab}-tab`
+            panel.classList.toggle('hidden', !selected)
+            panel.hidden = !selected
+          })
 
-          button.classList.add('active')
-          document.getElementById(`${button.dataset.tab}-tab`).classList.remove('hidden')
+          button.focus()
         })
+      })
+
+      document.querySelector('[role="tablist"]').addEventListener('keydown', (event) => {
+        if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return
+        const tabs = [...document.querySelectorAll('.tk-segment[role="tab"]')]
+        const current = tabs.indexOf(document.activeElement)
+        const next = event.key === 'Home' ? tabs[0]
+          : event.key === 'End' ? tabs.at(-1)
+            : tabs[(current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length]
+        event.preventDefault()
+        next.click()
       })
 
       // Default range: Monday–Friday of the current week.

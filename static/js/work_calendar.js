@@ -501,7 +501,9 @@ class WorkCalendar extends TimeKeeper {
         this.hoursChoice = rule.hours_per_day === null ? 'default' : 'custom'
         if (rule.hours_per_day !== null) this.customHours.value = String(rule.hours_per_day)
         this.updateSelectionEditor()
-        this.loadMonth().then(() => window.scrollTo({ top: 0, behavior: 'smooth' }))
+        this.loadMonth().then(() => {
+            document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' })
+        })
     }
 
     async removeRule(rule) {

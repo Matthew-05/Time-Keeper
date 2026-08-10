@@ -1,14 +1,6 @@
 <nav class="tk-nav">
   <div class="mx-auto flex h-full max-w-[1400px] items-center justify-between gap-4 px-5 sm:px-8">
-    <div class="flex min-w-0 items-center gap-6">
-      <a href="/" class="flex flex-shrink-0 items-center gap-2 text-[0.9375rem] font-semibold tracking-[-0.01em] text-text">
-        <svg class="h-[1.125rem] w-[1.125rem] text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 7v5l3 2" />
-        </svg>
-        TimeKeeper
-      </a>
-
+    <div class="flex min-w-0 items-center">
       <div class="flex items-center gap-0.5">
         <a href="/" class="tk-nav-link" data-nav-page="home">Today</a>
         <a href="/task_browser" class="tk-nav-link" data-nav-page="tasks">History</a>
@@ -33,6 +25,7 @@
         class="tk-btn-icon{% if request.path in ['/settings', '/work-calendar'] %} is-active{% endif %}"
         title="Settings"
         aria-label="Settings"
+        {% if request.path in ['/settings', '/work-calendar'] %}aria-current="page"{% endif %}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3" />
@@ -63,8 +56,10 @@
         const href = a.getAttribute('href').replace(/\/$/, '') || '/'
         if (path === href || (href !== '/' && path.indexOf(href) === 0)) {
           a.classList.add('tk-nav-link-active')
+          a.setAttribute('aria-current', 'page')
         } else {
           a.classList.remove('tk-nav-link-active')
+          a.removeAttribute('aria-current')
         }
       })
     })()

@@ -66,6 +66,7 @@ from flask_admin import Admin
 from flask_admin.contrib.sqla import ModelView
 from flask_admin.theme import Bootstrap4Theme
 import webview
+from webview.window import FixPoint
 from werkzeug.serving import run_simple
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from sqlalchemy import func, String, literal, case
@@ -2440,15 +2441,27 @@ def start_server():
 
 def create_window():
     logger.debug(f"Creating window with URL: http://127.0.0.1:{app_port}")
-    
+    window_api = WebviewAPI()
+
     window = webview.create_window(
-        'Time Tracker',
+        'Time Keeper',
         f'http://127.0.0.1:{app_port}',
-        width=1200,
-        height=800,
+        js_api=window_api,
+        width=1400,
+        height=850,
         resizable=True,
-        min_size=(800, 650)
+        min_size=(800, 650),
+        frameless=True,
+        easy_drag=False,
+        shadow=True,
+        background_color=(
+            '#0c0e12'
+            if user_settings.get_setting('theme') == 'dark'
+            else '#f6f7f9'
+        ),
     )
+    window.events.maximized += window_api._handle_maximized
+    window.events.restored += window_api._handle_restored
     return window
 
 
@@ -2518,8 +2531,59 @@ def start_webview():
 
 
 class WebviewAPI:
+    def __init__(self):
+        self._maximized = False
+
     def navigate(self, url):
         webview.windows[0].evaluate_js(f'window.location.href = "{url}"')
+
+    def minimize(self):
+        webview.windows[0].minimize()
+
+    def toggle_maximize(self):
+        window = webview.windows[0]
+        if self._maximized:
+            window.restore()
+        else:
+            window.maximize()
+
+        self._maximized = not self._maximized
+        return self._maximized
+
+    def resize_window(self, width, height, direction):
+        """Resize from a custom frame edge while anchoring its opposite side."""
+        direction = str(direction).lower()
+        if direction not in {'n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'}:
+            raise ValueError('Unknown resize direction')
+
+        width = max(800, int(round(width)))
+        height = max(650, int(round(height)))
+        horizontal_anchor = FixPoint.EAST if 'w' in direction else FixPoint.WEST
+        vertical_anchor = FixPoint.SOUTH if 'n' in direction else FixPoint.NORTH
+        webview.windows[0].resize(
+            width,
+            height,
+            horizontal_anchor | vertical_anchor,
+        )
+
+    def _sync_maximized(self, maximized):
+        self._maximized = maximized
+        if not webview.windows:
+            return
+
+        javascript_value = 'true' if maximized else 'false'
+        webview.windows[0].evaluate_js(
+            f'window.timeKeeperWindowChrome?.setMaximized({javascript_value})'
+        )
+
+    def _handle_maximized(self):
+        self._sync_maximized(True)
+
+    def _handle_restored(self):
+        self._sync_maximized(False)
+
+    def close(self):
+        webview.windows[0].destroy()
 
 
 def _format_admin_clock(_view, _context, model, column_name):
