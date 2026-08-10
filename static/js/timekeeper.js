@@ -20,8 +20,8 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.currentTaskClient = null;
         this.currentTaskClientId = null;
 
-        // A quarter-hour figure can only change on a minute boundary, so this
-        // is the coarsest tick that never shows a stale number. Set up in the
+        // The displayed figure changes on minute boundaries, so this is the
+        // coarsest tick that never shows a stale number. Set up in the
         // constructor rather than init(), which the page retries on failure
         // and would otherwise stack a second interval on top of the first.
         this.clientDayTotalInterval = setInterval(() => this.updateClientDayTotal(), 60000);
@@ -142,8 +142,8 @@ export class TimeKeeperIndex extends TimeKeeper {
 
 
     /**
-     * Total time booked to the running task's client today: rounded to the
-     * quarter hour, with the real tracked figure and the rounding difference.
+     * Total time booked to the running task's client today. When rounding is
+     * enabled, also show the policy-adjusted figure and difference.
      *
      * Derived from `/tasks/<today>` rather than a purpose-built endpoint so it
      * is by construction the same arithmetic the Task Browser does — that
@@ -207,7 +207,9 @@ export class TimeKeeperIndex extends TimeKeeper {
             : '';
 
         element.innerHTML = label + this.formatTimeWithDifference(fractionalHours, minutes, difference);
-        element.title = `${name || 'This client'} — rounded · tracked · rounding difference, today`;
+        element.title = this.roundingEnabled
+            ? `${name || 'This client'} — rounded · tracked · rounding difference, today`
+            : `${name || 'This client'} — tracked time today`;
         element.classList.remove('hidden');
     }
 

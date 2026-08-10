@@ -25,8 +25,9 @@ dicts, so it can be exercised directly.
 """
 
 import calendar
-import math
 from datetime import date, datetime, timedelta
+
+from rounding import round_seconds_to_hours
 
 DEFAULT_WORK_DAYS = frozenset({0, 1, 2, 3, 4})
 
@@ -62,13 +63,13 @@ def task_seconds(task, now=None):
 
 
 def round_to_quarter_hour(seconds):
-    """Seconds -> hours rounded to the nearest quarter, half up.
+    """Compatibility helper for the original nearest-quarter rule.
 
     Mirrors ``main.round_to_quarter_hour`` and ``totalTimeSpentToFractionalHours``
     in the frontend. Half-up rather than Python's banker's rounding, so the three
     of them agree on exact 7.5-minute boundaries.
     """
-    return math.floor(seconds / 900.0 + 0.5) / 4.0
+    return round_seconds_to_hours(seconds)
 
 
 # --------------------------------------------------------------------------
@@ -338,13 +339,12 @@ def business_days_between(
 # --------------------------------------------------------------------------
 
 
-def billable_hours_by_task(tasks, now=None):
+def billable_hours_by_task(tasks, now=None, rounding_policy=None):
     """Per-task hours that sum, within a client-day, to the billable figure.
 
-    The house rule is that time is rounded to the quarter hour per client per
-    day — that's what the History page shows and what gets invoiced. But a pin
-    is per *task*, so allocation needs a per-task number that still adds up to
-    the rounded day.
+    The global policy is applied per client per day, matching History and
+    invoicing. But a pin is per *task*, so allocation needs a per-task number
+    that still adds up to the policy-adjusted day.
 
     So each day's rounding difference is spread across that day's tasks in
     proportion to their length. A 20-minute and a 40-minute task on a day that
@@ -369,7 +369,8 @@ def billable_hours_by_task(tasks, now=None):
         if seconds <= 0:
             scale[day] = 0.0
         else:
-            scale[day] = round_to_quarter_hour(seconds) / (seconds / 3600.0)
+            adjusted = round_seconds_to_hours(seconds, rounding_policy)
+            scale[day] = adjusted / (seconds / 3600.0)
 
     return {
         task.id: (raw[task.id] / 3600.0) * scale[task.date]
@@ -397,7 +398,7 @@ def eligible_budgets(budgets, day):
     return covering
 
 
-def allocate(budgets, tasks, now=None):
+def allocate(budgets, tasks, now=None, rounding_policy=None):
     """Distribute `tasks` across `budgets` for a single client.
 
     Returns ``(used, entries, unbudgeted_hours)``:
@@ -430,7 +431,7 @@ def allocate(budgets, tasks, now=None):
     """
     now = now or datetime.now()
 
-    hours = billable_hours_by_task(tasks, now)
+    hours = billable_hours_by_task(tasks, now, rounding_policy)
     # Explicitly excluded entries remain client-associated, but never consume
     # a budget and are not reported as accidental coverage gaps.
     tasks = [t for t in tasks if not getattr(t, 'budget_excluded', False)]

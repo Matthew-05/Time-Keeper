@@ -701,6 +701,30 @@
     @apply text-base;
   }
 
+  /* History's day summary reads like a compact, headerless table. A shared
+     grid keeps every label and detail on the same two vertical axes, including
+     the editable start/end controls. */
+  .tk-day-summary > .tk-row {
+    column-gap: 1rem;
+    display: grid;
+    grid-template-columns: 6.5rem minmax(0, 1fr);
+    justify-content: initial;
+    padding-block: 0.75rem;
+  }
+
+  .tk-day-summary > .tk-row > :last-child {
+    justify-self: start;
+    line-height: 1.4;
+    min-width: 0;
+    text-align: left;
+  }
+
+  @media (min-width: 40rem) {
+    .tk-day-summary > .tk-row > :last-child {
+      white-space: nowrap;
+    }
+  }
+
   /* ---- Inline editing (task history) ----
      These names are toggled from JS, so they have to exist as authored CSS
      rather than being composed from utilities in the markup. */

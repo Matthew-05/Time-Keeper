@@ -46,15 +46,15 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
-      <div class="min-w-0 space-y-5">
+    <div class="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <div class="min-w-0 space-y-6">
         <!-- Timeline -->
         <section class="tk-card">
           <div class="tk-card-header">
             <span class="tk-card-title">Timeline</span>
             <span class="text-[0.6875rem] text-faint">Ctrl + scroll to zoom</span>
           </div>
-          <div class="p-3">
+          <div class="p-4">
             <div id="timeline" class="h-[200px]"></div>
             <div id="tooltip" class="tk-tooltip"></div>
           </div>
@@ -71,9 +71,11 @@
                 <tr>
                   <th>Client</th>
                   <th>Works</th>
-                  <th class="tk-num">Tracked</th>
-                  <th class="tk-num">Rounded</th>
-                  <th class="tk-num">Diff</th>
+                  <th class="tk-num">Logged time</th>
+                  {% if settings.rounding_enabled %}
+                    <th class="tk-num">Rounded</th>
+                    <th class="tk-num">Diff</th>
+                  {% endif %}
                 </tr>
               </thead>
               <tbody id="tasks-tbody">
@@ -85,7 +87,7 @@
       </div>
 
       <!-- Day summary -->
-      <aside class="tk-card xl:sticky xl:top-[calc(var(--nav-h)+1.75rem)]">
+      <aside class="tk-card tk-day-summary xl:sticky xl:top-[calc(var(--nav-h)+1.75rem)]">
         <div class="tk-card-header">
           <span class="tk-card-title">Day summary</span>
         </div>

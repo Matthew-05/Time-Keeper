@@ -68,8 +68,23 @@ export function clientColor(name) {
     return `hsl(${Math.abs(hash) % 360}, 62%, 58%)`;
 }
 
+/** Human-readable logged duration with both units and correct plurals. */
+export function formatDurationMinutes(minutes) {
+    const totalMinutes = Math.max(0, Math.round(Number(minutes) || 0));
+    const hours = Math.floor(totalMinutes / 60);
+    const remainingMinutes = totalMinutes % 60;
+    return `${hours} ${hours === 1 ? 'hr' : 'hrs'} `
+        + `${remainingMinutes} ${remainingMinutes === 1 ? 'min' : 'mins'}`;
+}
+
 export class TimeKeeper {
     constructor() {
+        const root = document.documentElement.dataset;
+        this.roundingEnabled = root.roundingEnabled === 'true';
+        this.roundingIntervalMinutes = Number(root.roundingIntervalMinutes) || 15;
+        this.roundingDirection = ['nearest', 'up', 'down'].includes(root.roundingDirection)
+            ? root.roundingDirection
+            : 'nearest';
         this.ensureToastContainer();
 
     }
@@ -267,15 +282,24 @@ export class TimeKeeper {
         return Math.floor(clockTimeToSeconds(timeString) / 60);
     }
 
-    minutesToHoursMinutes(minutes) {
-        const hours = Math.floor(minutes / 60);
-        const remainingMinutes = minutes % 60;
-        return `${hours}:${remainingMinutes.toString().padStart(2, '0')}`;
+    formatDurationMinutes(minutes) {
+        return formatDurationMinutes(minutes);
     }
 
     totalTimeSpentToFractionalHours(minutes) {
-        const hours = minutes / 60;
-        return Math.round(hours * 4) / 4;
+        if (!this.roundingEnabled) return minutes / 60;
+
+        const units = minutes / this.roundingIntervalMinutes;
+        let roundedUnits;
+        if (this.roundingDirection === 'up') roundedUnits = Math.ceil(units);
+        else if (this.roundingDirection === 'down') roundedUnits = Math.floor(units);
+        else roundedUnits = Math.floor(units + 0.5);
+
+        return roundedUnits * this.roundingIntervalMinutes / 60;
+    }
+
+    formatDecimalHours(hours) {
+        return Number(hours.toFixed(2)).toString();
     }
 
     /**
@@ -288,22 +312,27 @@ export class TimeKeeper {
     }
 
     /**
-     * The house format for a billable figure: rounded quarter-hours, the real
-     * tracked time, and what the rounding gave or took.
+     * The house format for a billable figure: policy-adjusted hours, the real
+     * tracked time, and what rounding gave or took. With rounding disabled,
+     * only the tracked duration is rendered.
      *
-     *     3.5 hrs · 3:20 · +10m
+     *     3.5 hrs. · 3 hrs 20 mins · +10m
      *
      * Shared so the Today page and the Task Browser can't drift into showing
      * the same number two different ways.
      */
     formatTimeWithDifference(fractionalHours, totalMinutes, difference) {
+        if (!this.roundingEnabled) {
+            return this.formatDurationMinutes(totalMinutes);
+        }
+
         const colorClass = difference > 0 ? 'text-success' : 'text-danger';
         const diffDisplay = difference !== 0
             ? `<span class="${colorClass} ml-1 text-xs font-medium">${difference > 0 ? '+' : '−'}${Math.abs(difference)}m</span>`
             : '';
 
-        return `${fractionalHours}<span class="text-faint font-normal"> hrs</span>`
-            + `<span class="text-faint font-normal text-xs"> · ${this.minutesToHoursMinutes(totalMinutes)}</span>`
+        return `${this.formatDecimalHours(fractionalHours)}<span class="text-faint font-normal"> hrs.</span>`
+            + `<span class="text-faint font-normal text-xs"> · ${this.formatDurationMinutes(totalMinutes)}</span>`
             + diffDisplay;
     }
 }

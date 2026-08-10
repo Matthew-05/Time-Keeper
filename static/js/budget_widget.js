@@ -110,20 +110,20 @@ export class BudgetWidget {
 
             <div class="mt-1.5 flex items-baseline justify-between gap-2 text-xs">
               <span class="tabular text-muted">
-                ${hours(budget.used_hours)} / ${hours(budget.budgeted_hours)} hrs
+                ${hours(budget.used_hours)} / ${hours(budget.budgeted_hours)} hrs.
                 <span class="text-faint">· to ${shortDate(budget.end_date)}</span>
               </span>
               <span class="flex-shrink-0 text-right" style="color: var(--status-text)">
                 ${
                     budget.status === 'on_track'
-                        ? this.escape(`${hours(budget.remaining_hours)} hrs left`)
+                        ? this.escape(`${hours(budget.remaining_hours)} hrs. left`)
                         // The full paused headline carries dates and a resume
                         // date and is far too long for one line here. On this
                         // screen the useful fact is just that you're about to
                         // record time against a project that's supposed to be
                         // stopped; the Budgets page has the rest.
                         : budget.status === 'paused'
-                          ? this.escape(`On hold · ${hours(budget.remaining_hours)} hrs left`)
+                          ? this.escape(`On hold · ${hours(budget.remaining_hours)} hrs. left`)
                           : this.escape(headline(budget))
                 }
               </span>

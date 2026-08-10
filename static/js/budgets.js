@@ -39,7 +39,7 @@ const FILTERS = {
 }
 
 const INSIGHTS = {
-    used: 'Task time allocated to this budget. Each client\'s daily time is rounded to the nearest quarter hour.',
+    used: '',
     projected: 'Estimated total at the end date if your capacity-weighted pace so far continues. Days off and held days are excluded.',
     pace: 'Average hours used per elapsed working day. Days off and held days are excluded.',
 }
@@ -47,6 +47,10 @@ const INSIGHTS = {
 class Budgets extends TimeKeeper {
     constructor() {
         super()
+
+        INSIGHTS.used = this.roundingEnabled
+            ? `Task time allocated to this budget. Each client's daily time uses the global ${this.roundingIntervalMinutes}-minute ${this.roundingDirection} rounding policy.`
+            : 'Tracked task time allocated to this budget. Rounding is disabled.'
 
         this.list = document.getElementById('budget-list')
         this.subtitle = document.getElementById('budgets-subtitle')
@@ -251,7 +255,7 @@ class Budgets extends TimeKeeper {
 
             <div class="mb-2 flex items-baseline justify-between gap-3">
               <span class="tabular text-sm font-semibold text-text">
-                ${hours(budget.used_hours)}<span class="font-normal text-faint"> / ${hours(budget.budgeted_hours)} hrs</span>
+                ${hours(budget.used_hours)}<span class="font-normal text-faint"> / ${hours(budget.budgeted_hours)} hrs.</span>
               </span>
               <span class="tabular text-sm font-semibold" style="color: var(--status-text)">${percent(budget.percent_used)}</span>
             </div>
@@ -263,11 +267,11 @@ class Budgets extends TimeKeeper {
             <div class="mt-3 grid grid-cols-4 gap-3 border-t border-border pt-3">
               <div>
                 <div class="tk-stat-label">Remaining</div>
-                <div class="tk-stat-value">${hours(budget.remaining_hours)}<span class="font-normal text-faint"> hrs</span></div>
+                <div class="tk-stat-value">${hours(budget.remaining_hours)}<span class="font-normal text-faint"> hrs.</span></div>
               </div>
               <div>
                 ${this.insightLabel('Projected', INSIGHTS.projected)}
-                <div class="tk-stat-value">${hours(budget.projected_hours)}<span class="font-normal text-faint"> hrs</span></div>
+                <div class="tk-stat-value">${hours(budget.projected_hours)}<span class="font-normal text-faint"> hrs.</span></div>
               </div>
               <div>
                 ${this.insightLabel('Pace', INSIGHTS.pace)}
@@ -333,7 +337,7 @@ class Budgets extends TimeKeeper {
                 return
             }
             this.unbudgetedNote.innerHTML =
-                `<span class="tabular font-semibold text-text">${hours(loose)} hrs</span>`
+                `<span class="tabular font-semibold text-text">${hours(loose)} hrs.</span>`
                 + ' recorded for this client fall outside every budget.'
             this.unbudgetedNote.classList.remove('hidden')
         } catch (error) {
@@ -630,7 +634,7 @@ class Budgets extends TimeKeeper {
           <div class="tk-budget-card border-0 p-0 shadow-none" data-status="${detail.status}">
             <div class="mb-2 flex items-baseline justify-between gap-3">
               <span class="tabular text-lg font-semibold text-text">
-                ${hours(detail.used_hours)}<span class="font-normal text-faint"> / ${hours(detail.budgeted_hours)} hrs</span>
+                ${hours(detail.used_hours)}<span class="font-normal text-faint"> / ${hours(detail.budgeted_hours)} hrs.</span>
               </span>
               <div class="flex items-center gap-1.5">
                 <span class="tk-badge tk-badge-status">${STATUS_LABEL[detail.status]}</span>
@@ -642,9 +646,9 @@ class Budgets extends TimeKeeper {
           </div>
 
           <div class="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border sm:grid-cols-4">
-            ${this.detailStat('Used', `${hours(detail.used_hours)} hrs`, percent(detail.percent_used), INSIGHTS.used)}
-            ${this.detailStat('Remaining', `${hours(detail.remaining_hours)} hrs`, `${detail.remaining_business_days} work days`)}
-            ${this.detailStat('Projected', `${hours(detail.projected_hours)} hrs`, percent(detail.projected_percent), INSIGHTS.projected)}
+            ${this.detailStat('Used', `${hours(detail.used_hours)} hrs.`, percent(detail.percent_used), INSIGHTS.used)}
+            ${this.detailStat('Remaining', `${hours(detail.remaining_hours)} hrs.`, `${detail.remaining_business_days} work days`)}
+            ${this.detailStat('Projected', `${hours(detail.projected_hours)} hrs.`, percent(detail.projected_percent), INSIGHTS.projected)}
             ${this.detailStat('Period gone', percent(detail.percent_elapsed), `${detail.elapsed_business_days}/${detail.total_business_days} days`)}
           </div>
 
@@ -757,7 +761,7 @@ class Budgets extends TimeKeeper {
         const heldWarning =
             detail.held_hours > 0.05
                 ? `<p class="mt-2 text-xs" style="color: var(--warn)">
-                     ${hours(detail.held_hours)} hrs were recorded on days this project was on hold.
+                     ${hours(detail.held_hours)} hrs. were recorded on days this project was on hold.
                      They still count — check the dates below.
                    </p>`
                 : ''
@@ -1086,10 +1090,10 @@ class Budgets extends TimeKeeper {
 
     diagnosisInsight(budget) {
         if (budget.status === 'at_risk') {
-            return `At risk because the current pace projects ${hours(budget.projected_hours)} hrs (${percent(budget.projected_percent)} of the ${hours(budget.budgeted_hours)}-hr commitment), ${hours(budget.projected_overage)} hrs over. This budget's threshold is ${hours(budget.risk_threshold_percent)}% over.`
+            return `At risk because the current pace projects ${hours(budget.projected_hours)} hrs. (${percent(budget.projected_percent)} of the ${hours(budget.budgeted_hours)}-hr commitment), ${hours(budget.projected_overage)} hrs. over. This budget's threshold is ${hours(budget.risk_threshold_percent)}% over.`
         }
         if (budget.status === 'over') {
-            return `Over budget because ${hours(budget.used_hours)} hrs have already been used against ${hours(budget.budgeted_hours)} committed, ${hours(budget.over_by)} hrs over.`
+            return `Over budget because ${hours(budget.used_hours)} hrs. have already been used against ${hours(budget.budgeted_hours)} committed, ${hours(budget.over_by)} hrs. over.`
         }
         return null
     }
@@ -1383,7 +1387,7 @@ class Budgets extends TimeKeeper {
                             label: (ctx) =>
                                 ctx.parsed.y == null
                                     ? undefined
-                                    : `${ctx.dataset.label}: ${hours(ctx.parsed.y)} hrs`,
+                                    : `${ctx.dataset.label}: ${hours(ctx.parsed.y)} hrs.`,
                             // Said in the tooltip as well as the shading: the
                             // bands are readable at a glance but ambiguous at
                             // the edges, and the edges are what people check.

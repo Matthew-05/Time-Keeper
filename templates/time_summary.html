@@ -8,8 +8,8 @@
   <div class="tk-page tk-page-narrow">
     <div class="tk-page-header">
       <div>
-        <h1 class="tk-title">Billable time summary</h1>
-        <p class="tk-subtitle">Summary of billable time logged.</p>
+        <h1 class="tk-title">Time summary</h1>
+        <p class="tk-subtitle">Summary of tracked client time.</p>
       </div>
 
       <div class="relative">
@@ -34,7 +34,14 @@
           <circle cx="12" cy="12" r="9" />
           <path d="M12 16v-4M12 8h.01" />
         </svg>
-        <span>Logged task time only. Gaps between tasks aren't counted. Each client's time is rounded to the nearest quarter hour per day, matching History.</span>
+        <span>
+          Logged task time only. Gaps between tasks aren't counted.
+          {% if settings.rounding_enabled %}
+            A {{ settings.rounding_interval_minutes }}-minute {{ settings.rounding_direction }} rounding policy is applied per client per day, matching History and budgets.
+          {% else %}
+            Rounding is disabled, so charts show tracked time directly.
+          {% endif %}
+        </span>
       </div>
 
       <div class="p-4">
@@ -57,10 +64,12 @@
 {% block page_scripts %}
   <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.min.js') }}"></script>
   <script type="module">
-    import { ready, clientColor } from "{{ url_for('static', filename='js/base.js') }}"
+    import { ready, clientColor, formatDurationMinutes } from "{{ url_for('static', filename='js/base.js') }}"
 
     let chart
     let dailyChart
+    const roundingEnabled = {{ 'true' if settings.rounding_enabled else 'false' }}
+    const valueLabel = roundingEnabled ? 'Billable hours' : 'Logged time'
 
     /** Pull live theme tokens so charts repaint correctly on theme switch. */
     function tokens() {
@@ -84,13 +93,16 @@
         plugins: {
           tooltip: {
             callbacks: {
-              label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)} billable hrs`,
+              label: (ctx) => roundingEnabled
+                ? `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)} hrs.`
+                : `${ctx.dataset.label}: ${formatDurationMinutes(ctx.parsed.y * 60)}`,
               afterLabel: (ctx) => {
+                if (!roundingEnabled) return undefined
                 const tracked = ctx.raw?.tracked ?? ctx.dataset.tracked?.[ctx.dataIndex]
                 if (tracked == null) return undefined
                 const diff = ctx.parsed.y - tracked
                 const sign = diff > 0 ? '+' : '−'
-                return `${tracked.toFixed(2)} tracked`
+                return `${formatDurationMinutes(tracked * 60)} logged`
                   + (Math.abs(diff) < 0.005 ? '' : ` (${sign}${Math.abs(diff * 60).toFixed(0)}m rounding)`)
               },
             },
@@ -105,7 +117,7 @@
           },
           y: {
             beginAtZero: true,
-            title: { display: true, text: 'Billable hours', color: t.muted },
+            title: { display: true, text: valueLabel, color: t.muted },
             ticks: { color: t.faint },
             grid: { color: t.border, drawBorder: false },
           },
@@ -189,8 +201,8 @@
       if (!range) return
       try {
         const data = await fetchJSON(`/api/summary/custom/${range[0]}/${range[1]}`)
-        if (!data.length) return showMessage('client-tab', 'No billable time logged in this range.')
-        createBarChart('timeChart', 'Billable time by client', data)
+        if (!data.length) return showMessage('client-tab', 'No tracked time logged in this range.')
+        createBarChart('timeChart', `${roundingEnabled ? 'Billable' : 'Tracked'} time by client`, data)
       } catch (error) {
         console.error(error)
         showMessage('client-tab', 'Can\'t reach the server. Reconnecting…')
@@ -203,8 +215,8 @@
       if (!range) return
       try {
         const data = await fetchJSON(`/api/summary/daily/${range[0]}/${range[1]}`)
-        if (!data.length) return showMessage('daily-tab', 'No billable time logged in this range.')
-        createDailyChart('dailyTimeChart', 'Daily billable hours', data)
+        if (!data.length) return showMessage('daily-tab', 'No tracked time logged in this range.')
+        createDailyChart('dailyTimeChart', `Daily ${roundingEnabled ? 'billable' : 'tracked'} hours`, data)
       } catch (error) {
         console.error(error)
         showMessage('daily-tab', 'Can\'t reach the server. Reconnecting…')
@@ -219,7 +231,10 @@
       data.sort((a, b) => b.total_hours - a.total_hours)
       const totalHours = data.reduce((sum, item) => sum + item.total_hours, 0).toFixed(2)
 
-      const options = baseChartOptions(`${title} — ${totalHours} billable hrs total`)
+      const displayedTotal = roundingEnabled
+        ? `${totalHours} hrs.`
+        : formatDurationMinutes(Number(totalHours) * 60)
+      const options = baseChartOptions(`${title} — ${displayedTotal} total`)
       options.plugins.legend.display = false
 
       chart = new Chart(canvas.getContext('2d'), {
@@ -228,7 +243,7 @@
           labels: data.map((item) => item.client_name),
           datasets: [
             {
-              label: 'Billable hours',
+              label: valueLabel,
               data: data.map((item) => item.total_hours),
               tracked: data.map((item) => item.tracked_hours),
               backgroundColor: data.map((item) => getClientColor(item.client_name)),
@@ -260,7 +275,7 @@
           labels: data.map((item) => item.date),
           datasets: [
             {
-              label: 'Billable hours',
+              label: valueLabel,
               data: hours,
               tracked: data.map((item) => item.tracked_hours),
               borderColor: t.accent,
@@ -270,7 +285,7 @@
               fill: false,
             },
             {
-              label: '5-day average (billable)',
+              label: `5-day average (${roundingEnabled ? 'billable' : 'tracked'})`,
               data: movingAverage,
               borderColor: t.danger,
               borderDash: [5, 5],

@@ -478,7 +478,10 @@ export class TaskBrowser extends TimeKeeper {
     /** Replace the task table with a message plus a way to try again. */
     showTasksMessage(html) {
         const tbody = document.getElementById('tasks-tbody');
-        if (tbody) tbody.innerHTML = `<tr><td colspan="5">${html}</td></tr>`;
+        if (tbody) {
+            const columns = this.roundingEnabled ? 5 : 3;
+            tbody.innerHTML = `<tr><td colspan="${columns}">${html}</td></tr>`;
+        }
     }
 
     async fetchDayData() {
@@ -747,7 +750,7 @@ export class TaskBrowser extends TimeKeeper {
         if (clientGroups.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="5" class="tk-empty">No time tracked on this date.</td>
+                    <td colspan="${this.roundingEnabled ? 5 : 3}" class="tk-empty">No time tracked on this date.</td>
                 </tr>
             `;
             // Still update summary values even with no tasks
@@ -780,11 +783,13 @@ export class TaskBrowser extends TimeKeeper {
                             <button type="button" class="works-copy-btn tk-btn tk-btn-secondary tk-btn-sm">Copy</button>
                         </div>`}
                 </td>
-                <td class="tk-num text-muted">${this.minutesToHoursMinutes(totalMinutes)}</td>
-                <td class="tk-num font-semibold">${fractionalHours}</td>
-                <td class="tk-num ${roundingDiff === 0 ? 'text-faint' : roundingDiff > 0 ? 'text-success' : 'text-danger'}">
-                    ${roundingDiff === 0 ? '—' : (roundingDiff > 0 ? '+' : '−') + Math.abs(roundingDiff) + 'm'}
-                </td>
+                <td class="tk-num whitespace-nowrap text-muted">${this.formatDurationMinutes(totalMinutes)}</td>
+                ${this.roundingEnabled ? `
+                    <td class="tk-num whitespace-nowrap font-semibold">${this.formatDecimalHours(fractionalHours)} <span class="font-normal text-faint">hrs.</span></td>
+                    <td class="tk-num ${roundingDiff === 0 ? 'text-faint' : roundingDiff > 0 ? 'text-success' : 'text-danger'}">
+                        ${roundingDiff === 0 ? '—' : (roundingDiff > 0 ? '+' : '−') + Math.abs(roundingDiff) + 'm'}
+                    </td>
+                ` : ''}
             `;
             summaryRow.addEventListener('click', (e) => {
                 // The works buttons sit inside the row, which is itself the
@@ -836,7 +841,7 @@ export class TaskBrowser extends TimeKeeper {
         detailRow.className = 'detail-row hidden';
 
         const detailCell = document.createElement('td');
-        detailCell.colSpan = 5;
+        detailCell.colSpan = this.roundingEnabled ? 5 : 3;
         detailCell.className = 'p-0';
 
         const detailTable = document.createElement('table');

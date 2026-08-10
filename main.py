@@ -51,6 +51,7 @@ import settings as user_settings
 # the local variables in this file, and shadowing the module was a real bug
 # waiting to happen.
 import budgets as budget_allocation
+from rounding import round_seconds_to_hours
 import notifications
 import ipc
 from reminders import ReminderService
@@ -1350,14 +1351,23 @@ def tasks_between(start, end):
 
 
 def round_to_quarter_hour(seconds):
-    """Seconds -> hours rounded to the nearest quarter.
+    """Compatibility helper for the original nearest-quarter rule.
 
     Mirrors `totalTimeSpentToFractionalHours` in task_browser.js. Uses explicit
     half-up rounding rather than Python's round(), which is banker's rounding
     and would disagree with the JS on exact .125 boundaries (7.5 min).
     """
-    quarters = seconds / 900.0
-    return math.floor(quarters + 0.5) / 4.0
+    return round_seconds_to_hours(seconds)
+
+
+def _rounding_policy():
+    """Snapshot the global policy for one calculation."""
+    settings = user_settings.load_settings()
+    return {
+        'enabled': settings['rounding_enabled'],
+        'interval_minutes': settings['rounding_interval_minutes'],
+        'direction': settings['rounding_direction'],
+    }
 
 
 def bucket_by_client_and_day(start, end, now=None):
@@ -1381,19 +1391,20 @@ def bucket_by_client_and_day(start, end, now=None):
 def get_custom_summary(start_date, end_date):
     """Billable hours per client across a date range.
 
-    `total_hours` is the billable figure: each client-day rounded up or down to
-    the nearest quarter hour, then summed. `tracked_hours` is the raw
-    unrounded time, so the UI can show what the rounding did.
+    `total_hours` is the billable figure: the global policy is applied to each
+    client-day, then summed. `tracked_hours` is the raw time so the UI can show
+    what rounding did when it is enabled.
     """
     try:
         start, end = _parse_range(start_date, end_date)
     except ValueError:
         return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD.'}), 400
 
+    policy = _rounding_policy()
     rounded = {}
     tracked = {}
     for (name, _day), seconds in bucket_by_client_and_day(start, end).items():
-        rounded[name] = rounded.get(name, 0) + round_to_quarter_hour(seconds)
+        rounded[name] = rounded.get(name, 0) + round_seconds_to_hours(seconds, policy)
         tracked[name] = tracked.get(name, 0) + seconds
 
     return jsonify([
@@ -1410,8 +1421,8 @@ def get_custom_summary(start_date, end_date):
 def get_daily_summary(start_date, end_date):
     """Billable hours per day across a date range.
 
-    Same rounding rule as the per-client view: each client's time within a day
-    is rounded to the nearest quarter hour, then the day is the sum of those.
+    Same global policy as the per-client view: each client's time within a day
+    is adjusted separately, then the day is the sum of those client figures.
 
     Ordered by date, and only days that actually have tasks are included so
     days off don't drag the moving average down.
@@ -1421,10 +1432,11 @@ def get_daily_summary(start_date, end_date):
     except ValueError:
         return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD.'}), 400
 
+    policy = _rounding_policy()
     rounded = {}
     tracked = {}
     for (_name, day), seconds in bucket_by_client_and_day(start, end).items():
-        rounded[day] = rounded.get(day, 0) + round_to_quarter_hour(seconds)
+        rounded[day] = rounded.get(day, 0) + round_seconds_to_hours(seconds, policy)
         tracked[day] = tracked.get(day, 0) + seconds
 
     return jsonify([
@@ -1511,6 +1523,7 @@ def _client_allocation(client_id, now=None, every_task=False):
     Only the endpoint that reports that number pays for it.
     """
     now = now or datetime.now()
+    rounding_policy = _rounding_policy()
 
     budgets = Budget.query.filter(Budget.client_id == client_id).all()
     if not budgets:
@@ -1522,7 +1535,11 @@ def _client_allocation(client_id, now=None, every_task=False):
             Task_Item.client_id == client_id,
             Task_Item.budget_excluded.is_(False),
         ).all()
-        loose = sum(budget_allocation.billable_hours_by_task(tasks, now).values())
+        loose = sum(
+            budget_allocation.billable_hours_by_task(
+                tasks, now, rounding_policy
+            ).values()
+        )
         return [], {}, {}, loose, tasks
 
     query = Task_Item.query.filter(Task_Item.client_id == client_id)
@@ -1538,7 +1555,9 @@ def _client_allocation(client_id, now=None, every_task=False):
         )
 
     tasks = query.all()
-    used, split, unbudgeted = budget_allocation.allocate(budgets, tasks, now)
+    used, split, unbudgeted = budget_allocation.allocate(
+        budgets, tasks, now, rounding_policy
+    )
     return budgets, used, split, unbudgeted, tasks
 
 
@@ -1727,7 +1746,9 @@ def api_get_budget(budget_id):
         .order_by(Task_Item.date.desc(), Task_Item.start_time.desc())
         .all()
     )
-    excluded_hours = budget_allocation.billable_hours_by_task(excluded_tasks, now)
+    excluded_hours = budget_allocation.billable_hours_by_task(
+        excluded_tasks, now, _rounding_policy()
+    )
     unassigned_entries = [{
         'task_id': task.id,
         'date': task.date.isoformat(),

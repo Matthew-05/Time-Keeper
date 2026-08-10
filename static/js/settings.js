@@ -17,6 +17,7 @@ import { applyTimeFormat, currentTimeFormat } from './time_format.js'
  */
 
 const INTERVAL_PRESETS = [15, 30, 60]
+const ROUNDING_INTERVAL_PRESETS = [5, 10, 15, 30, 60]
 
 // Typing "45" into a number field fires three input events. Wait for a pause
 // before writing, but save on blur/Enter regardless so a change is never lost.
@@ -27,6 +28,13 @@ class Settings extends TimeKeeper {
         super()
         this.themeGroup = document.getElementById('theme-mode')
         this.timeFormatGroup = document.getElementById('time-format')
+
+        this.roundingToggle = document.getElementById('rounding-enabled')
+        this.roundingOptions = document.getElementById('rounding-options')
+        this.roundingIntervalGroup = document.getElementById('rounding-interval')
+        this.roundingIntervalCustom = document.getElementById('rounding-interval-custom')
+        this.roundingIntervalInput = document.getElementById('rounding-interval-input')
+        this.roundingDirectionGroup = document.getElementById('rounding-direction')
 
         this.reminderToggle = document.getElementById('reminder-enabled')
         this.reminderOptions = document.getElementById('reminder-options')
@@ -42,6 +50,9 @@ class Settings extends TimeKeeper {
         // Last server-confirmed values, seeded from what the server rendered.
         this.saved = {
             time_format: currentTimeFormat(),
+            rounding_enabled: this.roundingToggle.getAttribute('aria-checked') === 'true',
+            rounding_interval_minutes: Number(this.roundingIntervalInput.value),
+            rounding_direction: document.documentElement.dataset.roundingDirection,
             reminder_enabled: this.reminderToggle.getAttribute('aria-checked') === 'true',
             reminder_interval_minutes: Number(this.intervalInput.value),
             reminder_snooze_minutes: Number(this.snoozeInput.value),
@@ -55,6 +66,7 @@ class Settings extends TimeKeeper {
     init() {
         this.initTheme()
         this.initTimeFormat()
+        this.initRounding()
         this.initReminders()
         this.initDevTools()
     }
@@ -185,6 +197,117 @@ class Settings extends TimeKeeper {
         }
     }
 
+    // -- rounding ---------------------------------------------------------
+
+    initRounding() {
+        this.markRoundingEnabled(this.saved.rounding_enabled)
+        this.markRoundingInterval(this.saved.rounding_interval_minutes)
+        this.markRoundingDirection(this.saved.rounding_direction)
+
+        this.roundingToggle.addEventListener('click', () => this.toggleRounding())
+        this.roundingIntervalGroup.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-rounding-interval]')
+            if (button) this.chooseRoundingInterval(button.dataset.roundingInterval)
+        })
+        this.roundingDirectionGroup.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-rounding-direction]')
+            if (button) this.setRoundingDirection(button.dataset.roundingDirection)
+        })
+        this.bindRoundingDirectionKeys()
+
+        this.bindNumberField(
+            this.roundingIntervalInput,
+            'rounding_interval_minutes',
+            (value) => this.markRoundingInterval(value)
+        )
+    }
+
+    async toggleRounding() {
+        const enabled = !(this.roundingToggle.getAttribute('aria-checked') === 'true')
+        this.markRoundingEnabled(enabled)
+
+        try {
+            const saved = await this.save({ rounding_enabled: enabled })
+            this.saved.rounding_enabled = saved.rounding_enabled
+            this.markRoundingEnabled(saved.rounding_enabled)
+        } catch (error) {
+            this.markRoundingEnabled(this.saved.rounding_enabled)
+        }
+    }
+
+    markRoundingEnabled(enabled) {
+        this.roundingToggle.setAttribute('aria-checked', enabled ? 'true' : 'false')
+        this.roundingOptions.dataset.active = enabled ? 'true' : 'false'
+    }
+
+    chooseRoundingInterval(choice) {
+        if (choice === 'custom') {
+            this.markRoundingInterval(null)
+            this.roundingIntervalInput.focus()
+            this.roundingIntervalInput.select()
+            return
+        }
+
+        const minutes = Number(choice)
+        this.roundingIntervalInput.value = String(minutes)
+        this.markRoundingInterval(minutes)
+        this.commit('rounding_interval_minutes', minutes, this.roundingIntervalInput)
+    }
+
+    markRoundingInterval(minutes) {
+        const isPreset = minutes !== null && ROUNDING_INTERVAL_PRESETS.includes(minutes)
+        const active = isPreset ? String(minutes) : 'custom'
+
+        this.roundingIntervalGroup.querySelectorAll('[data-rounding-interval]').forEach((button) => {
+            const selected = button.dataset.roundingInterval === active
+            button.classList.toggle('active', selected)
+            button.setAttribute('aria-checked', selected ? 'true' : 'false')
+            button.tabIndex = selected ? 0 : -1
+        })
+
+        this.roundingIntervalCustom.classList.toggle('hidden', isPreset)
+        this.roundingIntervalCustom.classList.toggle('flex', !isPreset)
+    }
+
+    markRoundingDirection(direction) {
+        this.roundingDirectionGroup.querySelectorAll('[data-rounding-direction]').forEach((button) => {
+            const selected = button.dataset.roundingDirection === direction
+            button.classList.toggle('active', selected)
+            button.setAttribute('aria-checked', selected ? 'true' : 'false')
+            button.tabIndex = selected ? 0 : -1
+        })
+    }
+
+    async setRoundingDirection(direction) {
+        if (direction === this.saved.rounding_direction) return
+        this.markRoundingDirection(direction)
+
+        try {
+            const saved = await this.save({ rounding_direction: direction })
+            this.saved.rounding_direction = saved.rounding_direction
+            this.markRoundingDirection(saved.rounding_direction)
+        } catch (error) {
+            this.markRoundingDirection(this.saved.rounding_direction)
+        }
+    }
+
+    bindRoundingDirectionKeys() {
+        this.roundingDirectionGroup.addEventListener('keydown', (event) => {
+            if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(event.key)) return
+            const options = [
+                ...this.roundingDirectionGroup.querySelectorAll('[data-rounding-direction]'),
+            ]
+            const index = options.findIndex(
+                (button) => button.dataset.roundingDirection === this.saved.rounding_direction
+            )
+            const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
+            const next = options[(index + step + options.length) % options.length]
+            event.preventDefault()
+            next.focus()
+            this.setRoundingDirection(next.dataset.roundingDirection)
+        })
+    }
+
     // -- reminders ---------------------------------------------------------
 
     initReminders() {
@@ -294,8 +417,8 @@ class Settings extends TimeKeeper {
 
     /** The field's value as an in-range integer, or null if it isn't one. */
     readNumber(input) {
-        const value = Number.parseInt(input.value, 10)
-        if (!Number.isFinite(value)) return null
+        const value = Number(input.value)
+        if (!Number.isInteger(value)) return null
         if (value < Number(input.min) || value > Number(input.max)) return null
         return value
     }
@@ -311,10 +434,16 @@ class Settings extends TimeKeeper {
             if (saved[key] !== value) {
                 input.value = String(saved[key])
                 if (input === this.intervalInput) this.markInterval(saved[key])
+                if (input === this.roundingIntervalInput) {
+                    this.markRoundingInterval(saved[key])
+                }
             }
         } catch (error) {
             input.value = String(this.saved[key])
             if (input === this.intervalInput) this.markInterval(this.saved[key])
+            if (input === this.roundingIntervalInput) {
+                this.markRoundingInterval(this.saved[key])
+            }
         }
     }
 

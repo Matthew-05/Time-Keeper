@@ -42,7 +42,12 @@
         <div class="bg-surface px-4 py-3">
           <div class="tk-stat-label flex items-center gap-1">
             Hours used
-            <button type="button" class="tk-insight" data-insight="Task time allocated to active budgets. Each client's daily time is rounded to the nearest quarter hour." aria-label="Hours used: Task time allocated to active budgets. Each client's daily time is rounded to the nearest quarter hour.">
+            <button
+              type="button"
+              class="tk-insight"
+              data-insight="{% if settings.rounding_enabled %}Task time allocated to active budgets. The global {{ settings.rounding_interval_minutes }}-minute, {{ settings.rounding_direction }} rounding policy is applied per client per day.{% else %}Tracked task time allocated to active budgets. Rounding is disabled.{% endif %}"
+              aria-label="Hours used: {% if settings.rounding_enabled %}the global rounding policy is applied per client per day.{% else %}tracked time with no rounding.{% endif %}"
+            >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" />
               </svg>

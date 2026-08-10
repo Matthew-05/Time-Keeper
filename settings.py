@@ -33,6 +33,9 @@ SETTINGS_PATH = os.path.join(USER_DATA_DIR, 'settings.json')
 
 THEME_CHOICES = ('light', 'dark', 'auto')
 TIME_FORMAT_CHOICES = ('12h', '24h')
+ROUNDING_DIRECTION_CHOICES = ('nearest', 'up', 'down')
+ROUNDING_INTERVAL_MIN = 1
+ROUNDING_INTERVAL_MAX = 60
 
 # Bounds for the description reminder. The UI enforces these too, but a
 # hand-edited file or a stale client shouldn't be able to set a 0-minute
@@ -238,6 +241,17 @@ _SCHEMA = {
     # How clock times are presented in the UI. API and database values remain
     # canonical 24-hour clock strings regardless of this display preference.
     'time_format': ('12h', _validate_choice(TIME_FORMAT_CHOICES)),
+    # One policy controls reports, History, Today, and budget allocation. It is
+    # intentionally not effective-dated: changes recalculate historical time.
+    'rounding_enabled': (True, _validate_bool),
+    'rounding_interval_minutes': (
+        15,
+        _validate_int(ROUNDING_INTERVAL_MIN, ROUNDING_INTERVAL_MAX),
+    ),
+    'rounding_direction': (
+        'nearest',
+        _validate_choice(ROUNDING_DIRECTION_CHOICES),
+    ),
     # Windows toast nudging you to describe the task you're currently on.
     'reminder_enabled': (True, _validate_bool),
     'reminder_interval_minutes': (

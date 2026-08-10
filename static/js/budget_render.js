@@ -21,8 +21,8 @@ export const STATUS_LABEL = {
 /**
  * Hours, to one decimal, without a trailing `.0` on whole numbers.
  *
- * Budgets are usually round figures — 40, 120, 7.5 — and rendering "40.0 hrs"
- * next to "40 hrs" in the same card reads like two different quantities.
+ * Budgets are usually round figures — 40, 120, 7.5 — and rendering "40.0 hrs."
+ * next to "40 hrs." in the same card reads like two different quantities.
  */
 export function hours(value) {
     if (value == null || Number.isNaN(value)) return '—'
@@ -65,11 +65,11 @@ export function dateRange(budget) {
  */
 export function headline(budget) {
     if (budget.status === 'upcoming') {
-        return `Starts ${shortDate(budget.start_date)} · ${hours(budget.budgeted_hours)} hrs budgeted`
+        return `Starts ${shortDate(budget.start_date)} · ${hours(budget.budgeted_hours)} hrs. budgeted`
     }
 
     if (budget.status === 'over') {
-        return `${hours(budget.over_by)} hrs over budget`
+        return `${hours(budget.over_by)} hrs. over budget`
     }
 
     // Deliberately says nothing about pace. A paused project has no pace, and
@@ -81,25 +81,25 @@ export function headline(budget) {
         const back = budget.resumes_on
             ? `resumes ${shortDate(budget.resumes_on)}`
             : 'no resume date set'
-        return `On hold${since} · ${hours(budget.remaining_hours)} hrs left · ${back}`
+        return `On hold${since} · ${hours(budget.remaining_hours)} hrs. left · ${back}`
     }
 
     if (budget.status === 'closed') {
         const left = budget.remaining_hours
         return left >= 0
-            ? `Finished ${hours(left)} hrs under budget`
-            : `Finished ${hours(-left)} hrs over budget`
+            ? `Finished ${hours(left)} hrs. under budget`
+            : `Finished ${hours(-left)} hrs. over budget`
     }
 
     if (budget.projected_hours == null) {
-        return `${hours(budget.remaining_hours)} hrs remaining`
+        return `${hours(budget.remaining_hours)} hrs. remaining`
     }
 
     const overshoot = budget.projected_overage
     if (overshoot > 0.05) {
-        return `Projected over budget at ${hours(budget.projected_hours)} hrs — which is ${hours(overshoot)} over`
+        return `Projected over budget at ${hours(budget.projected_hours)} hrs. — which is ${hours(overshoot)} over`
     }
-    return `Projected on pace for ${hours(budget.projected_hours)} hrs — leaving ${hours(-overshoot)} to spare`
+    return `Projected on pace for ${hours(budget.projected_hours)} hrs. — leaving ${hours(-overshoot)} to spare`
 }
 
 /**

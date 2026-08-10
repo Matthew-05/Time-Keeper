@@ -60,6 +60,83 @@
 
     <section class="tk-card mt-4">
       <div class="tk-card-header">
+        <h2 class="tk-card-title">Time rounding</h2>
+        <button
+          type="button"
+          id="rounding-enabled"
+          class="tk-switch"
+          role="switch"
+          aria-checked="{{ 'true' if settings.rounding_enabled else 'false' }}"
+          aria-label="Time rounding"
+        ></button>
+      </div>
+
+      <div
+        id="rounding-options"
+        class="tk-subsettings"
+        data-active="{{ 'true' if settings.rounding_enabled else 'false' }}"
+      >
+        <div class="border-b border-border p-4">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <span class="tk-label mb-0.5 block">Round to</span>
+              <p class="text-sm text-muted">Choose a preset or enter any whole minute from 1 to 60.</p>
+            </div>
+
+            <div
+              id="rounding-interval"
+              class="tk-segmented flex-shrink-0 flex-wrap justify-end"
+              role="radiogroup"
+              aria-label="Rounding interval"
+            >
+              {% for minutes in [5, 10, 15, 30, 60] %}
+                <button type="button" class="tk-segment" role="radio" aria-checked="false" data-rounding-interval="{{ minutes }}">{{ minutes }}m</button>
+              {% endfor %}
+              <button type="button" class="tk-segment" role="radio" aria-checked="false" data-rounding-interval="custom">Custom</button>
+            </div>
+          </div>
+
+          <div id="rounding-interval-custom" class="mt-3 hidden justify-end">
+            <label class="flex items-center gap-1.5">
+              <input
+                type="number"
+                id="rounding-interval-input"
+                class="tk-input tabular w-20 text-center"
+                min="1"
+                max="60"
+                step="1"
+                value="{{ settings.rounding_interval_minutes }}"
+                aria-label="Custom rounding interval in minutes"
+              />
+              <span class="text-sm text-muted">min</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="p-4">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <span class="tk-label mb-0.5 block">Direction</span>
+              <p class="text-sm text-muted">Nearest uses half-up rounding at exact midpoints.</p>
+            </div>
+
+            <div
+              id="rounding-direction"
+              class="tk-segmented flex-shrink-0"
+              role="radiogroup"
+              aria-label="Rounding direction"
+            >
+              <button type="button" class="tk-segment" role="radio" aria-checked="false" data-rounding-direction="nearest">Nearest</button>
+              <button type="button" class="tk-segment" role="radio" aria-checked="false" data-rounding-direction="up">Up</button>
+              <button type="button" class="tk-segment" role="radio" aria-checked="false" data-rounding-direction="down">Down</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tk-card mt-4">
+      <div class="tk-card-header">
         <h2 class="tk-card-title">Capacity</h2>
       </div>
 
