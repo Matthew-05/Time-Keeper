@@ -125,8 +125,8 @@
   --border-strong: #3a434f;
 
   --text: #e8eaee;
-  --muted: #99a2b0;
-  --faint: #a1aab8;
+  --muted: #b0b8c5;
+  --faint: #99a2b0;
 
   --accent: #6d8dff;
   --accent-hover: #8ba6ff;
@@ -391,6 +391,13 @@
     background-color: var(--field-focus);
   }
 
+  /* Compact time shortcut shown on Today when the previous task's end can be
+     reused. It is a control, so its resting boundary matches other fields. */
+  .tk-previous-time {
+    background-color: var(--control-fill);
+    border-color: var(--control-border);
+  }
+
   /* ---- Buttons ---- */
 
   .tk-btn {
@@ -562,7 +569,7 @@
   }
 
   .tk-btn-icon-sm {
-    border: none;
+    border: 1px solid var(--control-border);
     border-radius: 6px;
     height: 1.75rem;
     width: 1.75rem;
@@ -1054,7 +1061,8 @@
     align-items: center;
     background-color: rgb(15 23 42 / 0.45);
     display: flex;
-    inset: 0;
+    /* Keep the app chrome visible and usable while page content is modal. */
+    inset: var(--chrome-h) 0 0;
     justify-content: center;
     padding: 1.5rem;
     position: fixed;
@@ -1099,6 +1107,26 @@
 
   /* ---- Works ---- */
 
+  .tk-works-panel {
+    @apply rounded-lg border p-3;
+    background-color: var(--control-fill);
+    border-color: var(--control-border);
+  }
+
+  .tk-works-panel .tk-empty {
+    @apply px-3 py-6;
+  }
+
+  /* Keep the add and edit controls on the same fill as Client and Time so the
+     page reads as one control system. */
+  .tk-works-panel .tk-input {
+    background-color: var(--control-fill);
+  }
+
+  .tk-works-panel .tk-input:focus {
+    background-color: var(--field-focus);
+  }
+
   .tk-work-row {
     @apply flex items-center gap-2 rounded-lg border border-transparent px-2 py-1.5;
   }
@@ -1106,6 +1134,10 @@
   .tk-work-row:hover {
     background-color: var(--surface-2);
     border-color: var(--border);
+  }
+
+  .tk-works-panel .tk-work-row:hover {
+    background-color: var(--surface-3);
   }
 
   .tk-work-text {
@@ -1657,11 +1689,20 @@
 
   /* The Today-page widget: same information, one line, no chrome. */
   .tk-budget-strip {
-    @apply rounded-lg border border-border px-3 py-2.5;
-    background-color: var(--surface-2);
+    @apply rounded-lg border px-3 py-2.5;
+    background-color: var(--control-fill);
+    border-color: var(--control-border);
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease;
     --status: var(--accent);
     --status-soft: var(--accent-soft);
     --status-text: var(--accent-text);
+  }
+
+  .tk-budget-strip:hover {
+    background-color: var(--control-hover);
+    border-color: var(--accent);
   }
 
   .tk-budget-strip[data-status='on_track'] {
@@ -1794,8 +1835,8 @@
 
   .tk-work-calendar-day:focus-visible {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--ring);
-    outline: none;
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   .tk-work-calendar-day.is-off {
@@ -1804,7 +1845,7 @@
   }
 
   .tk-work-calendar-day.is-outside {
-    opacity: 0.48;
+    color: var(--faint);
   }
 
   .tk-work-calendar-day.is-override {
@@ -1816,6 +1857,7 @@
     background-color: var(--accent-soft);
     border-color: var(--accent);
     box-shadow: inset 0 0 0 1px var(--accent);
+    color: var(--accent-text);
   }
 
   .tk-calendar-date-number {
@@ -1904,8 +1946,8 @@
 }
 
 .choices__inner {
-  background-color: var(--surface-2) !important;
-  border: 1px solid var(--border) !important;
+  background-color: var(--control-fill) !important;
+  border: 1px solid var(--control-border) !important;
   border-radius: 8px !important;
   color: var(--text);
   font-size: 0.9375rem !important;
@@ -1917,7 +1959,8 @@
 }
 
 .choices:hover .choices__inner {
-  border-color: var(--border-strong) !important;
+  background-color: var(--control-hover) !important;
+  border-color: var(--control-border) !important;
 }
 
 .choices.is-focused .choices__inner,
@@ -2100,8 +2143,8 @@ span.flatpickr-weekday {
 .flatpickr-day:focus-visible {
   background: var(--control-hover);
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--ring);
-  outline: none;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .flatpickr-day.today {

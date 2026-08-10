@@ -72,6 +72,15 @@
     const roundingIntervalHours = {{ settings.rounding_interval_minutes }} / 60
     const valueLabel = roundingEnabled ? 'Billable hours' : 'Logged time'
 
+    /** Keep rounded-axis labels exact; Chart.js otherwise turns .25 into .3. */
+    function formatRoundedTick(hours) {
+      const minutes = Math.round(Number(hours) * 60)
+      const wholeHours = Math.floor(minutes / 60)
+      const remainingMinutes = minutes % 60
+      if (!wholeHours) return `${remainingMinutes}m`
+      return remainingMinutes ? `${wholeHours}h ${remainingMinutes}m` : `${wholeHours}h`
+    }
+
     /** Pull live theme tokens so charts repaint correctly on theme switch. */
     function tokens() {
       const css = getComputedStyle(document.documentElement)
@@ -121,7 +130,10 @@
             title: { display: true, text: valueLabel, color: t.muted },
             ticks: {
               color: t.faint,
-              ...(roundingEnabled ? { stepSize: roundingIntervalHours } : {}),
+              ...(roundingEnabled ? {
+                stepSize: roundingIntervalHours,
+                callback: (value) => formatRoundedTick(value),
+              } : {}),
             },
             grid: { color: t.border, drawBorder: false },
           },

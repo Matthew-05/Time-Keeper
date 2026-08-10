@@ -41,10 +41,10 @@
         <!-- Works (only shown while a task is running). Scoped to the running
              task's client for today, so it persists across separate blocks of
              time spent on the same client. -->
-        <div id="works-container" class="hidden">
-          <label class="tk-label">Works</label>
-          <div id="works-list"></div>
-        </div>
+        <section id="works-container" class="hidden" aria-labelledby="works-heading">
+          <h2 id="works-heading" class="tk-label">Works</h2>
+          <div id="works-list" class="tk-works-panel"></div>
+        </section>
 
         <!-- Time -->
         <div id="timepicker-container" class="rounded-lg border border-border bg-surface-2 px-4 py-5">
@@ -54,7 +54,7 @@
             <button
               type="button"
               id="recent-task-end-time"
-              class="hidden rounded-lg border border-border bg-surface px-3 py-1.5 text-left transition-colors hover:border-accent hover:bg-accent-soft"
+              class="tk-previous-time hidden rounded-lg border px-3 py-1.5 text-left transition-colors hover:border-accent hover:bg-accent-soft"
               title="Click to use this time"
             >
               <div class="text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-faint">Previous end</div>

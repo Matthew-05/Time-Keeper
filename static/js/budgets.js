@@ -110,6 +110,18 @@ class Budgets extends TimeKeeper {
             if (this.detailId && this.detail) this.renderDetail(this.detail)
         })
         await this.load()
+        await this.openLinkedBudget()
+    }
+
+    /** Open a budget linked from another page once the budget list is ready. */
+    async openLinkedBudget() {
+        const rawBudgetId = new URLSearchParams(window.location.search).get('budget_id')
+        if (!rawBudgetId || !/^\d+$/.test(rawBudgetId)) return
+
+        const budgetId = Number(rawBudgetId)
+        if (!this.budgets.some((budget) => budget.id === budgetId)) return
+
+        await this.openDetail(budgetId)
     }
 
     // -- loading -----------------------------------------------------------

@@ -97,8 +97,9 @@ export class BudgetWidget {
         // The whole point of this widget is the glance, so the layout is one
         // line of identity, one bar, one line of consequence.
         return `
-          <a href="/budgets" class="tk-budget-strip block no-underline" data-status="${budget.status}"
-             title="Open the Budgets page">
+          <a href="/budgets?budget_id=${encodeURIComponent(budget.id)}"
+             class="tk-budget-strip block no-underline" data-status="${budget.status}"
+             title="Open this budget in Budgets">
             <div class="mb-1.5 flex items-baseline justify-between gap-2">
               <span class="min-w-0 truncate text-sm font-semibold text-text">${this.escape(budget.name)}</span>
               <span class="tabular flex-shrink-0 text-sm font-semibold" style="color: var(--status-text)">
