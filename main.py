@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import httpx
 import getpass
+import re
 
 # True when running from source, False inside the PyInstaller bundle.
 # Drives the dev-only niceties — most visibly the webview devtools.
@@ -68,6 +69,43 @@ from werkzeug.serving import run_simple
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from sqlalchemy import func, String, literal, case
 import socket
+
+
+_CANONICAL_CLOCK_RE = re.compile(r'^(\d{2}):(\d{2})(?::(\d{2}))?$')
+_LEGACY_CLOCK_RE = re.compile(r'^(\d{1,2}):(\d{2})\s+(AM|PM)$', re.IGNORECASE)
+
+
+def parse_clock_time(value):
+    """Parse an API clock value without attaching a date or timezone.
+
+    New clients send canonical ``HH:MM`` (or ``HH:MM:SS`` when preserving
+    storage precision). Legacy releases sent ``h:mm AM/PM``. Accepting both at
+    this boundary lets UI display formatting change independently from API and
+    database contracts. Invalid values raise ``ValueError``.
+    """
+    if not isinstance(value, str):
+        raise ValueError('Clock time must be a string')
+
+    value = value.strip()
+    match = _CANONICAL_CLOCK_RE.fullmatch(value)
+    if match:
+        hours, minutes = int(match.group(1)), int(match.group(2))
+        seconds = int(match.group(3) or 0)
+    else:
+        match = _LEGACY_CLOCK_RE.fullmatch(value)
+        if not match:
+            raise ValueError('Expected HH:MM, HH:MM:SS, or h:mm AM/PM')
+        hour_12, minutes = int(match.group(1)), int(match.group(2))
+        if not 1 <= hour_12 <= 12:
+            raise ValueError('12-hour clock hour is out of range')
+        hours = hour_12 % 12
+        if match.group(3).upper() == 'PM':
+            hours += 12
+        seconds = 0
+
+    if not 0 <= hours <= 23 or not 0 <= minutes <= 59 or not 0 <= seconds <= 59:
+        raise ValueError('Clock time is out of range')
+    return datetime(2000, 1, 1, hours, minutes, seconds).time()
 
 
 class UsageLogger:
@@ -927,14 +965,14 @@ def get_most_recent_task_end_time():
     
     if most_recent_task and most_recent_task.end_time:
         return jsonify({
-            'mostRecentTaskEndTime': most_recent_task.end_time.strftime('%I:%M %p')
+            'mostRecentTaskEndTime': most_recent_task.end_time.strftime('%H:%M')
         })
     else:
         # If no completed tasks today, return the day's start time
         day_start = TimeTracking.query.filter_by(date=today).first()
         if day_start and day_start.start_time:
             return jsonify({
-                'mostRecentTaskEndTime': day_start.start_time.strftime('%I:%M %p')
+                'mostRecentTaskEndTime': day_start.start_time.strftime('%H:%M')
             })
     
     # If no day start or completed tasks, return null
@@ -945,12 +983,17 @@ def get_most_recent_task_end_time():
 @app.route('/complete_task', methods=['POST'])
 def complete_task():
     print("Completing task")
-    data = request.json
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON object required'}), 400
     client_name = data.get('client')
     end_time = data.get('endTime')
     type = data.get('type')
     print("submitted end time", end_time)
-    datetime_obj = datetime.strptime(end_time, '%I:%M %p').time()
+    try:
+        datetime_obj = parse_clock_time(end_time)
+    except ValueError:
+        return jsonify({'error': 'Invalid end time format'}), 400
     date = datetime.now().date()
 
     if not client_name:
@@ -985,13 +1028,18 @@ def complete_task():
 
 @app.route('/add_unfinished_task', methods=['POST'])
 def add_unfinished_task():
-    data = request.json
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON object required'}), 400
     client_name = data.get('client')
     now = datetime.now()
     start_date = now.date()
     start_time = data.get('startTime')
     print("submitted start time", start_time)
-    datetime_obj = datetime.strptime(start_time, '%I:%M %p').time()
+    try:
+        datetime_obj = parse_clock_time(start_time)
+    except ValueError:
+        return jsonify({'error': 'Invalid start time format'}), 400
 
 
     client = Client.query.filter_by(name=client_name).first()
@@ -1022,9 +1070,14 @@ def add_unfinished_task():
 def start_day():
     print("starting day")
     today = datetime.now().date()
-    data = request.json
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON object required'}), 400
     submitted_time = data.get('time')
-    datetime_obj = datetime.strptime(submitted_time, '%I:%M %p').time()
+    try:
+        datetime_obj = parse_clock_time(submitted_time)
+    except ValueError:
+        return jsonify({'error': 'Invalid start time format'}), 400
     existing_entry = TimeTracking.query.filter_by(date=today).first()
     if existing_entry:
         return jsonify({'message': 'Day already started'}), 400
@@ -1038,11 +1091,18 @@ def start_day():
 def end_day():
     print("ending day")
     today = datetime.now().date()
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON object required'}), 400
+    try:
+        submitted_time = parse_clock_time(data.get('time'))
+    except ValueError:
+        return jsonify({'error': 'Invalid end time format'}), 400
     existing_entry = TimeTracking.query.filter_by(date=today).first()
     if not existing_entry:
         return jsonify({'error': 'Day has not been started yet'}), 400
 
-    existing_entry.end_time = datetime.now().time()
+    existing_entry.end_time = submitted_time
     db.session.commit()
     return jsonify({'message': 'Day ended successfully'}), 200
 
@@ -1097,9 +1157,14 @@ def reopen_day():
 @app.route('/start_break', methods=['POST'])
 def start_break():
     today = datetime.now().date()
-    data = request.json
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON object required'}), 400
     submitted_time = data.get('time')
-    datetime_obj = datetime.strptime(submitted_time, '%I:%M %p').time()
+    try:
+        datetime_obj = parse_clock_time(submitted_time)
+    except ValueError:
+        return jsonify({'error': 'Invalid break start time format'}), 400
     # Create a new entry for the break
     new_entry = BreakTracking(date=today, start_time=datetime_obj)
     db.session.add(new_entry)
@@ -1111,10 +1176,15 @@ def end_break():
     today = datetime.now().date()
     existing_entry = BreakTracking.query.filter_by(date=today).first()
     print(existing_entry)
-    data = request.json
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON object required'}), 400
     submitted_time = data.get('time')
     print(submitted_time)
-    datetime_obj = datetime.strptime(submitted_time, '%I:%M %p').time()
+    try:
+        datetime_obj = parse_clock_time(submitted_time)
+    except ValueError:
+        return jsonify({'error': 'Invalid break end time format'}), 400
     if existing_entry:
         print(datetime_obj)
         existing_entry.end_time = datetime_obj
@@ -1227,7 +1297,7 @@ def get_min_time():
         return jsonify({'min_time': min_time})
 
         
-    min_time = '12:00 AM'
+    min_time = '00:00'
     return jsonify({'min_time': min_time})
 
 @app.route('/summary')
@@ -2082,11 +2152,16 @@ def api_unbudgeted_hours(client_id):
 
 @app.route('/update_task/<int:task_id>', methods=['PUT'])
 def update_task(task_id):
-    data = request.json
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON object required'}), 400
     task = Task_Item.query.get_or_404(task_id)
     
-    new_start = datetime.strptime(data['start_time'], '%I:%M %p').time()
-    new_end = datetime.strptime(data['end_time'], '%I:%M %p').time()
+    try:
+        new_start = parse_clock_time(data['start_time'])
+        new_end = parse_clock_time(data['end_time'])
+    except (KeyError, ValueError):
+        return jsonify({'error': 'Invalid start or end time format'}), 400
     
     print(f"Looking for tasks around - Start: {new_start}, End: {new_end}")
     
@@ -2118,8 +2193,17 @@ def update_task(task_id):
 
     if overlapping:
         overlapping_task = next(t for t in all_tasks if t.start_time < new_end and t.end_time > new_start)
+        conflict_start = overlapping_task.start_time.strftime('%H:%M')
+        conflict_end = overlapping_task.end_time.strftime('%H:%M')
         return jsonify({
-            'error': f'Task times overlap with existing task ({overlapping_task.start_time.strftime("%I:%M %p")} - {overlapping_task.end_time.strftime("%I:%M %p")}). Please choose a different time.'
+            # Keep the established `error` field for old clients while exposing
+            # machine-readable canonical clock values to new ones.
+            'error': f'Task times overlap with existing task ({conflict_start} - {conflict_end}). Please choose a different time.',
+            'conflict': {
+                'task_id': overlapping_task.id,
+                'start_time': conflict_start,
+                'end_time': conflict_end,
+            },
         }), 400
 
     task.start_time = new_start
@@ -2274,7 +2358,9 @@ def delete_task(task_id):
 
 @app.route('/update_day_time', methods=['POST'])
 def update_day_time():
-    data = request.json
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON object required'}), 400
     date_str = data.get('date')
     time_type = data.get('type')  # 'start' or 'end'
     time_str = data.get('time')
@@ -2284,7 +2370,7 @@ def update_day_time():
     
     try:
         date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
-        time_obj = datetime.strptime(time_str, '%I:%M %p').time()
+        time_obj = parse_clock_time(time_str)
     except ValueError:
         return jsonify({'error': 'Invalid date or time format'}), 400
     
@@ -2415,13 +2501,55 @@ class WebviewAPI:
         webview.windows[0].evaluate_js(f'window.location.href = "{url}"')
 
 
+def _format_admin_clock(_view, _context, model, column_name):
+    """Render a stored clock in Flask-Admin using the display preference.
+
+    This is presentation-only: model values remain ``datetime.time`` objects,
+    and API responses continue to use canonical 24-hour strings. Flask-Admin's
+    browser/native form widgets can still follow browser locale conventions;
+    these formatters cover the generated list and detail text.
+    """
+    value = getattr(model, column_name, None)
+    if value is None:
+        return ''
+    if user_settings.get_setting('time_format') == '24h':
+        return value.strftime('%H:%M')
+    return value.strftime('%I:%M %p').lstrip('0')
+
+
+class TaskItemAdminView(ModelView):
+    column_formatters = {
+        'start_time': _format_admin_clock,
+        'end_time': _format_admin_clock,
+    }
+    column_formatters_detail = column_formatters
+
+
+class TimeTrackingAdminView(ModelView):
+    column_formatters = {
+        'start_time': _format_admin_clock,
+        'end_time': _format_admin_clock,
+        # Legacy field, but it is still a db.Time column exposed by this view.
+        'pause_time': _format_admin_clock,
+    }
+    column_formatters_detail = column_formatters
+
+
+class BreakTrackingAdminView(ModelView):
+    column_formatters = {
+        'start_time': _format_admin_clock,
+        'end_time': _format_admin_clock,
+    }
+    column_formatters_detail = column_formatters
+
+
 admin = Admin(app, name='Admin Panel', theme=Bootstrap4Theme())
 
 # Add model views to Flask-Admin
-admin.add_view(ModelView(Task_Item, db.session))
-admin.add_view(ModelView(TimeTracking, db.session))
+admin.add_view(TaskItemAdminView(Task_Item, db.session))
+admin.add_view(TimeTrackingAdminView(TimeTracking, db.session))
 admin.add_view(ModelView(Client, db.session))
-admin.add_view(ModelView(BreakTracking, db.session))
+admin.add_view(BreakTrackingAdminView(BreakTracking, db.session))
 admin.add_view(ModelView(Work, db.session))
 admin.add_view(ModelView(Budget, db.session))
 

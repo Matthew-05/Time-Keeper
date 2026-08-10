@@ -32,6 +32,7 @@ USER_DATA_DIR = os.path.join(Path.home(), 'AppData', 'Local', 'TimeKeeper')
 SETTINGS_PATH = os.path.join(USER_DATA_DIR, 'settings.json')
 
 THEME_CHOICES = ('light', 'dark', 'auto')
+TIME_FORMAT_CHOICES = ('12h', '24h')
 
 # Bounds for the description reminder. The UI enforces these too, but a
 # hand-edited file or a stale client shouldn't be able to set a 0-minute
@@ -234,6 +235,9 @@ def _validate_work_schedule_history(value):
 # reject it and fall back to the default.
 _SCHEMA = {
     'theme': ('auto', _validate_choice(THEME_CHOICES)),
+    # How clock times are presented in the UI. API and database values remain
+    # canonical 24-hour clock strings regardless of this display preference.
+    'time_format': ('12h', _validate_choice(TIME_FORMAT_CHOICES)),
     # Windows toast nudging you to describe the task you're currently on.
     'reminder_enabled': (True, _validate_bool),
     'reminder_interval_minutes': (

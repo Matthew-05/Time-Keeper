@@ -60,15 +60,15 @@
 {% block page_scripts %}
   <script type="module">
     import { TimeKeeper } from "{{ url_for('static', filename='js/base.js') }}"
+    import { formatClockTime, serializeClockTime } from "{{ url_for('static', filename='js/time_format.js') }}"
 
     const tk = new TimeKeeper()
     const tbody = document.getElementById('task-table-body')
 
-    function to12Hour(value) {
+    function clock(value) {
       if (!value) return '—'
-      const [h, m] = value.split(':')
-      const period = +h >= 12 ? 'PM' : 'AM'
-      return `${+h % 12 || 12}:${m} ${period}`
+      const canonical = serializeClockTime(value)
+      return `<span data-clock-time="${canonical}">${formatClockTime(canonical)}</span>`
     }
 
     async function load(date) {
@@ -88,9 +88,9 @@
             (task) => `
               <tr class="${task.is_ongoing ? 'tk-row-ongoing' : ''}">
                 <td class="tk-num text-faint">${task.id}</td>
-                <td class="tk-num whitespace-nowrap">${to12Hour(task.start_time)}</td>
+                <td class="tk-num whitespace-nowrap">${clock(task.start_time)}</td>
                 <td class="tk-num whitespace-nowrap">
-                  ${to12Hour(task.end_time)}
+                  ${clock(task.end_time)}
                   ${task.is_ongoing ? '<span class="tk-badge tk-badge-warn ml-1.5">Ongoing</span>' : ''}
                 </td>
                 <td class="font-medium">${tk.escapeHtml(task.client_name)}</td>
@@ -115,5 +115,11 @@
     })
 
     load(picker.input.value)
+
+    document.addEventListener('timeFormatChanged', () => {
+      document.querySelectorAll('[data-clock-time]').forEach((element) => {
+        element.textContent = formatClockTime(element.dataset.clockTime)
+      })
+    })
   </script>
 {% endblock %}

@@ -9,6 +9,7 @@ import {
     percent,
     shortDate,
 } from './budget_render.js'
+import { formatClockTime } from './time_format.js'
 
 /**
  * Budgets page.
@@ -102,6 +103,9 @@ class Budgets extends TimeKeeper {
         this.bindModals()
         this.bindInsights()
         this.bindTheme()
+        document.addEventListener('timeFormatChanged', () => {
+            if (this.detailId && this.detail) this.renderDetail(this.detail)
+        })
         await this.load()
     }
 
@@ -1152,7 +1156,7 @@ class Budgets extends TimeKeeper {
           <tr>
             <td class="tk-num whitespace-nowrap">${shortDate(entry.date)}</td>
             <td class="tk-num whitespace-nowrap text-muted">
-              ${entry.start_time ?? '—'}${entry.end_time ? `–${entry.end_time}` : ''}
+              ${entry.start_time ? formatClockTime(entry.start_time) : '—'}${entry.end_time ? `–${formatClockTime(entry.end_time)}` : ''}
               ${entry.running ? '<span class="tk-badge tk-badge-accent ml-1.5">running</span>' : ''}
             </td>
             <td class="tk-num text-right font-medium">
@@ -1205,7 +1209,7 @@ class Budgets extends TimeKeeper {
           <tr>
             <td class="tk-num whitespace-nowrap">${shortDate(entry.date)}</td>
             <td class="tk-num whitespace-nowrap text-muted">
-              ${entry.start_time ?? '—'}${entry.end_time ? `–${entry.end_time}` : ''}
+              ${entry.start_time ? formatClockTime(entry.start_time) : '—'}${entry.end_time ? `–${formatClockTime(entry.end_time)}` : ''}
               ${entry.running ? '<span class="tk-badge tk-badge-accent ml-1.5">running</span>' : ''}
             </td>
             <td class="tk-num text-right font-medium">${hours(entry.hours)}</td>

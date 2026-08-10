@@ -1,6 +1,15 @@
 import { TimeKeeper, ready } from './base.js';
 import { WorksList } from './works.js';
 import { BudgetWidget } from './budget_widget.js';
+import {
+    clockTimeToDate,
+    clockTimeToSeconds,
+    currentClockTime,
+    flatpickrTimeFormat,
+    flatpickrTimeOptions,
+    formatClockTime,
+    serializeClockTime,
+} from './time_format.js';
 
 export class TimeKeeperIndex extends TimeKeeper {
     constructor() {
@@ -205,13 +214,10 @@ export class TimeKeeperIndex extends TimeKeeper {
 
     initializeTimePicker() {
         const now = new Date();
-        this.timePickerInstance = flatpickr(this.timePicker, {
-            enableTime: true,
-            noCalendar: true,
-            dateFormat: "h:i K",
+        this.timePickerInstance = flatpickr(this.timePicker, flatpickrTimeOptions({
             defaultHour: now.getHours(),
             defaultMinute: now.getMinutes(),
-        });
+        }));
     }
 
 
@@ -224,7 +230,27 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.reopenDayButton.addEventListener('click', () => this.handleReopenDay());
         this.currentTimeButton.addEventListener('click', () => this.setCurrentTime());
         this.recentTaskEndTime.addEventListener('click', () => this.useRecentTaskEndTime());
+        document.addEventListener('timeFormatChanged', () => this.handleTimeFormatChanged());
 
+    }
+
+    handleTimeFormatChanged() {
+        const selected = this.timePickerInstance.selectedDates[0]
+        const pickerFormat = flatpickrTimeFormat()
+        this.timePickerInstance.set('time_24hr', pickerFormat.time_24hr)
+        this.timePickerInstance.set('dateFormat', pickerFormat.dateFormat)
+        if (selected) this.timePickerInstance.setDate(selected, false)
+
+        if (this.storedRecentTaskEndTime) {
+            this.recentTaskTimeValue.textContent = formatClockTime(this.storedRecentTaskEndTime)
+        }
+        if (this.earliestAllowedTime) {
+            document.getElementById('lowestTimeAllowed').textContent =
+                `Earliest allowed: ${formatClockTime(this.earliestAllowedTime)}`
+        }
+        if (this.runningTaskStartTime && !this.taskStartTimeDisplay.classList.contains('hidden')) {
+            this.taskStartTimeDisplay.textContent = `${formatClockTime(this.runningTaskStartTime)} -`
+        }
     }
 
 
@@ -238,14 +264,11 @@ export class TimeKeeperIndex extends TimeKeeper {
         try {
             const response = await this.fetchFromAPI('/most_recent_task_end_time');
             if (response.mostRecentTaskEndTime) {
-                // Format time as h:mm AM/PM (remove leading zero from hour)
-                const timeStr = response.mostRecentTaskEndTime;
-                const formattedTime = timeStr.replace(/^0/, ''); // Remove leading zero if present
-                
-                this.recentTaskTimeValue.textContent = formattedTime;
+                const timeStr = serializeClockTime(response.mostRecentTaskEndTime);
+                this.recentTaskTimeValue.textContent = formatClockTime(timeStr);
                 this.recentTaskEndTime.classList.remove('hidden');
                 // Store the original time for later use
-                this.storedRecentTaskEndTime = response.mostRecentTaskEndTime;
+                this.storedRecentTaskEndTime = timeStr;
             } else {
                 this.recentTaskEndTime.classList.add('hidden');
                 this.storedRecentTaskEndTime = null;
@@ -258,9 +281,7 @@ export class TimeKeeperIndex extends TimeKeeper {
 
     useRecentTaskEndTime() {
         if (this.storedRecentTaskEndTime) {
-            // Parse the stored time and set it in the time picker
-            const dateObj = new Date(`2000-01-01 ${this.storedRecentTaskEndTime}`);
-            this.timePickerInstance.setDate(dateObj);
+            this.timePickerInstance.setDate(clockTimeToDate(this.storedRecentTaskEndTime));
             this.showToast('Time set to previous task end time', 'success');
         }
     }
@@ -269,16 +290,10 @@ export class TimeKeeperIndex extends TimeKeeper {
     async getMostRecentEndTimeFromBackend() {
         const response = await this.fetchFromAPI('/most_recent_end_time');
         if (response.mostRecentEndTime) {
-            const dateObj = new Date(`2000-01-01 ${response.mostRecentEndTime}`);
-            const hours = dateObj.getHours();
-            const minutes = dateObj.getMinutes();
-            const ampm = hours >= 12 ? 'PM' : 'AM';
-            const formattedHours = hours % 12 || 12;
-            const formattedMinutes = minutes.toString().padStart(2, '0');
-            const timeString = `${formattedHours}:${formattedMinutes} ${ampm}`;
-
-            document.getElementById('lowestTimeAllowed').textContent = `Earliest allowed: ${timeString}`;
-            return response.mostRecentEndTime;
+            this.earliestAllowedTime = serializeClockTime(response.mostRecentEndTime)
+            document.getElementById('lowestTimeAllowed').textContent =
+                `Earliest allowed: ${formatClockTime(this.earliestAllowedTime)}`;
+            return this.earliestAllowedTime;
         }
         return null;
     }
@@ -329,7 +344,7 @@ export class TimeKeeperIndex extends TimeKeeper {
             const response = await this.fetchFromAPI('/start_day', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ time: this.timePicker.value })
+                body: JSON.stringify({ time: serializeClockTime(this.timePicker.value) })
             });
 
             // If we get here, the request was successful (fetchFromAPI would throw on error)
@@ -377,7 +392,7 @@ export class TimeKeeperIndex extends TimeKeeper {
             }
 
             // Get the current time from the time picker
-            const selectedTime = this.timePicker.value;
+            const selectedTime = serializeClockTime(this.timePicker.value);
 
             // Call the API endpoint to end the day
             const response = await this.fetchFromAPI('/end_day', {
@@ -402,20 +417,6 @@ export class TimeKeeperIndex extends TimeKeeper {
             // Error is already handled by fetchFromAPI with a toast
         }
     }
-
-
-
-
-    getCurrentTimeIn12HourFormat() {
-        const now = new Date();
-        const hours = now.getHours();
-        const minutes = now.getMinutes();
-        const ampm = hours >= 12 ? 'PM' : 'AM';
-        const formattedHours = hours % 12 || 12;
-        const formattedMinutes = minutes.toString().padStart(2, '0');
-        return `${formattedHours}:${formattedMinutes} ${ampm}`;
-    }
-
 
 
 
@@ -448,14 +449,13 @@ export class TimeKeeperIndex extends TimeKeeper {
             return;
         }
 
-        // Compare with current time if needed
-        const currentTime = this.getCurrentTimeIn12HourFormat();
+        const canonicalTime = serializeClockTime(selectedTime);
         const response = await this.fetchFromAPI('/add_unfinished_task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 client: clientName,
-                startTime: selectedTime
+                startTime: canonicalTime
             })
         });
 
@@ -465,12 +465,12 @@ export class TimeKeeperIndex extends TimeKeeper {
 
             // Directly call the global startTimerWithTime function with the selected time
             if (window.startTimerWithTime) {
-                window.startTimerWithTime(selectedTime, clientName);
+                window.startTimerWithTime(canonicalTime, clientName);
             } else {
                 console.error('startTimerWithTime function not found in global scope');
                 // Fallback to the event-based approach
                 document.dispatchEvent(new CustomEvent('taskStarted', {
-                    detail: { startTime: selectedTime, client: clientName }
+                    detail: { startTime: canonicalTime, client: clientName }
                 }));
             }
 
@@ -493,16 +493,12 @@ export class TimeKeeperIndex extends TimeKeeper {
             const mostRecentTaskEndTime = response.mostRecentTaskEndTime;
 
             if (mostRecentTaskEndTime) {
-                // Convert both times to comparable format (24-hour)
-                const selectedDateTime = new Date(`2000-01-01 ${selectedTime}`);
-                const recentEndDateTime = new Date(`2000-01-01 ${mostRecentTaskEndTime}`);
-
                 // Check if selected time is earlier than the most recent task end time
-                if (selectedDateTime < recentEndDateTime) {
-                    this.showToast(`Task start time cannot be earlier than the previous task's end time (${this.formatTimeDisplay(mostRecentTaskEndTime)})`, 'error');
+                if (clockTimeToSeconds(selectedTime) < clockTimeToSeconds(mostRecentTaskEndTime)) {
+                    this.showToast(`Task start time cannot be earlier than the previous task's end time (${formatClockTime(mostRecentTaskEndTime)})`, 'error');
 
                     // Reset the time picker to the most recent task end time
-                    this.timePickerInstance.setDate(recentEndDateTime);
+                    this.timePickerInstance.setDate(clockTimeToDate(mostRecentTaskEndTime));
                     return false;
                 }
             }
@@ -548,7 +544,7 @@ export class TimeKeeperIndex extends TimeKeeper {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 client: this.clientInput.value,
-                endTime: this.timePicker.value
+                endTime: serializeClockTime(this.timePicker.value)
             })
         });
 
@@ -582,42 +578,6 @@ export class TimeKeeperIndex extends TimeKeeper {
             await this.updateRecentTaskEndTime();
         }
     }
-
-    formatTimeDisplay(timeString) {
-        if (!timeString) return '';
-
-        // Parse the time string (assuming format like "HH:MM:SS" or "HH:MM:SS AM/PM")
-        let timeParts = timeString.split(' ');
-        let timeValue = timeParts[0];
-        let ampm = timeParts.length > 1 ? timeParts[1] : '';
-
-        // Split hours, minutes, seconds
-        let [hours, minutes, seconds] = timeValue.split(':');
-
-        // Remove leading zero from hours if present
-        if (hours.startsWith('0')) {
-            hours = hours.substring(1);
-        }
-
-        // If no AM/PM is provided in the string but hours > 12, convert to 12-hour format
-        if (!ampm) {
-            if (parseInt(hours) > 12) {
-                hours = (parseInt(hours) - 12).toString();
-                ampm = 'PM';
-            } else if (parseInt(hours) === 12) {
-                ampm = 'PM';
-            } else if (parseInt(hours) === 0) {
-                hours = '12';
-                ampm = 'AM';
-            } else {
-                ampm = 'AM';
-            }
-        }
-
-        // Return formatted time without seconds
-        return `${hours}:${minutes} ${ampm}`;
-    }
-
 
     async initializeAutocomplete() {
         // Remove any existing event listeners first
@@ -862,7 +822,8 @@ export class TimeKeeperIndex extends TimeKeeper {
 
         // Display the task start time if available
         if (task && task.start_time) {
-            const formattedTime = this.formatTimeDisplay(task.start_time);
+            this.runningTaskStartTime = serializeClockTime(task.start_time)
+            const formattedTime = formatClockTime(this.runningTaskStartTime);
             this.taskStartTimeDisplay.textContent = `${formattedTime} -`;
             this.taskStartTimeDisplay.classList.remove('hidden');
         }
@@ -884,6 +845,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         // Hide the task start time display
         this.taskStartTimeDisplay.classList.add('hidden');
         this.taskStartTimeDisplay.textContent = '';
+        this.runningTaskStartTime = null;
     }
 
     hideInputFields() {
@@ -932,25 +894,8 @@ export class TimeKeeperIndex extends TimeKeeper {
 
 
     async validateTimeNotInFuture(selectedTime) {
-        // Parse the selected time (in 12-hour format like "1:30 PM")
-        const [timePart, ampmPart] = selectedTime.split(' ');
-        const [hours, minutes] = timePart.split(':').map(Number);
-
-        // Convert to 24-hour format
-        let hours24 = hours;
-        if (ampmPart.toUpperCase() === 'PM' && hours < 12) {
-            hours24 += 12;
-        } else if (ampmPart.toUpperCase() === 'AM' && hours === 12) {
-            hours24 = 0;
-        }
-
-        // Create Date objects for comparison
-        const now = new Date();
-        const selectedDateTime = new Date();
-        selectedDateTime.setHours(hours24, minutes, 0, 0);
-
         // Check if selected time is in the future
-        if (selectedDateTime > now) {
+        if (clockTimeToSeconds(selectedTime) > clockTimeToSeconds(currentClockTime({ includeSeconds: true }))) {
             this.showToast('Cannot select a time in the future', 'error');
             return false;
         }
@@ -981,23 +926,10 @@ export class TimeKeeperIndex extends TimeKeeper {
             const mostRecentEndTime = response.mostRecentEndTime;
 
             if (mostRecentEndTime) {
-                // Convert both times to comparable format (24-hour)
-                const selectedDateTime = new Date(`2000-01-01 ${selectedTime}`);
-                const recentEndDateTime = new Date(`2000-01-01 ${mostRecentEndTime}`);
-
                 // Check if selected time is earlier than the most recent end time
-                if (selectedDateTime < recentEndDateTime) {
-                    this.showToast(`Selected time cannot be earlier than ${mostRecentEndTime}`, 'error');
-
-                    // Reset the time picker to the most recent end time
-                    const hours = recentEndDateTime.getHours();
-                    const minutes = recentEndDateTime.getMinutes();
-                    const ampm = hours >= 12 ? 'PM' : 'AM';
-                    const formattedHours = hours % 12 || 12;
-                    const formattedMinutes = minutes.toString().padStart(2, '0');
-                    const timeString = `${formattedHours}:${formattedMinutes} ${ampm}`;
-
-                    this.timePickerInstance.setDate(recentEndDateTime);
+                if (clockTimeToSeconds(selectedTime) < clockTimeToSeconds(mostRecentEndTime)) {
+                    this.showToast(`Selected time cannot be earlier than ${formatClockTime(mostRecentEndTime)}`, 'error');
+                    this.timePickerInstance.setDate(clockTimeToDate(mostRecentEndTime));
                     return false;
                 }
             }

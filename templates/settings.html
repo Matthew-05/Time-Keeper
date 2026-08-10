@@ -37,6 +37,25 @@
           </div>
         </div>
       </div>
+
+      <div class="border-t border-border p-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <span class="tk-label mb-0.5 block">Time format</span>
+            <p class="text-sm text-muted">Choose how clock times are displayed throughout Time Keeper.</p>
+          </div>
+
+          <div
+            id="time-format"
+            class="tk-segmented flex-shrink-0"
+            role="radiogroup"
+            aria-label="Time display format"
+          >
+            <button type="button" class="tk-segment" role="radio" aria-checked="false" data-time-format-option="12h">12 hour</button>
+            <button type="button" class="tk-segment" role="radio" aria-checked="false" data-time-format-option="24h">24 hour</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="tk-card mt-4">

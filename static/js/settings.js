@@ -1,5 +1,6 @@
 import { TimeKeeper, ready } from './base.js'
 import { applyTheme, currentMode } from './theme.js'
+import { applyTimeFormat, currentTimeFormat } from './time_format.js'
 
 /**
  * Settings page.
@@ -25,6 +26,7 @@ class Settings extends TimeKeeper {
     constructor() {
         super()
         this.themeGroup = document.getElementById('theme-mode')
+        this.timeFormatGroup = document.getElementById('time-format')
 
         this.reminderToggle = document.getElementById('reminder-enabled')
         this.reminderOptions = document.getElementById('reminder-options')
@@ -39,16 +41,20 @@ class Settings extends TimeKeeper {
 
         // Last server-confirmed values, seeded from what the server rendered.
         this.saved = {
+            time_format: currentTimeFormat(),
             reminder_enabled: this.reminderToggle.getAttribute('aria-checked') === 'true',
             reminder_interval_minutes: Number(this.intervalInput.value),
             reminder_snooze_minutes: Number(this.snoozeInput.value),
         }
 
         this.pendingSaves = new Map()
+        this.timeFormatSaveQueue = Promise.resolve()
+        this.timeFormatIntent = 0
     }
 
     init() {
         this.initTheme()
+        this.initTimeFormat()
         this.initReminders()
         this.initDevTools()
     }
@@ -68,10 +74,10 @@ class Settings extends TimeKeeper {
 
         // Arrow keys across a radiogroup, as expected for this role.
         this.themeGroup.addEventListener('keydown', (event) => {
-            if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+            if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(event.key)) return
             const options = [...this.themeGroup.querySelectorAll('[data-theme-option]')]
             const index = options.findIndex((b) => b.dataset.themeOption === currentMode())
-            const step = event.key === 'ArrowRight' ? 1 : -1
+            const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
             const next = options[(index + step + options.length) % options.length]
             event.preventDefault()
             next.focus()
@@ -112,6 +118,70 @@ class Settings extends TimeKeeper {
             // survive a reload.
             applyTheme(previous)
             this.markThemeSelected(previous)
+        }
+    }
+
+    // -- time format ------------------------------------------------------
+
+    initTimeFormat() {
+        this.markTimeFormatSelected(currentTimeFormat())
+
+        this.timeFormatGroup.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-time-format-option]')
+            if (!button) return
+            this.setTimeFormat(button.dataset.timeFormatOption)
+        })
+
+        this.timeFormatGroup.addEventListener('keydown', (event) => {
+            if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(event.key)) return
+            const options = [
+                ...this.timeFormatGroup.querySelectorAll('[data-time-format-option]'),
+            ]
+            const index = options.findIndex(
+                (button) => button.dataset.timeFormatOption === currentTimeFormat()
+            )
+            const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
+            const next = options[(index + step + options.length) % options.length]
+            event.preventDefault()
+            next.focus()
+            this.setTimeFormat(next.dataset.timeFormatOption)
+        })
+    }
+
+    markTimeFormatSelected(timeFormat) {
+        this.timeFormatGroup.querySelectorAll('[data-time-format-option]').forEach((button) => {
+            const selected = button.dataset.timeFormatOption === timeFormat
+            button.classList.toggle('active', selected)
+            button.setAttribute('aria-checked', selected ? 'true' : 'false')
+            button.tabIndex = selected ? 0 : -1
+        })
+    }
+
+    async setTimeFormat(timeFormat) {
+        if (timeFormat === currentTimeFormat()) return
+        const intent = ++this.timeFormatIntent
+
+        applyTimeFormat(timeFormat)
+        this.markTimeFormatSelected(timeFormat)
+
+        // Serialize writes so the server's final value follows the user's click
+        // order. The intent token prevents an older response from repainting a
+        // newer optimistic choice while rapid toggles are still queued.
+        const request = this.timeFormatSaveQueue.then(() => this.save({ time_format: timeFormat }))
+        this.timeFormatSaveQueue = request.catch(() => {})
+
+        try {
+            const saved = await request
+            this.saved.time_format = saved.time_format
+            if (intent === this.timeFormatIntent) {
+                applyTimeFormat(saved.time_format)
+                this.markTimeFormatSelected(saved.time_format)
+            }
+        } catch (error) {
+            if (intent === this.timeFormatIntent) {
+                applyTimeFormat(this.saved.time_format)
+                this.markTimeFormatSelected(this.saved.time_format)
+            }
         }
     }
 

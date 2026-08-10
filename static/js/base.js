@@ -1,3 +1,5 @@
+import { clockTimeToSeconds } from './time_format.js';
+
 /**
  * Run `fn` once the DOM is parsed.
  *
@@ -90,18 +92,6 @@ export class TimeKeeper {
                 'tk-toast-container fixed bottom-9 right-4 flex flex-col-reverse gap-2';
             document.body.appendChild(toastContainer);
         }
-    }
-
-    getCurrentTimeIn12HourFormat() {
-        const now = new Date();
-        let hours = now.getHours();
-        let minutes = now.getMinutes();
-        const ampm = hours >= 12 ? 'PM' : 'AM';
-
-        hours = hours % 12 || 12;
-        minutes = minutes.toString().padStart(2, '0');
-
-        return `${hours}:${minutes} ${ampm}`;
     }
 
     /**
@@ -272,8 +262,9 @@ export class TimeKeeper {
 
     timeStringToMinutes(timeString) {
         if (!timeString) return 0;
-        const [hours, minutes] = timeString.split(':').map(Number);
-        return (hours * 60) + minutes;
+        // Preserve the established whole-minute duration semantics: seconds in
+        // API values never made a partial minute before this shared parser.
+        return Math.floor(clockTimeToSeconds(timeString) / 60);
     }
 
     minutesToHoursMinutes(minutes) {

@@ -1,5 +1,14 @@
 import { TimeKeeper, ready, clientColor, lockBodyScroll, unlockBodyScroll } from './base.js';
 import { WorksList, fetchWorks, joinWorks } from './works.js';
+import {
+    clockTimeToDate,
+    currentClockTime,
+    flatpickrTimeFormat,
+    flatpickrTimeOptions,
+    formatClockTime,
+    serializeClockTime,
+    visTimelineTimeFormat,
+} from './time_format.js';
 
 export class TaskBrowser extends TimeKeeper {
     constructor() {
@@ -15,6 +24,7 @@ export class TaskBrowser extends TimeKeeper {
             console.error('Initial load failed:', error);
         });
         this.initializeTaskEditing();
+        document.addEventListener('timeFormatChanged', () => this.handleTimeFormatChanged());
 
         setInterval(() => {
             if (this.selectedDate.value === this.getLocalDateString()) {
@@ -79,25 +89,38 @@ export class TaskBrowser extends TimeKeeper {
 
     initializeDayTimePickers() {
         // Initialize time pickers with onChange to show action buttons
-        this.dayStartTimePicker = flatpickr(this.dayStartTime, {
-            enableTime: true,
-            noCalendar: true,
-            dateFormat: "h:i K",
-            time_24hr: false,
+        this.dayStartTimePicker = flatpickr(this.dayStartTime, flatpickrTimeOptions({
             onChange: () => {
                 this.showTimeActions('start');
             }
-        });
+        }));
 
-        this.dayEndTimePicker = flatpickr(this.dayEndTime, {
-            enableTime: true,
-            noCalendar: true,
-            dateFormat: "h:i K",
-            time_24hr: false,
+        this.dayEndTimePicker = flatpickr(this.dayEndTime, flatpickrTimeOptions({
             onChange: () => {
                 this.showTimeActions('end');
             }
-        });
+        }));
+    }
+
+    reconfigureTimePicker(picker) {
+        if (!picker) return
+        const selected = picker.selectedDates[0]
+        const options = flatpickrTimeFormat()
+        picker.set('time_24hr', options.time_24hr)
+        picker.set('dateFormat', options.dateFormat)
+        if (selected) picker.setDate(selected, false)
+    }
+
+    handleTimeFormatChanged() {
+        this.reconfigureTimePicker(this.dayStartTimePicker)
+        this.reconfigureTimePicker(this.dayEndTimePicker)
+        document.querySelectorAll('.task-time-picker').forEach((input) => {
+            this.reconfigureTimePicker(input._flatpickr)
+        })
+        document.querySelectorAll('[data-clock-time]').forEach((element) => {
+            element.textContent = formatClockTime(element.dataset.clockTime)
+        })
+        if (this.timeline) this.timeline.setOptions({ format: visTimelineTimeFormat() })
     }
 
     showTimeActions(type) {
@@ -129,13 +152,14 @@ export class TaskBrowser extends TimeKeeper {
         }
 
         try {
+            const canonicalTime = serializeClockTime(timeStr)
             const response = await this.fetchFromAPI('/update_day_time', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     date: this.selectedDate.value,
                     type: type,
-                    time: timeStr
+                    time: canonicalTime
                 })
             });
 
@@ -144,11 +168,11 @@ export class TaskBrowser extends TimeKeeper {
                 
                 // Update the original value and flatpickr default
                 if (type === 'start') {
-                    this.originalStartTime = timeStr;
-                    this.dayStartTimePicker.setDate(timeStr, false);
+                    this.originalStartTime = canonicalTime;
+                    this.dayStartTimePicker.setDate(clockTimeToDate(canonicalTime), false);
                 } else {
-                    this.originalEndTime = timeStr;
-                    this.dayEndTimePicker.setDate(timeStr, false);
+                    this.originalEndTime = canonicalTime;
+                    this.dayEndTimePicker.setDate(clockTimeToDate(canonicalTime), false);
                 }
                 
                 // Hide action buttons
@@ -165,11 +189,11 @@ export class TaskBrowser extends TimeKeeper {
     handleCancelTime(type) {
         // Revert to original value
         if (type === 'start') {
-            this.dayStartTime.value = this.originalStartTime;
-            this.dayStartTimePicker.setDate(this.originalStartTime);
+            if (this.originalStartTime) this.dayStartTimePicker.setDate(clockTimeToDate(this.originalStartTime));
+            else this.dayStartTimePicker.clear();
         } else {
-            this.dayEndTime.value = this.originalEndTime;
-            this.dayEndTimePicker.setDate(this.originalEndTime);
+            if (this.originalEndTime) this.dayEndTimePicker.setDate(clockTimeToDate(this.originalEndTime));
+            else this.dayEndTimePicker.clear();
         }
         
         // Hide action buttons
@@ -198,7 +222,7 @@ export class TaskBrowser extends TimeKeeper {
             const response = await this.fetchFromAPI('/end_day', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ time: endTimeStr })
+                body: JSON.stringify({ time: serializeClockTime(endTimeStr) })
             });
 
             if (response.message) {
@@ -379,8 +403,8 @@ export class TaskBrowser extends TimeKeeper {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    start_time: startTime,
-                    end_time: endTime,
+                    start_time: serializeClockTime(startTime),
+                    end_time: serializeClockTime(endTime),
                     client_id: clientId
                 })
             });
@@ -388,6 +412,11 @@ export class TaskBrowser extends TimeKeeper {
             const data = await response.json();
 
             if (!response.ok) {
+                if (data.conflict?.start_time && data.conflict?.end_time) {
+                    throw new Error(
+                        `Task times overlap with an existing task (${formatClockTime(data.conflict.start_time)}–${formatClockTime(data.conflict.end_time)}). Please choose a different time.`
+                    )
+                }
                 throw new Error(data.error || 'Task times overlap with existing tasks');
             }
 
@@ -586,12 +615,8 @@ export class TaskBrowser extends TimeKeeper {
 
             // Update the day time pickers with fetched data
             if (start_time) {
-                const formattedStartTime = this.convertTo12HourFormat(start_time);
-                this.dayStartTime.value = formattedStartTime;
-                this.originalStartTime = formattedStartTime;
-                
-                // Set the flatpickr default date to the existing time
-                this.dayStartTimePicker.setDate(formattedStartTime, false);
+                this.originalStartTime = serializeClockTime(start_time);
+                this.dayStartTimePicker.setDate(clockTimeToDate(this.originalStartTime), false);
             } else {
                 this.dayStartTime.value = '';
                 this.originalStartTime = '';
@@ -599,12 +624,8 @@ export class TaskBrowser extends TimeKeeper {
             }
 
             if (end_time) {
-                const formattedEndTime = this.convertTo12HourFormat(end_time);
-                this.dayEndTime.value = formattedEndTime;
-                this.originalEndTime = formattedEndTime;
-                
-                // Set the flatpickr default date to the existing time
-                this.dayEndTimePicker.setDate(formattedEndTime, false);
+                this.originalEndTime = serializeClockTime(end_time);
+                this.dayEndTimePicker.setDate(clockTimeToDate(this.originalEndTime), false);
             } else {
                 this.dayEndTime.value = '';
                 this.originalEndTime = '';
@@ -839,16 +860,16 @@ export class TaskBrowser extends TimeKeeper {
                 ${client.tasks.map(task => `
                     <tr data-task-id="${task.id}" class="${task.is_ongoing ? 'tk-row-ongoing' : ''}">
                         <td class="tk-num tk-task-time-cell whitespace-nowrap">
-                            <span class="time-display">${this.convertTo12HourFormat(task.start_time)}</span>
-                            <input type="text" class="task-time-picker start-time tk-time-input hidden" value="${task.start_time}">
+                            <span class="time-display" data-clock-time="${serializeClockTime(task.start_time)}">${formatClockTime(task.start_time)}</span>
+                            <input type="text" class="task-time-picker start-time tk-time-input hidden" data-clock-value="${serializeClockTime(task.start_time)}">
                         </td>
                         <td class="tk-num tk-task-time-cell whitespace-nowrap">
                             <span class="time-display">
                                 ${task.is_ongoing ?
-                `${this.convertTo12HourFormat(task.end_time)} <span class="tk-badge tk-badge-warn ml-1.5">Ongoing</span>` :
-                this.convertTo12HourFormat(task.end_time)}
+                `<span data-clock-time="${serializeClockTime(task.end_time)}">${formatClockTime(task.end_time)}</span> <span class="tk-badge tk-badge-warn ml-1.5">Ongoing</span>` :
+                `<span data-clock-time="${serializeClockTime(task.end_time)}">${formatClockTime(task.end_time)}</span>`}
                             </span>
-                            <input type="text" class="task-time-picker end-time tk-time-input hidden" value="${task.end_time || ''}">
+                            <input type="text" class="task-time-picker end-time tk-time-input hidden" data-clock-value="${task.end_time ? serializeClockTime(task.end_time) : ''}">
                         </td>
                         <td class="tk-num whitespace-nowrap text-muted">${this.getMinuteDifference(task.end_time, task.start_time)}m</td>
                         <td class="tk-task-actions-cell">
@@ -877,13 +898,12 @@ export class TaskBrowser extends TimeKeeper {
 
         setTimeout(() => {
             detailRow.querySelectorAll('.task-time-picker').forEach(input => {
-                flatpickr(input, {
-                    enableTime: true,
-                    noCalendar: true,
-                    dateFormat: "h:i K", // Changed from "H:i" to "h:i K" for 12-hour format with AM/PM
-                    time_24hr: false,    // Changed from true to false
+                const picker = flatpickr(input, flatpickrTimeOptions({
                     minuteIncrement: 1
-                });
+                }));
+                if (input.dataset.clockValue) {
+                    picker.setDate(clockTimeToDate(input.dataset.clockValue), false)
+                }
             });
 
         }, 0);
@@ -900,14 +920,6 @@ export class TaskBrowser extends TimeKeeper {
         if (chevron) chevron.style.transform = expanded ? 'rotate(90deg)' : '';
     }
 
-    convertTo12HourFormat(timeString) {
-        if (!timeString) return '-';
-        const [hours, minutes] = timeString.split(':');
-        const period = +hours >= 12 ? 'PM' : 'AM';
-        const hour = +hours % 12 || 12;
-        return `${hour}:${minutes} ${period}`;
-    }
-
     getLocalDateString() {
         const now = new Date();
         const year = now.getFullYear();
@@ -919,11 +931,8 @@ export class TaskBrowser extends TimeKeeper {
 
     totalNumberofMinutesPerClient(tasks) {
         return tasks.reduce((total, task) => {
-            const startDate = new Date(`1970-01-01T${task.start_time}Z`);
-            const endDate = task.end_time ?
-                new Date(`1970-01-01T${task.end_time}Z`) :
-                new Date();
-            return total + Math.floor(Math.abs(endDate - startDate) / (1000 * 60));
+            const endTime = task.end_time || currentClockTime({ includeSeconds: true })
+            return total + this.getMinuteDifference(endTime, task.start_time)
         }, 0);
     }
 
@@ -1026,40 +1035,19 @@ export class TaskBrowser extends TimeKeeper {
             height: '200px',
             min: `${selectedDate}T00:00:00`,
             max: `${selectedDate}T23:59:59`,
-            format: {
-                minorLabels: {
-                    millisecond: 'SSS',
-                    second: 's',
-                    minute: 'h:mm A', // AM/PM format
-                    hour: 'h A',      // AM/PM format
-                    weekday: 'ddd D',
-                    day: 'D',
-                    week: 'w',
-                    month: 'MMM',
-                    year: 'YYYY'
-                },
-                majorLabels: {
-                    millisecond: 'h:mm:ss A', // AM/PM format
-                    second: 'D MMMM h:mm A',  // AM/PM format
-                    minute: 'ddd D MMMM',
-                    hour: 'ddd D MMMM',
-                    weekday: 'MMMM YYYY',
-                    day: 'MMMM YYYY',
-                    week: 'MMMM YYYY',
-                    month: 'YYYY',
-                    year: ''
-                }
-            },
+            format: visTimelineTimeFormat(),
         };
 
         container.innerHTML = '';
 
+        if (this.timeline) this.timeline.destroy()
         const timeline = new vis.Timeline(
             container,
             new vis.DataSet(items),
             options
         );
 
+        this.timeline = timeline
         return timeline;
     }
 
