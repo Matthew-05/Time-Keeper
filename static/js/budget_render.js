@@ -1,4 +1,4 @@
-import { heading, insight, insightToSentence, note, row, section } from './insight.js'
+import { heading, insight, insightToSentence, note, row } from './insight.js'
 
 /**
  * Shared budget rendering.
@@ -286,6 +286,23 @@ export function headline(budget) {
 }
 
 /**
+ * Whether the elapsed-period tick means anything for this budget.
+ *
+ * The tick exists to be compared against the fill: *am I burning hours faster
+ * than the calendar is burning days?* That comparison needs a period that is
+ * still running. On an upcoming budget nothing has elapsed, and on a closed one
+ * the answer is always "100%" — a full-width tick pinned to the end of every
+ * closed bar, carrying no information and reading like a second fill.
+ */
+function hasLiveElapsed(budget) {
+    return (
+        budget.percent_elapsed != null
+        && budget.status !== 'upcoming'
+        && budget.status !== 'closed'
+    )
+}
+
+/**
  * The meter: fill for hours used, hairline tick for how much of the period has
  * gone.
  *
@@ -293,6 +310,10 @@ export function headline(budget) {
  * hatched rather than allowed to overflow its container — the exact magnitude
  * of the overage is a number, and it's explained in the hover breakdown; what
  * the bar is for is being readable at a glance from across the room.
+ *
+ * This hover is the one place the *quantities* live — used, share, remaining,
+ * elapsed. The status badge beside it explains the *judgement* and repeats none
+ * of them, so hovering the two doesn't read the same four rows twice.
  */
 export function meterBreakdown(budget, { showPeriodMarker = true } = {}) {
     const isOver = (budget.over_by_seconds ?? 0) > 0
@@ -316,7 +337,7 @@ export function meterBreakdown(budget, { showPeriodMarker = true } = {}) {
               : row('Remaining',
                     budgetDuration(budget, 'remaining_hours', 'remaining_seconds',
                                    { floorAtZero: true })),
-        !showPeriodMarker || budget.status === 'upcoming' || budget.percent_elapsed == null
+        !showPeriodMarker || !hasLiveElapsed(budget)
             ? ''
             : row('Period elapsed', percent(budget.percent_elapsed)),
 
@@ -324,7 +345,10 @@ export function meterBreakdown(budget, { showPeriodMarker = true } = {}) {
         showPeriodMarker && budget.status === 'upcoming'
             ? note('The budget period has not started.')
             : '',
-        showPeriodMarker && budget.status !== 'upcoming' && budget.percent_elapsed == null
+        showPeriodMarker
+        && budget.status !== 'upcoming'
+        && budget.status !== 'closed'
+        && budget.percent_elapsed == null
             ? note('No elapsed-period marker is available.')
             : '',
     )
@@ -353,70 +377,61 @@ export function insightIcon(body, label) {
 }
 
 /**
- * What a status badge means, as figures.
+ * Why the badge says what it says.
  *
  * Written once and used by both the Budgets page and the Today strip, because
  * the two disagreeing about why something is at risk is exactly the kind of
  * small wrongness that makes people stop trusting the colour.
  *
+ * Deliberately **not** a second copy of the meter's breakdown. Both hovers used
+ * to open with Used / Share used / Remaining / Period elapsed, so the badge's
+ * one job — explaining a judgement — was buried under four figures the bar
+ * beside it already gives on hover, and the reason the colour had been chosen
+ * arrived fifth. Quantities belong to the meter; this answers only *why this
+ * colour*, in the fewest rows that can carry the answer.
+ *
+ * The one figure it does restate is the overage, because for an over budget the
+ * magnitude *is* the reason.
+ *
  * Only the three states that are a judgement get one. Upcoming, On hold and
  * Closed are statements of fact the badge already makes in full.
  */
 export function statusInsight(budget) {
-    const used = row(
-        'Used',
-        `${budgetDuration(budget, 'used_hours', 'used_seconds',
-                          { exact: budget.status === 'over' })}`
-        + ` of ${policyHours(budget.budgeted_hours)} hrs.`
-    )
-    const shareUsed = row(
-        'Share used', percent(budget.percent_used_exact ?? budget.percent_used)
-    )
     const threshold = budget.risk_threshold_percent == null
         ? ''
-        : row('Warning threshold', `${hours(budget.risk_threshold_percent)}% over`)
+        : row('Flags above', `${hours(budget.risk_threshold_percent)}% over budget`)
     const projection = budget.projected_hours == null ? [] : [
         row('Pace implies', `${hours(budget.projected_hours)} hrs. total`),
         row('Share of commitment', percent(budget.projected_percent)),
     ]
     // Said wherever a projection is shown: a number built on three days of
-    // history looks exactly like one built on thirty.
+    // history looks exactly like one built on thirty. Kept to a single clause —
+    // the exact maturity rule is on the Current avg. pace stat, and repeating
+    // it here was most of what made this popover hard to read.
     const immature = budget.projected_hours != null && !budget.projection_mature
-        ? note('The projection stays an early estimate until 20% of the working '
-               + 'period has elapsed and the budget is five working days into '
-               + 'its period. Both count working days on the calendar, not days '
-               + 'you recorded time on.')
+        ? note('Early estimate — too little of the period has run for the pace to '
+               + 'be reliable yet.')
         : ''
 
     if (budget.status === 'over') {
         return insight(
             heading('Over budget'),
-            used,
-            row('Committed', `${policyHours(budget.budgeted_hours)} hrs.`),
             row('Over by',
                 budgetDuration(budget, 'over_by', 'over_by_seconds', { exact: true })),
-            shareUsed,
-            note('This is time already recorded, not a projection.'),
+            note('Recorded time has passed the commitment. This is spent, not projected.'),
         )
     }
 
     if (budget.status === 'at_risk') {
         return insight(
             heading('At risk'),
-            used,
-            shareUsed,
-            row('Remaining', budgetDuration(budget, 'remaining_hours',
-                                            'remaining_seconds', { floorAtZero: true })),
-            section('Why this is flagged'),
             ...projection,
             budget.projected_overage == null
                 ? ''
                 : row('Over commitment by', `${hours(budget.projected_overage)} hrs.`),
             threshold,
-            note('This is about pace, not what has been spent — the budget is not '
-                 + 'over yet. Warnings begin only once 20% of the working period '
-                 + 'has elapsed and the budget is five working days into its '
-                 + 'period — calendar working days, not days with time recorded.'),
+            note('Flagged on pace, not spend — carry on at this rate and the budget '
+                 + 'ends over. Nothing is overspent yet.'),
             immature,
         )
     }
@@ -424,20 +439,11 @@ export function statusInsight(budget) {
     if (budget.status === 'on_track') {
         return insight(
             heading('Within budget'),
-            used,
-            shareUsed,
-            row('Remaining', budgetDuration(budget, 'remaining_hours',
-                                            'remaining_seconds', { floorAtZero: true })),
-            budget.percent_elapsed == null
-                ? ''
-                : row('Period elapsed', percent(budget.percent_elapsed)),
-            projection.length ? section('Looking ahead') : '',
             ...projection,
             threshold,
-            projection.length
-                ? note('Nothing is flagged while the projected total stays under '
-                       + 'the threshold.')
-                : '',
+            note(projection.length
+                ? 'Not flagged: the projected total stays under the threshold.'
+                : 'Not flagged: recorded time is within the commitment.'),
             immature,
         )
     }
@@ -453,7 +459,7 @@ export function meter(budget, { large = false, showPeriodMarker = true } = {}) {
     const breakdown = meterBreakdown(budget, { showPeriodMarker })
 
     const marker =
-        !showPeriodMarker || elapsed == null || budget.status === 'upcoming'
+        !showPeriodMarker || !hasLiveElapsed(budget)
             ? ''
             : `<span class="tk-meter-marker" style="left: ${Math.min(100, elapsed)}%"></span>`
 

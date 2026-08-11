@@ -828,9 +828,9 @@ class Budgets extends TimeKeeper {
             <div class="mb-2 flex items-center justify-between gap-3">
               <h3 class="tk-card-title">Holds</h3>
               <div class="flex gap-2">
-                <button type="button" id="add-hold" class="tk-btn tk-btn-ghost tk-btn-sm">Record a past hold</button>
+                <button type="button" id="add-hold" class="tk-btn tk-btn-secondary tk-btn-sm">Record a past hold</button>
                 <button type="button" id="toggle-hold" class="tk-btn tk-btn-sm ${
-                    detail.is_paused ? 'tk-btn-primary' : 'tk-btn-ghost'
+                    detail.is_paused ? 'tk-btn-primary' : 'tk-btn-secondary'
                 }">${detail.is_paused ? 'Resume now' : 'Pause from today'}</button>
               </div>
             </div>
