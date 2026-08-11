@@ -78,6 +78,7 @@ class Budgets extends TimeKeeper {
         this.detailRange = document.getElementById('budget-detail-range')
         this.detailEdit = document.getElementById('budget-detail-edit')
         this.detailCloseBudget = document.getElementById('budget-detail-close-budget')
+        this.detailReopenBudget = document.getElementById('budget-detail-reopen-budget')
 
         this.fields = {
             name: document.getElementById('budget-name'),
@@ -620,6 +621,32 @@ class Budgets extends TimeKeeper {
         }
     }
 
+    /**
+     * Undo a manual close. Unlike Close and Delete, this doesn't need the
+     * arm-then-confirm second click — it puts a budget back to allocating,
+     * which is recoverable with a second close, not a one-way action.
+     */
+    async reopenBudget() {
+        const detail = this.detail
+        if (!detail?.closed_at) return
+
+        this.detailReopenBudget.disabled = true
+        try {
+            await this.fetchFromAPI(
+                `/api/budgets/${detail.id}/reopen`,
+                { method: 'POST' },
+                { quiet: true }
+            )
+            this.showToast('Budget reopened. Later time will be allocated to it again.', 'success')
+            await this.load()
+            if (this.detailId === detail.id) await this.openDetail(detail.id)
+        } catch (error) {
+            this.showToast(error.message, 'error')
+        } finally {
+            this.detailReopenBudget.disabled = false
+        }
+    }
+
     // -- detail ------------------------------------------------------------
 
     async openDetail(budgetId) {
@@ -643,6 +670,7 @@ class Budgets extends TimeKeeper {
         const canClose = detail.is_active && !detail.closed_at
         const diagnosis = statusInsight(detail)
         this.detailCloseBudget.classList.toggle('hidden', !canClose)
+        this.detailReopenBudget.classList.toggle('hidden', !detail.closed_at)
         this.resetCloseBudgetButton()
 
         this.detail = detail
@@ -1667,6 +1695,10 @@ class Budgets extends TimeKeeper {
     bindModals() {
         this.detailCloseBudget.addEventListener('click', () => {
             this.closeBudget().catch((e) => console.error(e))
+        })
+
+        this.detailReopenBudget.addEventListener('click', () => {
+            this.reopenBudget().catch((e) => console.error(e))
         })
 
         document.querySelectorAll('[data-close-modal]').forEach((button) => {

@@ -1978,6 +1978,22 @@ def api_close_budget(budget_id):
     return jsonify(_summarise_one(budget))
 
 
+@app.route('/api/budgets/<int:budget_id>/reopen', methods=['POST'])
+def api_reopen_budget(budget_id):
+    """Undo a manual close. The budget goes back to whatever its dates and
+    holds already imply — active if today is still inside its range, ended
+    again if the range has since passed."""
+    budget = _budget_or_404(budget_id)
+    if budget is None:
+        return jsonify({'error': 'Budget not found'}), 404
+    if budget.closed_at is None:
+        return jsonify({'error': 'This budget is not closed.'}), 409
+
+    budget.closed_at = None
+    db.session.commit()
+    return jsonify(_summarise_one(budget))
+
+
 # --------------------------------------------------------------------------
 # Holds
 #
