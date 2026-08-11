@@ -1345,6 +1345,11 @@ class Budgets extends TimeKeeper {
      * it is, and the client-day total behind it is in the tooltip — putting
      * both on the face meant two raw→billed pairs side by side, which is
      * exactly the confusion the ledger exists to remove.
+     *
+     * Rendered with the same house format as the Day summary card on
+     * History (`formatTimeWithDifference`): rounded/billed hours, the real
+     * tracked time, and the rounding delta — one figure, not a mental
+     * subtraction between a raw and a billed clause.
      */
     dayRoundingSummary(day, destination) {
         const isBudget = destination === 'budget'
@@ -1352,9 +1357,10 @@ class Budgets extends TimeKeeper {
         const billable = isBudget
             ? day.budget_billable_seconds
             : day.no_budget_billable_seconds
-        const adjustment = isBudget
-            ? day.budget_rounding_adjustment_seconds
-            : day.no_budget_rounding_adjustment_seconds
+
+        const totalMinutes = raw / 60
+        const fractionalHours = billable / 3600
+        const difference = Math.round(fractionalHours * 60 - totalMinutes)
 
         // A split that reads "10m excluded, 23m coverage gap" is the one case
         // where the single No-budget figure above would be actively misleading,
@@ -1363,10 +1369,8 @@ class Budgets extends TimeKeeper {
         const mixed = !isBudget && reasons.excluded && reasons.coverage_gap
 
         return `
-          <span class="mt-1 block text-xs text-muted">
-            ${exactDurationSeconds(raw)} → ${exactDurationSeconds(billable)} billed
-            <span class="mx-1 text-faint">·</span>
-            <span class="text-faint">${this.roundingNote(adjustment)}</span>
+          <span class="mt-1 block text-xs">
+            ${this.formatTimeWithDifference(fractionalHours, totalMinutes, difference)}
           </span>
           ${mixed ? `
           <span class="mt-1 block text-xs text-faint">
@@ -1381,13 +1385,6 @@ class Budgets extends TimeKeeper {
     signedDuration(adjustment) {
         if (!adjustment) return 'none'
         return `${adjustment > 0 ? '+' : '−'}${exactDurationSeconds(adjustment)}`
-    }
-
-    /** The same figure for running text, where it has to say what it is. */
-    roundingNote(adjustment) {
-        return adjustment
-            ? `${this.signedDuration(adjustment)} rounding`
-            : 'no rounding'
     }
 
     /**
