@@ -1,3 +1,4 @@
+import { reconcileChildren, setHtml } from './base.js'
 import {
     STATUS_LABEL,
     budgetDuration,
@@ -99,8 +100,30 @@ export class BudgetWidget {
             return
         }
 
-        this.list.innerHTML = budgets.map((b) => this.strip(b)).join('')
+        // Patched in place rather than rebuilt: this reloads every minute while
+        // a task runs, and a wholesale innerHTML swap took the keyboard focus
+        // off a strip the user had tabbed to and detached the meter a popover
+        // was anchored against. Only the figures actually move.
+        reconcileChildren(this.list, budgets, {
+            key: (budget) => budget.id,
+            create: (budget) => {
+                const strip = document.createElement('a')
+                strip.className = 'tk-budget-strip block no-underline'
+                strip.title = 'Open this budget in Budgets'
+                this.updateStrip(strip, budget)
+                return strip
+            },
+            update: ([strip], budget) => this.updateStrip(strip, budget),
+        })
+
         this.container.classList.remove('hidden')
+    }
+
+    updateStrip(strip, budget) {
+        const href = `/budgets?budget_id=${encodeURIComponent(budget.id)}`
+        if (strip.getAttribute('href') !== href) strip.setAttribute('href', href)
+        if (strip.dataset.status !== budget.status) strip.dataset.status = budget.status
+        setHtml(strip, this.strip(budget))
     }
 
     strip(budget) {
@@ -112,10 +135,10 @@ export class BudgetWidget {
         // hairline that only added noise at this size; drawn clearly it earns
         // its place, because it is the one thing that makes "62% used" mean
         // anything without reading a second number.
+        //
+        // Returns the *contents* of the strip; the anchor itself is created
+        // once and reused across refreshes by updateStrip.
         return `
-          <a href="/budgets?budget_id=${encodeURIComponent(budget.id)}"
-             class="tk-budget-strip block no-underline" data-status="${budget.status}"
-             title="Open this budget in Budgets">
             <div class="mb-1.5 flex items-baseline justify-between gap-2">
               <span class="min-w-0 truncate text-sm font-semibold text-text">${this.escape(budget.name)}</span>
               <span class="tabular flex-shrink-0 text-sm font-semibold" style="color: var(--status-text)">
@@ -152,7 +175,6 @@ export class BudgetWidget {
                 ${this.statusIcon(budget)}
               </span>
             </div>
-          </a>
         `
     }
 

@@ -1,4 +1,4 @@
-import { TimeKeeper, ready, clientColor, clientForeground, confirmAction, lockBodyScroll, unlockBodyScroll } from './base.js';
+import { TimeKeeper, createPoller, reconcileChildren, setText, setHtml, ready, clientColor, clientForeground, confirmAction, lockBodyScroll, unlockBodyScroll } from './base.js';
 import { WorksList, fetchWorks, joinWorks } from './works.js';
 import {
     clockTimeToDate,
@@ -53,11 +53,60 @@ export class TaskBrowser extends TimeKeeper {
         this.initializeTaskEditing();
         document.addEventListener('timeFormatChanged', () => this.handleTimeFormatChanged());
 
-        setInterval(() => {
-            if (this.selectedDate.value === this.getLocalDateString()) {
-                this.fetchTasks();
-            }
-        }, 60000);
+        // Only today's view goes stale on its own — a past date is settled, so
+        // re-fetching it every minute is pure noise. Returning early leaves the
+        // poller scheduled, so switching back to today picks up on the next
+        // boundary without anything having to restart it.
+        //
+        // `background: true` is what keeps this invisible: no spinner, rows
+        // patched rather than rebuilt, timeline updated through its DataSet.
+        this.tasksPoller = createPoller(async () => {
+            if (this.selectedDate.value !== this.getLocalDateString()) return;
+            await this.fetchTasks({ background: true });
+        }, {
+            name: 'task-browser',
+            shouldSkip: () => this.isBusy(),
+        });
+    }
+
+    /**
+     * Is the user in the middle of something a refresh shouldn't land on?
+     *
+     * Patching in place already means a refresh doesn't destroy the page, but
+     * these three states involve values the user is actively working with, and
+     * changing the data underneath them is confusing even when it's done
+     * gracefully. The tick is deferred and `resume()` collects it the moment
+     * they finish, so nothing is lost by waiting.
+     */
+    isBusy() {
+        // Works modal open: it's reading a client's works for this day, and
+        // the row behind it is the thing that would move.
+        if (this.worksModal && !this.worksModal.classList.contains('hidden')) return true;
+
+        // A task row mid-edit, with unsaved times in its pickers.
+        if (document.querySelector('#tasks-tbody .tk-row-editing')) return true;
+
+        // The day start/close fields, which reveal their Save/Cancel actions
+        // only once the value has been touched. These toggle
+        // action-buttons-visible rather than `hidden` — see .tk-time-text-actions
+        // in app.css, which animates them rather than switching display.
+        if (this.dayStartActions?.classList.contains('action-buttons-visible')) return true;
+        if (this.dayEndActions?.classList.contains('action-buttons-visible')) return true;
+
+        return false;
+    }
+
+    /** Collect a refresh that isBusy() deferred. No-op if none was skipped. */
+    resumeRefresh() {
+        this.tasksPoller?.resume().catch((error) => console.error(error));
+    }
+
+    /** Stop the refresh poller. See the note on TimeKeeperIndex.destroy(). */
+    destroy() {
+        this.tasksPoller?.stop();
+        // #loadTasks queues this on failure and it retries indefinitely, so a
+        // page torn down mid-outage would otherwise keep one alive.
+        clearTimeout(this.reloadTimer);
     }
 
     initializeElements() {
@@ -225,6 +274,7 @@ export class TaskBrowser extends TimeKeeper {
         
         // Hide action buttons
         this.hideTimeActions(type);
+        this.resumeRefresh();
     }
 
     initializeTaskEditing() {
@@ -309,6 +359,10 @@ export class TaskBrowser extends TimeKeeper {
         this.worksModal.classList.add('hidden');
         this.worksModalClient = null;
         unlockBodyScroll();
+
+        // Refreshes were deferred for as long as this was open; the table
+        // behind it may be several minutes behind by now.
+        this.resumeRefresh();
     }
 
     /** Copy one client's works for the browsed day, comma-separated. */
@@ -372,6 +426,10 @@ export class TaskBrowser extends TimeKeeper {
         row.querySelectorAll('.task-time-picker').forEach(input => input.classList.add('hidden'));
         row.querySelector('.task-view-actions').classList.remove('hidden');
         row.querySelector('.edit-controls').classList.add('hidden');
+
+        // The row was skipped by every refresh while it was being edited, so
+        // its figures may be a few minutes stale. Collect the deferred tick.
+        this.resumeRefresh();
     }
 
     async handleTaskUpdate(row) {
@@ -466,6 +524,10 @@ export class TaskBrowser extends TimeKeeper {
     showTasksMessage(html) {
         const tbody = document.getElementById('tasks-tbody');
         if (tbody) {
+            // Blowing the rows away takes their time inputs with them, and a
+            // flatpickr whose input vanishes without being destroyed leaves its
+            // calendar node and document listener behind.
+            this.destroyRowPickers(tbody);
             const columns = this.roundingEnabled ? 5 : 3;
             tbody.innerHTML = `<tr><td colspan="${columns}">${html}</td></tr>`;
         }
@@ -540,14 +602,26 @@ export class TaskBrowser extends TimeKeeper {
         }
     }
 
-    fetchTasks() {
+    /**
+     * @param {object}  [options]
+     * @param {boolean} [options.background=false] A refresh nobody asked for.
+     *   Background loads never show a placeholder: the data is already on
+     *   screen and still broadly true, so blanking the table to a spinner every
+     *   minute reports "working" about a request the user didn't make and
+     *   costs them the view. A cold load or a date change has nothing to show
+     *   yet and keeps its spinner.
+     */
+    fetchTasks({ background = false } = {}) {
         // Previously a concurrent call was dropped on the floor, so a date
         // change or the 60s refresh landing mid-load was simply lost. Share the
         // in-flight promise instead so every caller settles.
+        //
+        // A foreground caller joining a background load is fine: the reconciler
+        // makes the outcome identical, only the placeholder differs.
         if (this.loadPromise) return this.loadPromise;
 
         this.isLoading = true;
-        this.loadPromise = this.#loadTasks().finally(() => {
+        this.loadPromise = this.#loadTasks({ background }).finally(() => {
             this.isLoading = false;
             this.loadPromise = null;
         });
@@ -555,25 +629,31 @@ export class TaskBrowser extends TimeKeeper {
         return this.loadPromise;
     }
 
-    async #loadTasks() {
+    async #loadTasks({ background = false } = {}) {
         const date = this.selectedDate.value;
         const timelineContainer = document.getElementById('timeline');
 
-        if (this.timeline) {
-            this.timeline.destroy();
-            this.timeline = null;
-        }
-        if (timelineContainer) {
-            timelineContainer.setAttribute('aria-busy', 'true');
-            timelineContainer.innerHTML = `
-                <div class="tk-loading tk-timeline-loading" role="status">
-                    <span class="tk-spinner" aria-hidden="true"></span>
-                    <span>Loading timeline&hellip;</span>
-                </div>
-            `;
-        }
+        // Nothing is torn down on a background pass. renderTimeline reuses the
+        // existing timeline, so destroying it here would throw away the user's
+        // zoom and pan for no reason.
+        if (!background) {
+            if (this.timeline) {
+                this.timeline.destroy();
+                this.timeline = null;
+                this.timelineItems = null;
+            }
+            if (timelineContainer) {
+                timelineContainer.setAttribute('aria-busy', 'true');
+                timelineContainer.innerHTML = `
+                    <div class="tk-loading tk-timeline-loading" role="status">
+                        <span class="tk-spinner" aria-hidden="true"></span>
+                        <span>Loading timeline&hellip;</span>
+                    </div>
+                `;
+            }
 
-        this.showTasksMessage('<div class="tk-loading"><span class="tk-spinner"></span> Loading tasks…</div>');
+            this.showTasksMessage('<div class="tk-loading"><span class="tk-spinner"></span> Loading tasks…</div>');
+        }
 
         try {
             // Always fetch and populate day data first
@@ -581,12 +661,20 @@ export class TaskBrowser extends TimeKeeper {
 
             const response = await this.fetchFromAPI(`/tasks/${date}`);
             await this.renderTasks(response);
-            this.renderTimeline(response, date);
+            this.renderTimeline(response, date, { background });
 
             // Recovered — drop any queued retry.
             clearTimeout(this.reloadTimer);
         } catch (error) {
             console.error('Error fetching tasks:', error);
+
+            // A failed background refresh leaves the last good view up. The
+            // data on screen is a minute old, which is a far better answer than
+            // replacing it with an error for a request the user never made.
+            if (background) {
+                this.scheduleReload(3000, { background: true });
+                return;
+            }
 
             // Say what's happening rather than leaving a bare spinner, then keep
             // trying on our own. The backend is local, so there's no reason to
@@ -606,10 +694,16 @@ export class TaskBrowser extends TimeKeeper {
         }
     }
 
-    /** Keep retrying a failed load in the background, indefinitely. */
-    scheduleReload(delay = 3000) {
+    /**
+     * Keep retrying a failed load in the background, indefinitely.
+     *
+     * The retry inherits the mode of the load that failed. A background refresh
+     * that failed must not come back as a foreground one, or the spinner it was
+     * careful not to show appears three seconds later anyway.
+     */
+    scheduleReload(delay = 3000, { background = false } = {}) {
         clearTimeout(this.reloadTimer);
-        this.reloadTimer = setTimeout(() => this.fetchTasks(), delay);
+        this.reloadTimer = setTimeout(() => this.fetchTasks({ background }), delay);
     }
 
     async populateDayTimes() {
@@ -706,6 +800,15 @@ export class TaskBrowser extends TimeKeeper {
     // in base.js — the Today page shows the same figure for the running
     // client and the two must not drift.
 
+    /**
+     * Draw the client table.
+     *
+     * Rows are reconciled against what's on screen rather than rebuilt, because
+     * this runs every minute underneath whatever the user is doing. See
+     * `reconcileChildren` in base.js for why that distinction matters; the
+     * short version is that the fold state of a detail row, a row in edit mode
+     * and its unsaved input all live in the DOM and nowhere else.
+     */
     async renderTasks(tasks) {
         const tbody = document.getElementById('tasks-tbody');
 
@@ -713,8 +816,6 @@ export class TaskBrowser extends TimeKeeper {
         // .then() with no .catch(): a failure here cleared the table and then
         // rejected into nothing, leaving a permanently blank page.
         const clients = await this.fetchFromAPI('/clients');
-        tbody.innerHTML = '';
-
         this.clients = clients;
 
         const clientGroups = this.aggregateByClient(tasks);
@@ -722,6 +823,7 @@ export class TaskBrowser extends TimeKeeper {
         let totalFractionalHours = 0;
 
         if (clientGroups.length === 0) {
+            this.destroyRowPickers(tbody);
             tbody.innerHTML = `
                 <tr>
                     <td colspan="${this.roundingEnabled ? 5 : 3}" class="tk-empty">No time tracked on this date.</td>
@@ -732,62 +834,134 @@ export class TaskBrowser extends TimeKeeper {
             return;
         }
 
-        clientGroups.forEach(client => {
+        // Row click handlers close over the client, and on a refresh the client
+        // objects are rebuilt while the rows are not. Looking the current one
+        // up by key at click time keeps a surviving row's Works button pointed
+        // at fresh data instead of the aggregate it was born with.
+        this.clientsByKey = new Map(clientGroups.map((c) => [c.detailKey, c]));
+
+        for (const client of clientGroups) {
             const totalMinutes = this.totalNumberofMinutesPerClient(client.tasks);
             totalMinutesForAll += totalMinutes;
-            const fractionalHours = this.totalTimeSpentToFractionalHours(totalMinutes);
-            totalFractionalHours += fractionalHours;
+            totalFractionalHours += this.totalTimeSpentToFractionalHours(totalMinutes);
+        }
 
-            // Add the summary row
-            const summaryRow = document.createElement('tr');
-            summaryRow.className = 'task-row';
-            const roundingDiff = Math.round(fractionalHours * 60 - totalMinutes);
-            summaryRow.innerHTML = `
-                <td class="font-medium">
-                    <span class="inline-flex items-center gap-2">
-                        <svg class="tk-chevron h-3.5 w-3.5 flex-shrink-0 text-faint transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
-                        ${this.escapeHtml(client.name)}
-                    </span>
-                </td>
-                <td>
-                    ${client.id == null
-                ? '<span class="text-faint">—</span>'
-                : `<div class="tk-inline-actions">
-                            <button type="button" class="works-open-btn tk-btn tk-btn-secondary tk-btn-sm">Works</button>
-                            <button type="button" class="works-copy-btn tk-btn tk-btn-secondary tk-btn-sm">Copy</button>
-                        </div>`}
-                </td>
-                <td class="tk-num whitespace-nowrap text-muted">${this.formatDurationMinutes(totalMinutes)}</td>
-                ${this.roundingEnabled ? `
-                    <td class="tk-num whitespace-nowrap font-semibold">${this.formatDecimalHours(fractionalHours)} <span class="font-normal text-faint">hrs.</span></td>
-                    <td class="tk-num ${roundingDiff === 0 ? 'text-faint' : roundingDiff > 0 ? 'text-success' : 'text-danger'}">
-                        ${roundingDiff === 0 ? '—' : (roundingDiff > 0 ? '+' : '−') + Math.abs(roundingDiff) + 'm'}
-                    </td>
-                ` : ''}
-            `;
-            summaryRow.addEventListener('click', (e) => {
-                // The works buttons sit inside the row, which is itself the
-                // fold/unfold target — so they have to swallow their own clicks.
-                if (e.target.closest('.works-open-btn')) {
-                    e.stopPropagation();
-                    this.openWorksModal(client);
-                    return;
-                }
-                if (e.target.closest('.works-copy-btn')) {
-                    e.stopPropagation();
-                    this.copyWorks(client);
-                    return;
-                }
-                this.toggleDetailTable(client.detailKey);
-            });
-            tbody.appendChild(summaryRow);
-
-            // Add the detail row
-            const detailRow = this.createDetailRow(client);
-            tbody.appendChild(detailRow);
+        reconcileChildren(tbody, clientGroups, {
+            key: (client) => client.detailKey,
+            create: (client) => [this.createSummaryRow(client), this.createDetailRow(client)],
+            update: ([summaryRow, detailRow], client) => {
+                this.updateSummaryRow(summaryRow, client);
+                this.updateDetailRow(detailRow, client);
+            },
+            // flatpickr attaches an instance per time input and holds a
+            // document-level listener; dropping the row without this leaks one
+            // per task per refresh.
+            remove: (els) => els.forEach((el) => this.destroyRowPickers(el)),
         });
 
         this.updateSummaryValues(totalMinutesForAll, totalFractionalHours);
+    }
+
+    /** Per-client totals, derived identically for create and update. */
+    summaryFigures(client) {
+        const totalMinutes = this.totalNumberofMinutesPerClient(client.tasks);
+        const fractionalHours = this.totalTimeSpentToFractionalHours(totalMinutes);
+        return {
+            totalMinutes,
+            fractionalHours,
+            roundingDiff: Math.round(fractionalHours * 60 - totalMinutes),
+        };
+    }
+
+    createSummaryRow(client) {
+        const summaryRow = document.createElement('tr');
+        summaryRow.className = 'task-row';
+        summaryRow.dataset.clientKey = client.detailKey;
+
+        // Cells carry `data-cell` so updateSummaryRow can find the two that
+        // hold figures without depending on column order, which changes with
+        // the rounding setting.
+        summaryRow.innerHTML = `
+            <td class="font-medium">
+                <span class="inline-flex items-center gap-2">
+                    <svg class="tk-chevron h-3.5 w-3.5 flex-shrink-0 text-faint transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                    <span data-cell="name">${this.escapeHtml(client.name)}</span>
+                </span>
+            </td>
+            <td>
+                ${client.id == null
+                ? '<span class="text-faint">—</span>'
+                : `<div class="tk-inline-actions">
+                        <button type="button" class="works-open-btn tk-btn tk-btn-secondary tk-btn-sm">Works</button>
+                        <button type="button" class="works-copy-btn tk-btn tk-btn-secondary tk-btn-sm">Copy</button>
+                    </div>`}
+            </td>
+            <td class="tk-num whitespace-nowrap text-muted" data-cell="minutes"></td>
+            ${this.roundingEnabled ? `
+                <td class="tk-num whitespace-nowrap font-semibold" data-cell="hours"></td>
+                <td class="tk-num" data-cell="diff"></td>
+            ` : ''}
+        `;
+
+        summaryRow.addEventListener('click', (e) => {
+            // Resolve through the key, not the captured client — see the note
+            // on clientsByKey in renderTasks.
+            const current = this.clientsByKey?.get(summaryRow.dataset.clientKey) ?? client;
+
+            // The works buttons sit inside the row, which is itself the
+            // fold/unfold target — so they have to swallow their own clicks.
+            if (e.target.closest('.works-open-btn')) {
+                e.stopPropagation();
+                this.openWorksModal(current);
+                return;
+            }
+            if (e.target.closest('.works-copy-btn')) {
+                e.stopPropagation();
+                this.copyWorks(current);
+                return;
+            }
+            this.toggleDetailTable(current.detailKey);
+        });
+
+        this.updateSummaryRow(summaryRow, client);
+        return summaryRow;
+    }
+
+    /**
+     * Patch the figures on an existing summary row.
+     *
+     * Deliberately does not touch the chevron or the action buttons: the
+     * chevron carries an inline rotation set by toggleDetailTable, and whether
+     * the buttons exist depends on `client.id == null`, which can't change for
+     * a given key because the key is derived from the client id.
+     */
+    updateSummaryRow(summaryRow, client) {
+        const { totalMinutes, fractionalHours, roundingDiff } = this.summaryFigures(client);
+
+        setText(summaryRow.querySelector('[data-cell="name"]'), client.name);
+        setText(
+            summaryRow.querySelector('[data-cell="minutes"]'),
+            this.formatDurationMinutes(totalMinutes)
+        );
+
+        const hoursCell = summaryRow.querySelector('[data-cell="hours"]');
+        if (hoursCell) {
+            setHtml(
+                hoursCell,
+                `${this.formatDecimalHours(fractionalHours)} <span class="font-normal text-faint">hrs.</span>`
+            );
+        }
+
+        const diffCell = summaryRow.querySelector('[data-cell="diff"]');
+        if (diffCell) {
+            diffCell.className = `tk-num ${roundingDiff === 0 ? 'text-faint' : roundingDiff > 0 ? 'text-success' : 'text-danger'}`;
+            setText(
+                diffCell,
+                roundingDiff === 0
+                    ? '—'
+                    : (roundingDiff > 0 ? '+' : '−') + Math.abs(roundingDiff) + 'm'
+            );
+        }
     }
 
     aggregateByClient(tasks) {
@@ -812,6 +986,8 @@ export class TaskBrowser extends TimeKeeper {
     createDetailRow(client) {
         const detailRow = document.createElement('tr');
         detailRow.id = `detail-row-${client.detailKey}`;
+        // `hidden` is the fold state, and it is the only record of it. A
+        // refresh must never rebuild this row for that reason alone.
         detailRow.className = 'detail-row hidden';
 
         const detailCell = document.createElement('td');
@@ -835,59 +1011,140 @@ export class TaskBrowser extends TimeKeeper {
                     <th class="tk-task-actions-heading"><span class="sr-only">Actions</span></th>
                 </tr>
             </thead>
-            <tbody>
-                ${client.tasks.map(task => `
-                    <tr data-task-id="${task.id}" class="${task.is_ongoing ? 'tk-row-ongoing' : ''}">
-                        <td class="tk-num tk-task-time-cell whitespace-nowrap">
-                            <span class="time-display" data-clock-time="${serializeClockTime(task.start_time)}">${formatClockTime(task.start_time)}</span>
-                            <input type="text" class="task-time-picker start-time tk-time-input hidden" data-clock-value="${serializeClockTime(task.start_time)}">
-                        </td>
-                        <td class="tk-num tk-task-time-cell whitespace-nowrap">
-                            <span class="time-display">
-                                ${task.is_ongoing ?
-                `<span data-clock-time="${serializeClockTime(task.end_time)}">${formatClockTime(task.end_time)}</span> <span class="tk-badge tk-badge-warn ml-1.5">Ongoing</span>` :
-                `<span data-clock-time="${serializeClockTime(task.end_time)}">${formatClockTime(task.end_time)}</span>`}
-                            </span>
-                            <input type="text" class="task-time-picker end-time tk-time-input hidden" data-clock-value="${task.end_time ? serializeClockTime(task.end_time) : ''}">
-                        </td>
-                        <td class="tk-num whitespace-nowrap text-muted">${this.getMinuteDifference(task.end_time, task.start_time)}m</td>
-                        <td class="tk-task-actions-cell">
-                            <div class="task-view-actions tk-task-view-actions">
-                                <button type="button" class="edit-task-btn tk-btn tk-btn-secondary tk-btn-sm">Edit</button>
-                                <button type="button" class="delete-task-btn tk-btn tk-btn-danger tk-btn-sm">Delete</button>
-                            </div>
-                            <div class="edit-controls tk-task-edit-controls hidden">
-                                <label class="tk-task-client-field">
-                                    <span>Client</span>
-                                    <select class="client-select tk-select tk-select-sm">
-                                    ${this.getClientOptions(task.client_id)}
-                                    </select>
-                                </label>
-                                <button type="button" class="save-task-btn tk-btn tk-btn-primary tk-btn-sm">Save</button>
-                                <button type="button" class="cancel-task-btn tk-btn tk-btn-secondary tk-btn-sm">Cancel</button>
-                            </div>
-                        </td>
-                    </tr>
-                `).join('')}
-            </tbody>
+            <tbody></tbody>
         `;
 
         detailCell.appendChild(detailTable);
         detailRow.appendChild(detailCell);
 
-        setTimeout(() => {
-            detailRow.querySelectorAll('.task-time-picker').forEach(input => {
-                const picker = flatpickr(input, flatpickrTimeOptions({
-                    minuteIncrement: 1
-                }));
-                if (input.dataset.clockValue) {
-                    picker.setDate(clockTimeToDate(input.dataset.clockValue), false)
-                }
-            });
-
-        }, 0);
-
+        this.updateDetailRow(detailRow, client);
         return detailRow;
+    }
+
+    /**
+     * Reconcile one client's task rows.
+     *
+     * A row in `tk-row-editing` is skipped outright. Patching it would fight
+     * the user for the input they are typing into, and the row's own save path
+     * refreshes the table anyway — so the correct move is to leave it alone
+     * until they're done. (The poller's `shouldSkip` normally prevents a
+     * background refresh from reaching here at all while an edit is open; this
+     * is the guarantee for the refreshes that aren't background, like the one
+     * that follows saving a *different* row.)
+     */
+    updateDetailRow(detailRow, client) {
+        const tbody = detailRow.querySelector('table > tbody');
+        if (!tbody) return;
+
+        reconcileChildren(tbody, client.tasks, {
+            key: (task) => task.id,
+            create: (task) => this.createTaskRow(task),
+            update: (els, task) => this.updateTaskRow(els[0], task),
+            skip: (els) => els[0].classList.contains('tk-row-editing'),
+            remove: (els) => els.forEach((el) => this.destroyRowPickers(el)),
+        });
+    }
+
+    createTaskRow(task) {
+        const row = document.createElement('tr');
+        row.dataset.taskId = task.id;
+        row.innerHTML = `
+            <td class="tk-num tk-task-time-cell whitespace-nowrap">
+                <span class="time-display" data-cell="start"></span>
+                <input type="text" class="task-time-picker start-time tk-time-input hidden">
+            </td>
+            <td class="tk-num tk-task-time-cell whitespace-nowrap">
+                <span class="time-display" data-cell="end"></span>
+                <input type="text" class="task-time-picker end-time tk-time-input hidden">
+            </td>
+            <td class="tk-num whitespace-nowrap text-muted" data-cell="duration"></td>
+            <td class="tk-task-actions-cell">
+                <div class="task-view-actions tk-task-view-actions">
+                    <button type="button" class="edit-task-btn tk-btn tk-btn-secondary tk-btn-sm">Edit</button>
+                    <button type="button" class="delete-task-btn tk-btn tk-btn-danger tk-btn-sm">Delete</button>
+                </div>
+                <div class="edit-controls tk-task-edit-controls hidden">
+                    <label class="tk-task-client-field">
+                        <span>Client</span>
+                        <select class="client-select tk-select tk-select-sm"></select>
+                    </label>
+                    <button type="button" class="save-task-btn tk-btn tk-btn-primary tk-btn-sm">Save</button>
+                    <button type="button" class="cancel-task-btn tk-btn tk-btn-secondary tk-btn-sm">Cancel</button>
+                </div>
+            </td>
+        `;
+
+        this.updateTaskRow(row, task);
+
+        // Was a setTimeout(0) per render, which built a fresh flatpickr for
+        // every task every minute and abandoned the previous one. Rows now
+        // persist, so pickers are built once here and destroyed in
+        // destroyRowPickers when the row actually goes away.
+        row.querySelectorAll('.task-time-picker').forEach((input) => {
+            const picker = flatpickr(input, flatpickrTimeOptions({ minuteIncrement: 1 }));
+            if (input.dataset.clockValue) {
+                picker.setDate(clockTimeToDate(input.dataset.clockValue), false);
+            }
+        });
+
+        return row;
+    }
+
+    /** Patch a task row's displayed values. Never called on a row being edited. */
+    updateTaskRow(row, task) {
+        row.classList.toggle('tk-row-ongoing', Boolean(task.is_ongoing));
+
+        const startClock = serializeClockTime(task.start_time);
+        const endClock = task.end_time ? serializeClockTime(task.end_time) : '';
+
+        const startCell = row.querySelector('[data-cell="start"]');
+        startCell.dataset.clockTime = startClock;
+        setText(startCell, formatClockTime(task.start_time));
+
+        // The ongoing badge lives inside the end cell, so this one is markup.
+        setHtml(
+            row.querySelector('[data-cell="end"]'),
+            task.is_ongoing
+                ? `<span data-clock-time="${endClock}">${formatClockTime(task.end_time)}</span> <span class="tk-badge tk-badge-warn ml-1.5">Ongoing</span>`
+                : `<span data-clock-time="${endClock}">${formatClockTime(task.end_time)}</span>`
+        );
+
+        setText(
+            row.querySelector('[data-cell="duration"]'),
+            `${this.getMinuteDifference(task.end_time, task.start_time)}m`
+        );
+
+        // Keep the hidden pickers in step with the values they'd open on. An
+        // ongoing task's end time moves every minute, and without this an Edit
+        // click a while after load would open on whatever it was at load time.
+        const startInput = row.querySelector('.start-time');
+        const endInput = row.querySelector('.end-time');
+        this.syncPickerValue(startInput, startClock);
+        this.syncPickerValue(endInput, endClock);
+
+        const select = row.querySelector('.client-select');
+        if (select) setHtml(select, this.getClientOptions(task.client_id));
+    }
+
+    /** Point a hidden time input and its flatpickr at a new value. */
+    syncPickerValue(input, clockValue) {
+        if (!input) return;
+        input.dataset.clockValue = clockValue;
+        if (!clockValue) return;
+        const picker = input._flatpickr;
+        if (picker) picker.setDate(clockTimeToDate(clockValue), false);
+    }
+
+    /**
+     * Destroy flatpickr instances inside an element that is about to be
+     * dropped. flatpickr keeps a document-level listener and a detached
+     * calendar node per instance, so a row removed without this leaks both.
+     */
+    destroyRowPickers(element) {
+        if (!element) return;
+        element.querySelectorAll('.task-time-picker').forEach((input) => {
+            input._flatpickr?.destroy();
+        });
     }
 
     toggleDetailTable(clientId) {
@@ -956,7 +1213,7 @@ export class TaskBrowser extends TimeKeeper {
     }
 
 
-    renderTimeline(tasks, selectedDate) {
+    renderTimeline(tasks, selectedDate, { background = false } = {}) {
         const container = document.getElementById('timeline');
 
         // Colour comes from clientColor() in base.js, keyed on the client's
@@ -1000,20 +1257,33 @@ export class TaskBrowser extends TimeKeeper {
             };
         });
 
-        const summary = document.getElementById('timeline-summary');
-        if (summary) {
-            const totalMinutes = sortedTasks.reduce(
-                (total, task) => total + this.getMinuteDifference(task.end_time, task.start_time),
-                0
-            );
-            const taskCount = sortedTasks.length;
-            if (taskCount === 0) {
-                summary.textContent = 'No tracked tasks';
-            } else {
-                const firstStart = formatClockTime(sortedTasks[0].start_time);
-                const lastEnd = formatClockTime(sortedTasks[sortedTasks.length - 1].end_time);
-                summary.textContent = `${taskCount} ${taskCount === 1 ? 'task' : 'tasks'} · ${this.formatDurationMinutes(totalMinutes)} · ${firstStart}–${lastEnd}`;
-            }
+        // A live timeline for the same day is updated through its DataSet
+        // rather than replaced. `new vis.Timeline(...)` recomputes the visible
+        // window from `options.start`/`end`, so rebuilding it every minute
+        // silently undid any zoom or pan the user had applied — and the
+        // rebuild is also what made the whole strip flash.
+        const reusable = background
+            && this.timeline
+            && this.timelineItems
+            && this.timelineDate === selectedDate;
+
+        if (reusable) {
+            this.updateTimelineItems(items);
+            this.updateTimelineBoundaries(selectedDate);
+            this.renderTimelineSummary(sortedTasks);
+            return this.timeline;
+        }
+
+        this.renderTimelineSummary(sortedTasks);
+
+        // Falling through to a full build with a live timeline still mounted
+        // would leave two of them in the container. The foreground path clears
+        // this already; this covers the background pass that can't reuse —
+        // a date change racing a tick, or a rebuild after a failed load.
+        if (this.timeline) {
+            this.timeline.destroy();
+            this.timeline = null;
+            this.timelineItems = null;
         }
 
         // Keep an eight-hour minimum for useful context, but expand and center
@@ -1098,11 +1368,8 @@ export class TaskBrowser extends TimeKeeper {
 
         // The loader is an overlay, so vis-timeline can build underneath it.
         // onInitialDrawComplete removes it only after the first full redraw.
-        const timeline = new vis.Timeline(
-            container,
-            new vis.DataSet(items),
-            options
-        );
+        const dataSet = new vis.DataSet(items);
+        const timeline = new vis.Timeline(container, dataSet, options);
 
         const addDayBoundary = (clockTime, id, label) => {
             if (!clockTime) return;
@@ -1116,7 +1383,84 @@ export class TaskBrowser extends TimeKeeper {
         addDayBoundary(this.originalEndTime, 'tk-day-close', 'Close');
 
         this.timeline = timeline
+        this.timelineItems = dataSet;
+        this.timelineDate = selectedDate;
+        this.timelineBoundaries = new Map([
+            ['tk-day-start', this.originalStartTime || null],
+            ['tk-day-close', this.originalEndTime || null],
+        ]);
         return timeline;
+    }
+
+    /** One line of context under the timeline. */
+    renderTimelineSummary(sortedTasks) {
+        const summary = document.getElementById('timeline-summary');
+        if (!summary) return;
+
+        const taskCount = sortedTasks.length;
+        if (taskCount === 0) {
+            setText(summary, 'No tracked tasks');
+            return;
+        }
+
+        const totalMinutes = sortedTasks.reduce(
+            (total, task) => total + this.getMinuteDifference(task.end_time, task.start_time),
+            0
+        );
+        const firstStart = formatClockTime(sortedTasks[0].start_time);
+        const lastEnd = formatClockTime(sortedTasks[sortedTasks.length - 1].end_time);
+        setText(
+            summary,
+            `${taskCount} ${taskCount === 1 ? 'task' : 'tasks'} · ${this.formatDurationMinutes(totalMinutes)} · ${firstStart}–${lastEnd}`
+        );
+    }
+
+    /**
+     * Diff a fresh item list into the live DataSet.
+     *
+     * vis redraws only what the DataSet reports as changed, so an unchanged
+     * range keeps its DOM node — and with it any tooltip the user is hovering.
+     * Wholesale `clear()` + `add()` would redraw every range on every tick.
+     */
+    updateTimelineItems(items) {
+        const wanted = new Set(items.map((item) => item.id));
+        const stale = this.timelineItems.getIds().filter((id) => !wanted.has(id));
+        if (stale.length) this.timelineItems.remove(stale);
+        this.timelineItems.update(items);
+    }
+
+    /**
+     * Move the day start/close markers to their current values.
+     *
+     * vis throws on setCustomTime for an id it doesn't know and on
+     * addCustomTime for one it does, so the ids in play are tracked rather
+     * than probed.
+     */
+    updateTimelineBoundaries(selectedDate) {
+        const wanted = new Map([
+            ['tk-day-start', { time: this.originalStartTime || null, label: 'Start' }],
+            ['tk-day-close', { time: this.originalEndTime || null, label: 'Close' }],
+        ]);
+
+        for (const [id, { time, label }] of wanted) {
+            const present = this.timelineBoundaries.get(id);
+
+            if (!time) {
+                if (present) {
+                    this.timeline.removeCustomTime(id);
+                    this.timelineBoundaries.set(id, null);
+                }
+                continue;
+            }
+
+            if (present) {
+                this.timeline.setCustomTime(`${selectedDate}T${time}`, id);
+            } else {
+                this.timeline.addCustomTime(`${selectedDate}T${time}`, id);
+            }
+            this.timeline.setCustomTimeTitle(`${label}: ${formatClockTime(time)}`, id);
+            this.timelineBoundaries.set(id, time);
+        }
     }
 
 

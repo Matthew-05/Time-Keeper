@@ -38,6 +38,7 @@
 
 <script type="module">
   import { clockTimeToSeconds, parseClockTime } from "{{ url_for('static', filename='js/time_format.js') }}"
+  import { createPoller } from "{{ url_for('static', filename='js/base.js') }}"
   /* ---------------------------------------------------------------------
      Running-task timer
      Theme handling lives in static/js/theme.js — the preference is stored in
@@ -47,7 +48,7 @@
   // Store task start time as an absolute timestamp
   let taskStartTimestamp = null
   let currentTimerClient = null
-  let timerUpdateInterval = null
+  let timerPoller = null
 
   document.addEventListener('DOMContentLoaded', function () {
     ;(function setActiveNavLink() {
@@ -102,38 +103,40 @@
     startTimer()
   }
 
+  /*
+    The one tick that isn't a refresh: the elapsed figure is derived from
+    `taskStartTimestamp` and the wall clock, so it fetches nothing. It still
+    goes through createPoller for the scheduling, which is what the two
+    hand-rolled handlers here used to approximate:
+
+      - Aligned to whole seconds. The display is truncated to seconds, so a
+        tick landing mid-second showed a number that had already been true for
+        up to 999ms. It now updates as the digit actually changes.
+      - Paused while hidden, refreshed on the way back. Browsers throttle
+        background timers to once a minute, which is exactly why the old code
+        needed a visibilitychange handler to repaint on return. The poller does
+        that itself, so both handlers below collapse into the `focus` one —
+        kept because pywebview can hand focus back without the document ever
+        having been marked hidden.
+  */
   function startTimer() {
-    // Clear any existing interval
     stopTimer()
 
-    // Update immediately
-    updateTimerDisplay()
-
-    // Set up interval to update every second
-    timerUpdateInterval = setInterval(updateTimerDisplay, 1000)
+    timerPoller = createPoller(updateTimerDisplay, {
+      interval: 1000,
+      immediate: true,
+      name: 'navbar-timer',
+    })
   }
 
-  // Handle page visibility changes to keep timer accurate when window regains focus
-  document.addEventListener('visibilitychange', function () {
-    if (!document.hidden && taskStartTimestamp !== null) {
-      // Page became visible again - immediately update the timer display
-      // This ensures the timer shows the correct time even if it was throttled while hidden
-      updateTimerDisplay()
-    }
-  })
-
-  // Also handle when window regains focus (additional safeguard)
   window.addEventListener('focus', function () {
-    if (taskStartTimestamp !== null) {
-      // Window regained focus - immediately update the timer display
-      updateTimerDisplay()
-    }
+    if (taskStartTimestamp !== null) timerPoller?.refresh()
   })
 
   function stopTimer() {
-    if (timerUpdateInterval) {
-      clearInterval(timerUpdateInterval)
-      timerUpdateInterval = null
+    if (timerPoller) {
+      timerPoller.stop()
+      timerPoller = null
     }
   }
 
@@ -223,6 +226,14 @@
     timerEl.innerText = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`
     setTimerRunning(true)
   }
+
+  // base.js stops every poller on pagehide, which covers the timer. The
+  // unfinished-task retry is a bare timeout that reschedules itself forever,
+  // so it needs cancelling by hand or a page left mid-outage keeps polling
+  // after the user has navigated away from it.
+  window.addEventListener('pagehide', function () {
+    clearTimeout(unfinishedRetryTimer)
+  })
 
   // Make the function available globally so it can be called from other scripts
   window.startTimerWithTime = startTimerWithTime

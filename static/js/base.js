@@ -37,11 +37,26 @@ ready(mountModalBackdrops);
  * One delegated popover for every insight control and budget meter in the app.
  * Delegation also covers elements rendered after page load.
  */
+let insightPopover = null;
+
+/**
+ * Is a status breakdown currently on screen?
+ *
+ * Background refreshes consult this. The popover is a single shared element
+ * positioned against whichever trigger opened it, so replacing that trigger's
+ * markup underneath leaves the popover floating next to nothing — `mouseout`
+ * can't fire on a node that no longer exists.
+ */
+export function isInsightOpen() {
+    return Boolean(insightPopover) && !insightPopover.classList.contains('hidden');
+}
+
 function bindInsightPopovers() {
     const popover = document.createElement('div');
     popover.className = 'tk-insight-popover hidden';
     popover.setAttribute('role', 'tooltip');
     document.body.appendChild(popover);
+    insightPopover = popover;
 
     const show = (target) => {
         // Measured *after* the content is in, because a structured insight is
@@ -346,6 +361,339 @@ export function formatDurationMinutes(minutes) {
 export function formatDecimalHours(hours) {
     return Number(Number(hours).toFixed(2)).toString();
 }
+
+/* -------------------------------------------------------------------------
+   Periodic refresh
+   ------------------------------------------------------------------------- */
+
+/** Every live poller on the page, so one teardown can stop all of them. */
+const activePollers = new Set();
+
+/**
+ * Run an async task on a repeating schedule.
+ *
+ * This exists because `setInterval(() => somethingAsync(), 60000)` is wrong in
+ * four ways that all showed up here:
+ *
+ *  - **It doesn't await.** The interval fires on a fixed wall-clock cadence
+ *    regardless of whether the previous run finished. `fetchFromAPI` retries a
+ *    failing read for up to a minute, so a server hiccup meant a second request
+ *    launched on top of the first, then a third, each racing to write the same
+ *    DOM. Self-scheduling from the *end* of the run makes overlap impossible.
+ *  - **It drifts.** These refreshes exist to keep a minute-resolution figure
+ *    honest, and a fixed 60s delay lands wherever the first tick happened to
+ *    fall — up to 59s of staleness, permanently. Aligning to the next real
+ *    minute boundary keeps the number correct the moment it changes.
+ *  - **It runs while nobody is looking.** A minimised desktop app polled all
+ *    day for a screen no one could see. Pausing while hidden and refreshing
+ *    once on the way back is the same UX for none of the requests.
+ *  - **It never stops.** Nothing cleared these, so navigating away left the
+ *    fetch in flight against a torn-down page.
+ *
+ * `task` may be sync or async; its returned promise is awaited. Rejections are
+ * logged, never thrown — a poller that dies on one bad response stops updating
+ * the page for the rest of the session, which is the failure this is meant to
+ * prevent. Because reads already retry internally, a rejection here means a
+ * real outage, so the cadence backs off up to `maxBackoff` and resets on the
+ * first success.
+ *
+ * `shouldSkip` is the second half of "don't interrupt the user". Patching the
+ * DOM in place (see `reconcileChildren`) means a refresh no longer destroys
+ * what someone is working on, but there are interactions no amount of careful
+ * patching makes safe to refresh underneath — a modal reading a row that the
+ * response is about to change, a half-typed time in an input. For those the
+ * tick is *deferred*, not dropped: the schedule carries on, and `resume()`
+ * runs the skipped work the moment the interaction ends, so the page is never
+ * left showing stale data once it's free to update.
+ *
+ * @param {() => (void|Promise<void>)} task   Work to run each tick.
+ * @param {object}  [options]
+ * @param {number}  [options.interval=60000]  Base period, ms.
+ * @param {boolean} [options.align=true]      Snap ticks to interval boundaries.
+ * @param {boolean} [options.immediate=false] Run once now instead of waiting.
+ * @param {boolean} [options.pauseWhenHidden=true] Idle while the page is hidden.
+ * @param {() => boolean} [options.shouldSkip] Defer the tick while this is true.
+ * @param {number}  [options.maxBackoff=300000] Ceiling for the failure backoff.
+ * @param {string}  [options.name='poller']   Label used in console warnings.
+ * @returns {{refresh: () => Promise<void>, resume: () => Promise<void>,
+ *            stop: () => void, isRunning: () => boolean, isDeferred: () => boolean}}
+ */
+export function createPoller(task, {
+    interval = 60000,
+    align = true,
+    immediate = false,
+    pauseWhenHidden = true,
+    shouldSkip = null,
+    maxBackoff = 300000,
+    name = 'poller',
+} = {}) {
+    let timer = null;
+    let stopped = false;
+    let running = false;
+    let failures = 0;
+    // Set while a run is in flight so a visibility change or a manual refresh
+    // joins the existing run rather than starting a competing one.
+    let inFlight = null;
+    // A tick that `shouldSkip` turned away. Remembered so `resume()` knows
+    // there is work owed rather than having to refresh unconditionally.
+    let deferred = false;
+
+    /**
+     * Delay to the next tick.
+     *
+     * Aligned mode targets the next boundary of `interval` on the wall clock,
+     * so a 60s poller fires at :00 of each minute no matter when it started or
+     * how long the last run took. A run that overruns its own boundary simply
+     * aims at the next one — never a zero-length wait that would spin.
+     */
+    function nextDelay() {
+        if (failures > 0) {
+            // Exponential, capped. Unaligned deliberately: during an outage the
+            // point is to stop hammering, not to hit a boundary.
+            return Math.min(maxBackoff, interval * 2 ** Math.min(failures, 8));
+        }
+        if (!align) return interval;
+        const remainder = Date.now() % interval;
+        return interval - remainder || interval;
+    }
+
+    function schedule() {
+        if (stopped || timer !== null) return;
+        // Nothing to schedule while hidden — `visibilitychange` restarts us.
+        if (pauseWhenHidden && document.hidden) return;
+        timer = setTimeout(() => {
+            timer = null;
+            run();
+        }, nextDelay());
+    }
+
+    async function run({ force = false } = {}) {
+        if (stopped) return;
+        // Coalesce: concurrent callers await the run already happening.
+        if (inFlight) return inFlight;
+
+        // Busy. Note the debt and reschedule — `resume()` settles it. `force`
+        // is how an explicit refresh() overrides the guard, since a caller
+        // asking directly has already decided the moment is right.
+        if (!force && shouldSkip?.()) {
+            deferred = true;
+            schedule();
+            return;
+        }
+        deferred = false;
+
+        running = true;
+        inFlight = (async () => {
+            try {
+                await task();
+                failures = 0;
+            } catch (error) {
+                failures++;
+                console.warn(`[${name}] refresh failed (${failures}):`, error);
+            } finally {
+                running = false;
+                inFlight = null;
+            }
+        })();
+
+        await inFlight;
+        schedule();
+    }
+
+    function onVisibilityChange() {
+        if (!pauseWhenHidden) return;
+        if (document.hidden) {
+            // Drop the pending timer; the data will be refetched on return
+            // anyway, so firing it in the background buys nothing.
+            if (timer !== null) {
+                clearTimeout(timer);
+                timer = null;
+            }
+            return;
+        }
+        // Back on screen. Whatever is displayed was computed at least one
+        // interval ago, so refresh now rather than waiting for a boundary.
+        run();
+    }
+
+    const poller = {
+        /**
+         * Run the task now, resetting the schedule around it.
+         *
+         * Ignores `shouldSkip`: an explicit call is a caller stating the moment
+         * is right, and honouring the guard here would make refresh() silently
+         * do nothing exactly when a page most wants a repaint.
+         */
+        async refresh() {
+            if (stopped) return;
+            if (timer !== null) {
+                clearTimeout(timer);
+                timer = null;
+            }
+            await run({ force: true });
+        },
+        /**
+         * Settle a tick that `shouldSkip` turned away.
+         *
+         * Call when the blocking interaction ends — modal closed, edit saved or
+         * cancelled. A no-op if nothing was actually skipped, so it's safe to
+         * wire into every exit path without checking first.
+         */
+        async resume() {
+            if (stopped || !deferred) return;
+            if (shouldSkip?.()) return;   // something else still has the page
+            await poller.refresh();
+        },
+        /** Cancel permanently. Safe to call more than once. */
+        stop() {
+            if (stopped) return;
+            stopped = true;
+            if (timer !== null) {
+                clearTimeout(timer);
+                timer = null;
+            }
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+            activePollers.delete(poller);
+        },
+        isRunning: () => running,
+        isDeferred: () => deferred,
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    activePollers.add(poller);
+
+    if (immediate) {
+        run();
+    } else {
+        schedule();
+    }
+
+    return poller;
+}
+
+/** Stop every poller on the page. */
+export function stopAllPollers() {
+    for (const poller of [...activePollers]) poller.stop();
+}
+
+/**
+ * Update a list of elements in place instead of rebuilding it.
+ *
+ * `container.innerHTML = items.map(render).join('')` is the pattern this
+ * replaces, and it is fine exactly once — on first paint. On a *refresh* it
+ * throws away live state that only exists in the DOM, which on this app meant:
+ * a row the user was editing, complete with what they'd typed; every expanded
+ * detail row (that fold state is a `hidden` class and nothing else); focus;
+ * scroll position; and the flatpickr instance bound to each time input, which
+ * was leaked rather than destroyed because nothing told it the input was gone.
+ *
+ * So instead: match each item to the element already representing it, update
+ * only what changed, create only what's new, remove only what's gone. An
+ * element that survives is the *same* element — so anything the browser or the
+ * user put on it survives too, because it was never touched.
+ *
+ * `create` may return one element or several. Several is what a table needs
+ * here, where one client is a summary `<tr>` and a detail `<tr>` side by side
+ * as siblings; they're keyed identically and moved as a unit.
+ *
+ * @param {Element} container            Parent whose children are managed.
+ * @param {Array} items                  Desired contents, in display order.
+ * @param {object} handlers
+ * @param {(item: any) => string|number} handlers.key    Stable identity per item.
+ * @param {(item: any) => Element|Element[]} handlers.create  Build a missing entry.
+ * @param {(els: Element[], item: any) => void} [handlers.update]  Patch a surviving entry.
+ * @param {(els: Element[], item: any) => boolean} [handlers.skip] Leave an entry untouched.
+ * @param {(els: Element[]) => void} [handlers.remove]    Tear down a departing entry.
+ * @param {string} [handlers.keyAttr='data-rk']           Attribute holding the key.
+ */
+export function reconcileChildren(container, items, {
+    key,
+    create,
+    update,
+    skip,
+    remove,
+    keyAttr = 'data-rk',
+} = {}) {
+    if (!container) return;
+
+    // Index what's already there. Anything unkeyed is scaffolding rather than
+    // data — a loading spinner, an empty-state row — and has no counterpart in
+    // `items`, so it goes.
+    const existing = new Map();
+    for (const child of Array.from(container.children)) {
+        const childKey = child.getAttribute(keyAttr);
+        if (childKey === null) {
+            child.remove();
+            continue;
+        }
+        if (!existing.has(childKey)) existing.set(childKey, []);
+        existing.get(childKey).push(child);
+    }
+
+    const wanted = new Set(items.map((item) => String(key(item))));
+
+    // Departures first, so the ordering pass below only ever walks elements
+    // that are staying and can use plain sibling comparison.
+    for (const [childKey, els] of existing) {
+        if (wanted.has(childKey)) continue;
+        remove?.(els);
+        els.forEach((el) => el.remove());
+        existing.delete(childKey);
+    }
+
+    // Walk the desired order with a cursor into the surviving children. An
+    // element already in the right place is left completely alone — no move,
+    // no reinsertion. That matters beyond performance: re-inserting a node
+    // blurs it if it holds focus, which would defeat the point of all this.
+    let cursor = container.firstElementChild;
+    for (const item of items) {
+        const itemKey = String(key(item));
+        let els = existing.get(itemKey);
+
+        if (els) {
+            if (!skip?.(els, item)) update?.(els, item);
+        } else {
+            const created = create(item);
+            els = Array.isArray(created) ? created : [created];
+            els.forEach((el) => el.setAttribute(keyAttr, itemKey));
+        }
+
+        for (const el of els) {
+            if (el === cursor) cursor = cursor.nextElementSibling;
+            else container.insertBefore(el, cursor);
+        }
+    }
+}
+
+/**
+ * Set text only when it differs.
+ *
+ * Assigning identical text still dirties the node, and a dirtied node inside a
+ * selection collapses it — which is how a background refresh used to wipe out
+ * a user mid-drag over a number they were copying.
+ */
+export function setText(el, value) {
+    if (!el) return;
+    const next = value == null ? '' : String(value);
+    if (el.textContent !== next) el.textContent = next;
+}
+
+/** As `setText`, for the cases that genuinely need markup. */
+export function setHtml(el, value) {
+    if (!el) return;
+    const next = value == null ? '' : String(value);
+    if (el.innerHTML !== next) el.innerHTML = next;
+}
+
+/**
+ * Teardown on navigation.
+ *
+ * `pagehide` rather than `unload`: it fires for the back/forward cache too, and
+ * `unload` is the one browsers are actively removing. The app is a multi-page
+ * Flask site inside pywebview, so every nav is a real document teardown and
+ * without this the outgoing page's fetches carry on against dead DOM.
+ */
+window.addEventListener('pagehide', stopAllPollers);
 
 export class TimeKeeper {
     constructor() {

@@ -1,4 +1,4 @@
-import { TimeKeeper, ready } from './base.js';
+import { TimeKeeper, createPoller, isInsightOpen, setHtml, ready } from './base.js';
 import { WorksList } from './works.js';
 import { BudgetWidget } from './budget_widget.js';
 import {
@@ -22,19 +22,45 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.currentTaskClientId = null;
 
         // The displayed figure changes on minute boundaries, so this is the
-        // coarsest tick that never shows a stale number. Set up in the
-        // constructor rather than init(), which the page retries on failure
-        // and would otherwise stack a second interval on top of the first.
-        this.clientDayTotalInterval = setInterval(() => this.updateClientDayTotal(), 60000);
+        // coarsest tick that never shows a stale number — and `align` makes
+        // that literal: the fetch lands on :00 of each minute rather than
+        // wherever page load happened to fall. Set up in the constructor
+        // rather than init(), which the page retries on failure and would
+        // otherwise stack a second poller on top of the first.
+        this.clientDayTotalPoller = createPoller(() => this.updateClientDayTotal(), {
+            name: 'client-day-total',
+        });
 
         // Budget meters move as the running task accrues, on the same minute
-        // boundary and for the same reason. Separate interval rather than one
+        // boundary and for the same reason. Separate poller rather than one
         // combined tick because the two are independent requests and a slow
         // budget fetch shouldn't hold up the day total.
-        this.budgetInterval = setInterval(
-            () => this.budgets.refresh().catch((e) => console.error(e)),
-            60000
-        );
+        //
+        // Strips are patched in place (see BudgetWidget.load), but a status
+        // breakdown popover is anchored to the meter that opened it, so the
+        // tick waits while one is on screen.
+        this.budgetPoller = createPoller(() => this.budgets.refresh(), {
+            name: 'budget-widget',
+            shouldSkip: () => isInsightOpen(),
+        });
+
+        // Closing the popover is a mouseout or a click anywhere, neither of
+        // which is a handler this page owns — so rather than hook them, settle
+        // the debt on the next tick, which is at most a minute later and only
+        // happens at all if one was actually skipped.
+        document.addEventListener('click', () => this.budgetPoller?.resume());
+    }
+
+    /**
+     * Stop both pollers.
+     *
+     * `pagehide` already sweeps every poller on navigation, so this is for the
+     * cases that aren't a navigation — a test tearing the page object down, or
+     * a future caller replacing the instance.
+     */
+    destroy() {
+        this.clientDayTotalPoller?.stop();
+        this.budgetPoller?.stop();
     }
 
     async init() {
@@ -205,7 +231,11 @@ export class TimeKeeperIndex extends TimeKeeper {
             ? `<span class="inline-block max-w-[12rem] truncate font-semibold text-muted">${this.escapeHtml(name)}</span>${separator}`
             : '';
 
-        element.innerHTML = `${client}
+        // setHtml, not innerHTML: this is rewritten every minute and the figure
+        // usually hasn't moved. Reassigning identical markup still replaces the
+        // nodes, which collapses any selection the user has made over the
+        // numbers — the one interaction this element supports.
+        setHtml(element, `${client}
             <span class="inline-flex items-baseline gap-1 whitespace-nowrap">
                 <span class="text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-accent">Unlogged</span>
                 <span class="font-semibold text-text">${unlogged}</span>
@@ -214,7 +244,7 @@ export class TimeKeeperIndex extends TimeKeeper {
             <span class="inline-flex items-baseline gap-1 whitespace-nowrap">
                 <span class="text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-faint">Logged</span>
                 <span class="font-semibold text-text">${logged}</span>
-            </span>`;
+            </span>`);
         element.title = `${name || 'This client'} — current task unlogged: ${unlogged}; logged today: ${logged}`;
         element.classList.add('inline-flex');
         element.classList.remove('hidden');
