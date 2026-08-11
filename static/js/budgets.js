@@ -1,4 +1,4 @@
-import { TimeKeeper, ready, lockBodyScroll, unlockBodyScroll } from './base.js'
+import { TimeKeeper, ready, confirmAction, disarmConfirm, lockBodyScroll, unlockBodyScroll } from './base.js'
 import {
     MATURITY_RULE,
     STATUS_LABEL,
@@ -119,7 +119,6 @@ class Budgets extends TimeKeeper {
         this.formReturnBudgetId = null
         this.detailId = null
         this.chart = null
-        this.closeBudgetResetTimer = null
 
         // Guards a slow response from painting over a newer one — the same
         // problem works.js solves with its loadToken.
@@ -562,20 +561,15 @@ class Budgets extends TimeKeeper {
     }
 
     async remove() {
+        if (!this.editing) return
+        // Two-step rather than a confirm dialog, on the shared helper every
+        // other destructive button in the app uses.
+        return confirmAction(this.deleteButton, () => this.performRemove())
+    }
+
+    async performRemove() {
         const budget = this.editing
         if (!budget) return
-
-        // Two-step rather than a confirm dialog, matching how the client
-        // manager arms a delete.
-        if (!this.deleteButton.classList.contains('tk-btn-danger-armed')) {
-            this.deleteButton.classList.add('tk-btn-danger-armed')
-            this.deleteButton.textContent = 'Really delete?'
-            setTimeout(() => {
-                this.deleteButton.classList.remove('tk-btn-danger-armed')
-                this.deleteButton.textContent = 'Delete'
-            }, 4000)
-            return
-        }
 
         try {
             await this.fetchFromAPI(
@@ -590,20 +584,12 @@ class Budgets extends TimeKeeper {
             await this.load()
         } catch (error) {
             this.showToast(error.message, 'error')
-        } finally {
-            this.deleteButton.classList.remove('tk-btn-danger-armed')
-            this.deleteButton.textContent = 'Delete'
         }
     }
 
     resetCloseBudgetButton() {
-        if (this.closeBudgetResetTimer) {
-            clearTimeout(this.closeBudgetResetTimer)
-            this.closeBudgetResetTimer = null
-        }
+        disarmConfirm(this.detailCloseBudget)
         this.detailCloseBudget.disabled = false
-        this.detailCloseBudget.classList.remove('tk-btn-danger-armed')
-        this.detailCloseBudget.textContent = 'Close budget'
     }
 
     async closeBudget() {
@@ -611,18 +597,15 @@ class Budgets extends TimeKeeper {
         if (!detail?.is_active || detail.closed_at) return
 
         // Closing stops future automatic allocation, so require the same
-        // deliberate second click used by Delete without interrupting the
-        // flow with a browser-native confirmation dialog.
-        if (!this.detailCloseBudget.classList.contains('tk-btn-danger-armed')) {
-            this.detailCloseBudget.classList.add('tk-btn-danger-armed')
-            this.detailCloseBudget.textContent = 'Really close?'
-            this.closeBudgetResetTimer = setTimeout(() => {
-                this.closeBudgetResetTimer = null
-                this.resetCloseBudgetButton()
-            }, 4000)
-            return
-        }
+        // deliberate second click used by Delete.
+        return confirmAction(
+            this.detailCloseBudget,
+            () => this.performCloseBudget(detail),
+            { label: 'Confirm close?' }
+        )
+    }
 
+    async performCloseBudget(detail) {
         this.detailCloseBudget.disabled = true
         try {
             await this.fetchFromAPI(
@@ -1755,8 +1738,7 @@ class Budgets extends TimeKeeper {
             const returnBudgetId = this.formReturnBudgetId
             this.formReturnBudgetId = null
             this.editing = null
-            this.deleteButton.classList.remove('tk-btn-danger-armed')
-            this.deleteButton.textContent = 'Delete'
+            disarmConfirm(this.deleteButton)
 
             // X, Cancel, backdrop click, and Escape all come through here.
             // Restore the budget they were editing without making each close

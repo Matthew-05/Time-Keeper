@@ -175,6 +175,109 @@ export function unlockBodyScroll() {
 }
 
 /**
+ * Click-twice-to-confirm for destructive buttons.
+ *
+ * The app deliberately never calls `confirm()`: a browser-native dialog in the
+ * pywebview shell is a modal OS window that steals focus, ignores the theme,
+ * and reads as a system error rather than part of the page. Instead the button
+ * itself arms — its label becomes "Confirm?" and it goes solid danger — and the
+ * second click within `timeout` performs the action.
+ *
+ * Every delete in the app went its own way here (client manager, works list,
+ * budgets, task browser), so this is the one implementation they all share.
+ * Anything that arms disarms again on a timeout, on a click elsewhere, or on
+ * Escape, so nothing is left sitting in a confirm state waiting to be hit.
+ */
+const ARMED_CLASS = 'tk-btn-danger-armed';
+
+/* The variant classes carry the button's resting colour, which the armed state
+   replaces. Only these are removed and restored, so a button keeps its
+   size/layout classes (tk-btn-sm, hidden, …) untouched. `text-danger` is in the
+   list because a Tailwind utility outranks the component class and would
+   otherwise paint red text onto the solid red armed background. */
+const BUTTON_VARIANTS = [
+    'tk-btn-danger',
+    'tk-btn-warn',
+    'tk-btn-secondary',
+    'tk-btn-ghost',
+    'text-danger',
+];
+
+const armedButtons = new Map();
+
+export function isConfirmArmed(button) {
+    return armedButtons.has(button);
+}
+
+/** Return an armed button to its resting state. Safe to call unconditionally. */
+export function disarmConfirm(button) {
+    const state = armedButtons.get(button);
+    if (!state) return false;
+
+    clearTimeout(state.timer);
+    armedButtons.delete(button);
+    // Restored as markup, not text: arming replaces the button's contents, and
+    // some of these buttons hold an icon element alongside their label.
+    button.innerHTML = state.content;
+    button.classList.remove(ARMED_CLASS);
+    state.variants.forEach((variant) => button.classList.add(variant));
+    delete button.dataset.confirmMode;
+    return true;
+}
+
+/**
+ * Arm `button`, or run `onConfirm` if it is already armed.
+ *
+ * Call it from the button's own click handler and let it decide which of the
+ * two clicks this is:
+ *
+ *     button.addEventListener('click', () => confirmAction(button, () => this.remove(id)))
+ */
+export function confirmAction(button, onConfirm, { label = 'Confirm?', timeout = 3000 } = {}) {
+    if (!button) return onConfirm();
+
+    if (armedButtons.has(button)) {
+        disarmConfirm(button);
+        return onConfirm();
+    }
+
+    const variants = BUTTON_VARIANTS.filter((variant) => button.classList.contains(variant));
+    variants.forEach((variant) => button.classList.remove(variant));
+    button.classList.add(ARMED_CLASS);
+
+    armedButtons.set(button, {
+        content: button.innerHTML,
+        variants,
+        // A button that was re-rendered away can't be restored, but it must
+        // still leave the map or it would confirm on its first click if the
+        // same element came back.
+        timer: setTimeout(() => {
+            if (button.isConnected) disarmConfirm(button);
+            else armedButtons.delete(button);
+        }, timeout),
+    });
+
+    button.textContent = label;
+    button.dataset.confirmMode = 'true';
+    return undefined;
+}
+
+/* Capture phase, so an armed button that isn't the one being clicked is reset
+   before the click's own handler runs. `contains` keeps a click on an icon or
+   label inside the armed button counting as the confirming click. */
+document.addEventListener('click', (event) => {
+    if (!armedButtons.size) return;
+    [...armedButtons.keys()].forEach((button) => {
+        if (button !== event.target && !button.contains(event.target)) disarmConfirm(button);
+    });
+}, true);
+
+document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !armedButtons.size) return;
+    [...armedButtons.keys()].forEach((button) => disarmConfirm(button));
+});
+
+/**
  * Stable per-client colour, shared by the History timeline and the Summary
  * charts.
  *

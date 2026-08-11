@@ -1,10 +1,9 @@
-import { TimeKeeper, ready } from './base.js';
+import { TimeKeeper, confirmAction, ready } from './base.js';
 
 export class ClientManager extends TimeKeeper {
     constructor() {
         super();
         this.originalText = {};
-        this.deleteConfirmTimers = {};
         this.initializeElements();
         this.bindEvents();
         this.initOriginalText();
@@ -40,15 +39,7 @@ export class ClientManager extends TimeKeeper {
             } else if (target.name === 'delete') {
                 const row = target.closest('tr');
                 const id = row.id.split('_')[1];
-                
-                // Check if this is already in confirm mode
-                if (target.dataset.confirmMode === 'true') {
-                    // Actually delete the client
-                    this.deleteClient(id);
-                } else {
-                    // Enter confirm mode
-                    this.enterDeleteConfirmMode(target, id);
-                }
+                confirmAction(target, () => this.deleteClient(id));
             } else if (target.name === 'save') {
                 const row = target.closest('tr');
                 const id = row.id.split('_')[1];
@@ -171,38 +162,6 @@ export class ClientManager extends TimeKeeper {
         this.flashCell(nameCell, '--danger-soft');
     }
 
-    enterDeleteConfirmMode(button, id) {
-        // Store original text and styling
-        button.dataset.originalText = button.textContent;
-        button.dataset.confirmMode = 'true';
-        
-        // Change button appearance to confirm state
-        button.textContent = 'Confirm?';
-        button.classList.remove('tk-btn-danger');
-        button.classList.add('tk-btn-danger-armed');
-        
-        // Clear any existing timer for this button
-        if (this.deleteConfirmTimers[id]) {
-            clearTimeout(this.deleteConfirmTimers[id]);
-        }
-        
-        // Set timer to revert after 3 seconds
-        this.deleteConfirmTimers[id] = setTimeout(() => {
-            this.revertDeleteButton(button);
-            delete this.deleteConfirmTimers[id];
-        }, 3000);
-    }
-    
-    revertDeleteButton(button) {
-        // Revert button to original state
-        button.textContent = button.dataset.originalText || 'Delete';
-        button.dataset.confirmMode = 'false';
-        
-        // Restore original styling
-        button.classList.remove('tk-btn-danger-armed');
-        button.classList.add('tk-btn-danger');
-    }
-
     resetRow(id) {
         const row = document.getElementById(`row_${id}`);
         const nameCell = document.getElementById(`name_${id}`);
@@ -223,12 +182,6 @@ export class ClientManager extends TimeKeeper {
     }
 
     async deleteClient(id) {
-        // Clear the confirmation timer
-        if (this.deleteConfirmTimers[id]) {
-            clearTimeout(this.deleteConfirmTimers[id]);
-            delete this.deleteConfirmTimers[id];
-        }
-        
         try {
             const row = document.getElementById(`row_${id}`);
 

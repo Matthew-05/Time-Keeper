@@ -206,12 +206,12 @@ export class TimeKeeperIndex extends TimeKeeper {
 
         element.innerHTML = `${client}
             <span class="inline-flex items-baseline gap-1 whitespace-nowrap">
-                <span class="text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-accent">Unlogged</span>
+                <span class="text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-accent">Today's Unlogged</span>
                 <span class="font-semibold text-text">${unlogged}</span>
             </span>
             ${separator}
             <span class="inline-flex items-baseline gap-1 whitespace-nowrap">
-                <span class="text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-faint">Logged</span>
+                <span class="text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-faint">Today'sLogged</span>
                 <span class="font-semibold text-text">${logged}</span>
             </span>`;
         element.title = `${name || 'This client'} — current task unlogged: ${unlogged}; logged today: ${logged}`;

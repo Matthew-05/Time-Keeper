@@ -1,4 +1,4 @@
-import { TimeKeeper, ready, clientColor, clientForeground, lockBodyScroll, unlockBodyScroll } from './base.js';
+import { TimeKeeper, ready, clientColor, clientForeground, confirmAction, lockBodyScroll, unlockBodyScroll } from './base.js';
 import { WorksList, fetchWorks, joinWorks } from './works.js';
 import {
     clockTimeToDate,
@@ -231,9 +231,8 @@ export class TaskBrowser extends TimeKeeper {
         document.addEventListener('click', e => {
             // Handle delete button clicks separately
             if (e.target.classList.contains('delete-task-btn')) {
-                if (confirm('Are you sure you want to delete this task?')) {
-                    this.handleTaskDelete(e.target.closest('tr'));
-                }
+                const row = e.target.closest('tr');
+                confirmAction(e.target, () => this.handleTaskDelete(row));
                 return; // Prevent event bubbling
             }
 

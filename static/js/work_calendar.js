@@ -1,5 +1,4 @@
-import { TimeKeeper, ready } from './base.js'
-import { SaveChangesBar } from './save_changes.js'
+import { TimeKeeper, confirmAction, disarmConfirm, ready } from './base.js'
 import { daysSinceWeekStart, isoWeekday } from './week_start.js'
 
 const MONTH_FORMAT = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' })
@@ -38,6 +37,15 @@ function endOfCalendar(month) {
     return addDays(last, 6 - daysSinceWeekStart(last))
 }
 
+/**
+ * Every edit on this page is written straight through to the settings file.
+ *
+ * The page used to stage a draft behind the shared "Unsaved changes" bar, which
+ * meant two confirmations for one intent: Apply override, then Save changes.
+ * The editor's own Apply button is the deliberate step, so there is nothing
+ * left for a second one to protect — and no draft state to strand if the user
+ * navigates away mid-edit.
+ */
 class WorkCalendar extends TimeKeeper {
     constructor() {
         super()
@@ -45,8 +53,6 @@ class WorkCalendar extends TimeKeeper {
         this.month = new Date(now.getFullYear(), now.getMonth(), 1)
         this.today = isoDate(now)
         this.settings = null
-        this.savedSettings = null
-        this.draft = null
         this.loadIntent = 0
         this.days = new Map()
         this.selectionStart = null
@@ -54,8 +60,10 @@ class WorkCalendar extends TimeKeeper {
         this.selectionWeekdays = null
         this.rangeAnchor = null
         this.editingId = null
-        this.statusChoice = 'default'
-        this.hoursChoice = 'default'
+        // true / false / null, where null is "the selected dates don't agree,
+        // so leave each one's status alone".
+        this.statusChoice = null
+        this.seeded = { status: null, hours: null }
 
         this.grid = document.getElementById('work-calendar-grid')
         this.monthTitle = document.getElementById('calendar-month-title')
@@ -66,17 +74,13 @@ class WorkCalendar extends TimeKeeper {
         this.selectionLabel = document.getElementById('calendar-selection-label')
         this.overrideFields = document.getElementById('calendar-override-fields')
         this.statusOptions = document.getElementById('calendar-status-options')
-        this.hoursOptions = document.getElementById('calendar-hours-options')
-        this.customHoursWrap = document.getElementById('calendar-custom-hours-wrap')
         this.customHours = document.getElementById('calendar-custom-hours')
+        this.editorHint = document.getElementById('calendar-editor-hint')
         this.saveButton = document.getElementById('calendar-save-override')
+        this.resetButton = document.getElementById('calendar-reset-override')
         this.clearButton = document.getElementById('calendar-clear-selection')
         this.rules = document.getElementById('calendar-rules')
         this.ruleCount = document.getElementById('calendar-rule-count')
-        this.saveBar = new SaveChangesBar({
-            onSave: () => this.saveChanges(),
-            onCancel: () => this.cancelChanges(),
-        })
     }
 
     async init() {
@@ -111,60 +115,47 @@ class WorkCalendar extends TimeKeeper {
         this.statusOptions.addEventListener('click', (event) => {
             const button = event.target.closest('[data-status]')
             if (!button) return
-            this.statusChoice = button.dataset.status
+            this.statusChoice = button.dataset.status === 'work'
             this.markEditorChoices()
         })
-        this.hoursOptions.addEventListener('click', (event) => {
-            const button = event.target.closest('[data-hours-mode]')
-            if (!button) return
-            this.hoursChoice = button.dataset.hoursMode
-            this.markEditorChoices()
-            if (this.hoursChoice === 'custom') this.customHours.focus()
-        })
+        // Typing an amount is itself the override, so the hints and the Apply
+        // label have to follow every keystroke rather than waiting for change.
+        this.customHours.addEventListener('input', () => this.markEditorChoices())
         this.saveButton.addEventListener('click', () => this.saveOverride())
+        // A reset can clear several rules at once — more than the per-rule
+        // Remove does — so it takes the same second click Remove does.
+        this.resetButton.addEventListener('click', () => {
+            confirmAction(this.resetButton, () => this.resetSelection(), { label: 'Confirm reset?' })
+        })
     }
 
-    async loadMonth({ resetDraft = false } = {}) {
+    async loadMonth() {
         const start = startOfCalendar(this.month)
         const end = endOfCalendar(this.month)
         const intent = ++this.loadIntent
         this.monthTitle.textContent = MONTH_FORMAT.format(this.month)
 
         try {
-            const endpoint = `/api/work-calendar?start=${isoDate(start)}&end=${isoDate(end)}`
-            const payload = this.draft && !resetDraft
-                ? await this.fetchFromAPI(endpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(this.draft),
-                })
-                : await this.fetchFromAPI(endpoint)
+            const payload = await this.fetchFromAPI(
+                `/api/work-calendar?start=${isoDate(start)}&end=${isoDate(end)}`
+            )
             if (intent !== this.loadIntent) return false
 
-            if (!this.savedSettings || resetDraft) {
-                this.savedSettings = this.settingsDraft(payload)
-                this.draft = structuredClone(this.savedSettings)
-                this.saveBar.setDirty(false)
-            }
             this.settings = payload
             this.days = new Map(payload.days.map((day) => [day.date, day]))
             this.renderMonthCapacity(payload.days)
             this.renderDefaults()
             this.renderCalendar(start, end)
             this.renderRules()
+            // Fresh data can change what the editor says about the selection —
+            // whether there is anything left to reset, most of all. It re-reads
+            // the controls without re-seeding them, so anything typed survives.
+            this.updateSelectionEditor()
             return true
         } catch (error) {
             if (intent !== this.loadIntent) return false
             this.grid.innerHTML = '<div class="tk-empty col-span-7 py-12">Could not load the work calendar.</div>'
             return false
-        }
-    }
-
-    settingsDraft(payload) {
-        return {
-            work_hours_per_day: payload.work_hours_per_day,
-            work_days: [...payload.work_days],
-            work_calendar_overrides: structuredClone(payload.overrides),
         }
     }
 
@@ -282,28 +273,118 @@ class WorkCalendar extends TimeKeeper {
             this.selectionWeekdays = null
             this.rangeAnchor = key
             this.editingId = null
-            this.seedEditorFromDate(key)
         }
+        // Re-seeded on every selection change, extensions included: adding a
+        // Saturday to a weekday range can turn a settled status into a mixed one.
+        this.seedEditorFromSelection()
         this.updateSelectionEditor()
         this.renderCalendar(startOfCalendar(this.month), endOfCalendar(this.month))
     }
 
-    seedEditorFromDate(key) {
-        const details = this.days.get(key)
-        if (!details) {
-            this.statusChoice = 'default'
-            this.hoursChoice = 'default'
-            return
+    /**
+     * What the selected dates currently look like, per editable field.
+     *
+     * `default` is what the recurring schedule alone gives, `effective` is what
+     * the date resolves to today including any override. Either is `null` when
+     * the selected dates disagree — a Monday-to-Sunday range has two different
+     * default statuses, and there is no single value to seed or compare with.
+     *
+     * Only dates in the loaded window are considered. A selection can outrun it
+     * (a saved rule may span months), and the visible part is what the editor
+     * is describing.
+     */
+    selectionSummary() {
+        const details = this.selectedDateKeys()
+            .map((key) => this.days.get(key))
+            .filter(Boolean)
+
+        const only = (values) => {
+            const unique = [...new Set(values)]
+            return unique.length === 1 ? unique[0] : null
         }
+        // Rounded to the same 2dp the input and the settings file use, so a
+        // stored 6.67 and a typed 6.67 compare equal rather than reading as an
+        // override of themselves.
+        const hours = (value) => Math.round(Number(value) * 100) / 100
 
-        this.statusChoice = details.status_overridden
-            ? details.is_workday ? 'work' : 'off'
-            : 'default'
-        this.hoursChoice = details.hours_overridden ? 'custom' : 'default'
+        const statusEffective = only(details.map((day) => day.is_workday))
+        const hoursEffective = only(details.map((day) => hours(day.configured_hours ?? day.default_hours)))
 
-        const configured = Number(details.configured_hours ?? details.default_hours)
-        if (Number.isFinite(configured)) {
-            this.customHours.value = String(Math.round(configured * 100) / 100)
+        return {
+            count: details.length,
+            statusDefault: only(details.map((day) => day.default_is_workday)),
+            statusEffective,
+            hoursDefault: only(details.map((day) => hours(day.default_hours))),
+            hoursEffective,
+            // A range holding both working and non-working days has no single
+            // "hours per working day" to show — the off days aren't working
+            // days at all — so the box starts blank there as well.
+            hoursSeed: statusEffective === null ? null : hoursEffective,
+            statusOverridden: details.some((day) => day.status_overridden),
+            hoursOverridden: details.some((day) => day.hours_overridden),
+        }
+    }
+
+    /** Show the selection as it stands. Nothing here is an override yet. */
+    seedEditorFromSelection() {
+        const summary = this.selectionSummary()
+        this.statusChoice = summary.statusEffective
+        this.customHours.value = summary.hoursSeed === null ? '' : String(summary.hoursSeed)
+        // Kept so Apply can tell "I chose this" from "this is just what was
+        // already here". Re-applying the value a date already resolves to would
+        // otherwise duplicate the rule that produced it.
+        this.seeded = { status: this.statusChoice, hours: this.chosenHours() }
+    }
+
+    /**
+     * What Apply would do to one field, from the value in the editor alone:
+     *
+     *   skip     — no value chosen; the selection was mixed and left alone
+     *   match    — the value is the default and nothing overrides it: no rule
+     *   reset    — the value is the default but an override exists: clear it
+     *   override — the value differs from the default, so it is recorded
+     *
+     * A chosen value against mixed defaults is an override: it differs from at
+     * least one of the dates, and the user picked it deliberately for all.
+     */
+    fieldPlan(chosen, defaultValue, overridden) {
+        if (chosen === null) return { action: 'skip', value: null }
+        if (defaultValue !== null && chosen === defaultValue) {
+            return { action: overridden ? 'reset' : 'match', value: null }
+        }
+        return { action: 'override', value: chosen }
+    }
+
+    /** The chosen hours, or null for an empty box; NaN for an unusable entry. */
+    chosenHours() {
+        const raw = this.customHours.value.trim()
+        if (!raw) return null
+        const value = Number(raw)
+        if (!Number.isFinite(value)) return NaN
+        return Math.round(value * 100) / 100
+    }
+
+    /** Both field plans, plus whether applying them would record anything. */
+    editorPlan() {
+        const summary = this.selectionSummary()
+        const hours = this.chosenHours()
+        const status = this.fieldPlan(this.statusChoice, summary.statusDefault, summary.statusOverridden)
+        const hoursPlan = Number.isNaN(hours)
+            ? { action: 'skip', value: null }
+            : this.fieldPlan(hours, summary.hoursDefault, summary.hoursOverridden)
+
+        // Nothing has been touched, so whatever the editor shows is just what
+        // the dates already are. Applying it would restate an existing rule.
+        const touched = this.statusChoice !== this.seeded.status
+            || !Object.is(hours, this.seeded.hours)
+        const records = (plan) => plan.action === 'override' || plan.action === 'reset'
+
+        return {
+            summary,
+            status,
+            hours: hoursPlan,
+            overrides: status.action === 'override' || hoursPlan.action === 'override',
+            writes: touched && (records(status) || records(hoursPlan)),
         }
     }
 
@@ -313,8 +394,7 @@ class WorkCalendar extends TimeKeeper {
         this.selectionWeekdays = [weekday]
         this.rangeAnchor = null
         this.editingId = null
-        this.statusChoice = 'default'
-        this.hoursChoice = 'default'
+        this.seedEditorFromSelection()
         this.updateSelectionEditor()
         this.renderCalendar(startOfCalendar(this.month), endOfCalendar(this.month))
     }
@@ -325,8 +405,9 @@ class WorkCalendar extends TimeKeeper {
         this.selectionWeekdays = null
         this.rangeAnchor = null
         this.editingId = null
-        this.statusChoice = 'default'
-        this.hoursChoice = 'default'
+        this.statusChoice = null
+        this.customHours.value = ''
+        this.seeded = { status: null, hours: null }
         this.updateSelectionEditor()
         this.renderCalendar(startOfCalendar(this.month), endOfCalendar(this.month))
     }
@@ -336,6 +417,11 @@ class WorkCalendar extends TimeKeeper {
         this.overrideFields.disabled = !hasSelection
         this.saveButton.disabled = !hasSelection
         this.clearButton.disabled = !hasSelection
+        // Nothing to reset unless a stored rule actually reaches these dates.
+        const resettable = hasSelection
+            && (this.settings?.overrides || []).some((rule) => this.ruleTouchesSelection(rule))
+        if (!resettable) disarmConfirm(this.resetButton)
+        this.resetButton.disabled = !resettable
         if (!hasSelection) {
             this.selectionLabel.textContent = 'Select a date on the calendar.'
         } else if (this.selectionWeekdays !== null) {
@@ -346,92 +432,185 @@ class WorkCalendar extends TimeKeeper {
             const end = this.selectionEnd || this.selectionStart
             this.selectionLabel.textContent = this.formatRange(this.selectionStart, end)
         }
-        this.saveButton.textContent = this.editingId ? 'Apply update' : 'Apply override'
         this.markEditorChoices()
     }
 
     markEditorChoices() {
         this.statusOptions.querySelectorAll('[data-status]').forEach((button) => {
-            const selected = button.dataset.status === this.statusChoice
+            // Neither segment lights up while statusChoice is null, which is
+            // what "mixed, left alone" looks like.
+            const selected = (button.dataset.status === 'work') === this.statusChoice
             button.classList.toggle('active', selected)
             button.setAttribute('aria-checked', selected ? 'true' : 'false')
         })
-        this.hoursOptions.querySelectorAll('[data-hours-mode]').forEach((button) => {
-            const selected = button.dataset.hoursMode === this.hoursChoice
-            button.classList.toggle('active', selected)
-            button.setAttribute('aria-checked', selected ? 'true' : 'false')
-        })
-        const custom = this.hoursChoice === 'custom'
-        this.customHoursWrap.classList.toggle('hidden', !custom)
-        this.customHoursWrap.classList.toggle('flex', custom)
 
-        const resetting = Boolean(this.selectionStart)
-            && this.statusChoice === 'default'
-            && this.hoursChoice === 'default'
-        this.saveButton.textContent = resetting
-            ? 'Apply reset'
-            : this.editingId ? 'Apply update' : 'Apply override'
+        if (!this.selectionStart) {
+            this.customHours.placeholder = ''
+            this.setEditorHint('')
+            this.saveButton.textContent = 'Apply override'
+            return
+        }
+
+        const plan = this.editorPlan()
+        // The placeholder is the whole explanation for a blank box: these dates
+        // disagree, and leaving it alone keeps each one as it is.
+        this.customHours.placeholder = plan.summary.hoursSeed === null ? 'Mixed' : ''
+        this.setEditorHint(
+            Number.isNaN(this.chosenHours()) ? 'Enter an amount between 0.25 and 24.' : ''
+        )
+
+        this.saveButton.textContent = !plan.writes
+            ? 'Apply'
+            : plan.overrides
+                ? this.editingId ? 'Apply update' : 'Apply override'
+                : 'Apply reset'
+    }
+
+    /* Hidden rather than left empty, so the card doesn't keep a gap where a
+       hint would go. `hidden` is toggled from here instead of a CSS `:empty`
+       rule because the stylesheet is a build artifact. */
+    setEditorHint(text) {
+        this.editorHint.textContent = text
+        this.editorHint.classList.toggle('hidden', !text)
     }
 
     async saveDailyHours() {
         const value = Number(this.dailyHours.value)
         if (!Number.isFinite(value) || value < 0.25 || value > 24) {
-            this.dailyHours.value = String(this.draft.work_hours_per_day)
+            this.dailyHours.value = String(this.settings.work_hours_per_day)
             this.showToast('Daily hours must be between 0.25 and 24.', 'error')
             return
         }
-        await this.stageSettings({ work_hours_per_day: Math.round(value * 100) / 100 })
+        // No toast here or in toggleWorkday: both controls repaint every day in
+        // the grid, which is louder confirmation than a toast, and workdays get
+        // toggled several times in a row.
+        await this.commitSettings({ work_hours_per_day: Math.round(value * 100) / 100 })
     }
 
     async toggleWorkday(weekday) {
-        const next = this.draft.work_days.includes(weekday)
-            ? this.draft.work_days.filter((day) => day !== weekday)
-            : [...this.draft.work_days, weekday].sort((a, b) => a - b)
+        const next = this.settings.work_days.includes(weekday)
+            ? this.settings.work_days.filter((day) => day !== weekday)
+            : [...this.settings.work_days, weekday].sort((a, b) => a - b)
         if (!next.length) {
             this.showToast('Keep at least one usual workday.', 'warning')
             return
         }
-        await this.stageSettings({ work_days: next })
+        await this.commitSettings({ work_days: next })
     }
 
-    async stageSettings(changes) {
-        this.draft = { ...this.draft, ...structuredClone(changes) }
-        this.updateDirtyState()
-        return this.loadMonth()
+    /**
+     * Write `changes` to the settings file and repaint from what came back.
+     *
+     * The reload is a plain GET of the saved state, so the grid can never show
+     * a value the server didn't accept. A rejected write leaves the file alone
+     * and fetchFromAPI has already toasted the reason; reloading anyway puts
+     * the controls back in step with what is actually stored.
+     */
+    async commitSettings(changes, message) {
+        try {
+            await this.fetchFromAPI('/api/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(changes),
+            })
+        } catch (error) {
+            await this.loadMonth()
+            return false
+        }
+        const loaded = await this.loadMonth()
+        if (loaded && message) this.showToast(message)
+        return loaded
     }
 
     async saveOverride() {
         if (!this.selectionStart) return
-        const isWorkday = this.statusChoice === 'default' ? null : this.statusChoice === 'work'
-        const resetWorkday = this.statusChoice === 'default'
-        const resetHours = this.hoursChoice === 'default'
-        let hours = null
-        if (this.hoursChoice === 'custom') {
-            hours = Number(this.customHours.value)
-            if (!Number.isFinite(hours) || hours < 0.25 || hours > 24) {
-                this.showToast('Daily hours must be between 0.25 and 24.', 'error')
-                return
-            }
-            hours = Math.round(hours * 100) / 100
+
+        const hours = this.chosenHours()
+        if (Number.isNaN(hours) || (hours !== null && (hours < 0.25 || hours > 24))) {
+            this.showToast('Daily hours must be between 0.25 and 24.', 'error')
+            return
         }
+
+        const plan = this.editorPlan()
+        if (!plan.writes) {
+            this.showToast('Nothing to change — the selection already reads this way.', 'info')
+            return
+        }
+
+        const next = structuredClone(this.settings.overrides)
         const rule = {
             id: this.editingId || this.makeId(),
             start_date: this.selectionStart,
             end_date: this.selectionEnd || this.selectionStart,
             weekdays: this.selectionWeekdays,
-            is_workday: isWorkday,
-            hours_per_day: hours,
-            reset_workday: resetWorkday,
-            reset_hours: resetHours,
+            is_workday: plan.status.action === 'override' ? plan.status.value : null,
+            hours_per_day: plan.hours.action === 'override' ? plan.hours.value : null,
+            reset_workday: plan.status.action === 'reset',
+            reset_hours: plan.hours.action === 'reset',
         }
-        const next = structuredClone(this.draft.work_calendar_overrides)
         const index = next.findIndex((item) => item.id === rule.id)
         if (index === -1) next.push(rule)
         else next[index] = rule
 
         this.saveButton.disabled = true
-        const saved = await this.stageSettings({ work_calendar_overrides: next })
+        const saved = await this.commitSettings(
+            { work_calendar_overrides: next },
+            this.editingId
+                ? 'Override updated.'
+                : plan.overrides ? 'Override applied.' : 'Reset to defaults.'
+        )
         this.saveButton.disabled = false
+        if (saved) this.clearSelection()
+    }
+
+    /** Does this rule reach any of the dates the selection covers? */
+    ruleTouchesSelection(rule) {
+        if (!this.selectionStart) return false
+        const end = this.selectionEnd || this.selectionStart
+        if (rule.end_date < this.selectionStart || rule.start_date > end) return false
+        if (rule.weekdays === null || this.selectionWeekdays === null) return true
+        return rule.weekdays.some((day) => this.selectionWeekdays.includes(day))
+    }
+
+    /**
+     * Clear both fields back to the schedule defaults across the selection.
+     *
+     * Rules are ordered rather than addressable, so "reset" normally means
+     * appending a rule that resets both fields. Where the selection swallows a
+     * rule whole — same range or wider, and no weekday filter narrowing it —
+     * that rule can never apply again, so it is dropped instead of buried. If
+     * dropping them leaves nothing reaching the selection, no reset rule is
+     * needed at all and the list simply gets shorter.
+     */
+    async resetSelection() {
+        if (!this.selectionStart) return
+        const start = this.selectionStart
+        const end = this.selectionEnd || start
+
+        const swallowed = (rule) => this.selectionWeekdays === null
+            && rule.start_date >= start
+            && rule.end_date <= end
+
+        const remaining = structuredClone(this.settings.overrides).filter((rule) => !swallowed(rule))
+        const next = remaining.some((rule) => this.ruleTouchesSelection(rule))
+            ? [...remaining, {
+                id: this.makeId(),
+                start_date: start,
+                end_date: end,
+                weekdays: this.selectionWeekdays,
+                is_workday: null,
+                hours_per_day: null,
+                reset_workday: true,
+                reset_hours: true,
+            }]
+            : remaining
+
+        this.resetButton.disabled = true
+        const saved = await this.commitSettings(
+            { work_calendar_overrides: next },
+            'Reset to the schedule defaults.'
+        )
+        this.resetButton.disabled = false
         if (saved) this.clearSelection()
     }
 
@@ -498,13 +677,21 @@ class WorkCalendar extends TimeKeeper {
             remove.type = 'button'
             remove.className = 'tk-btn tk-btn-ghost text-danger'
             remove.textContent = 'Remove'
-            remove.addEventListener('click', () => this.removeRule(rule))
+            // Removing a rule has no Apply step of its own, so it keeps the
+            // app's standard second click rather than a native confirm().
+            remove.addEventListener('click', () => confirmAction(remove, () => this.removeRule(rule)))
             actions.append(edit, remove)
             row.append(content, actions)
             this.rules.appendChild(row)
         })
     }
 
+    /**
+     * Editing selects the rule's range and then seeds from the dates like any
+     * other selection, rather than from the rule's own fields. What the range
+     * resolves to now is what the editor should show — and it's what Apply will
+     * be compared against, so the two can't disagree.
+     */
     editRule(rule) {
         const start = localDate(rule.start_date)
         this.month = new Date(start.getFullYear(), start.getMonth(), 1)
@@ -513,52 +700,21 @@ class WorkCalendar extends TimeKeeper {
         this.selectionWeekdays = Array.isArray(rule.weekdays) ? [...rule.weekdays] : null
         this.rangeAnchor = this.selectionWeekdays === null ? rule.start_date : null
         this.editingId = rule.id
-        this.statusChoice = rule.is_workday === null ? 'default' : rule.is_workday ? 'work' : 'off'
-        this.hoursChoice = rule.hours_per_day === null ? 'default' : 'custom'
-        if (rule.hours_per_day !== null) this.customHours.value = String(rule.hours_per_day)
-        this.updateSelectionEditor()
+        // Seeded after the load, since the dates being described may be in a
+        // month that isn't in `this.days` yet.
         this.loadMonth().then(() => {
+            this.seedEditorFromSelection()
+            this.updateSelectionEditor()
             document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' })
         })
     }
 
-    updateDirtyState() {
-        const dirty = JSON.stringify(this.draft) !== JSON.stringify(this.savedSettings)
-        this.saveBar.setDirty(dirty)
-    }
-
-    async saveChanges() {
-        try {
-            const saved = await this.fetchFromAPI('/api/settings', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(this.draft),
-            })
-            this.savedSettings = {
-                work_hours_per_day: saved.work_hours_per_day,
-                work_days: [...saved.work_days],
-                work_calendar_overrides: structuredClone(saved.work_calendar_overrides),
-            }
-            this.draft = structuredClone(this.savedSettings)
-            await this.loadMonth({ resetDraft: true })
-            this.showToast('Work calendar saved.')
-            return true
-        } catch (error) {
-            return false
-        }
-    }
-
-    async cancelChanges() {
-        this.draft = structuredClone(this.savedSettings)
-        const loaded = await this.loadMonth({ resetDraft: true })
-        if (loaded) this.clearSelection()
-        return loaded
-    }
-
     async removeRule(rule) {
-        if (!window.confirm(`Remove the override for ${this.formatRange(rule.start_date, rule.end_date)}?`)) return
-        const next = this.draft.work_calendar_overrides.filter((item) => item.id !== rule.id)
-        const saved = await this.stageSettings({ work_calendar_overrides: next })
+        const next = this.settings.overrides.filter((item) => item.id !== rule.id)
+        const saved = await this.commitSettings(
+            { work_calendar_overrides: next },
+            'Override removed.'
+        )
         if (saved && this.editingId === rule.id) this.clearSelection()
     }
 
@@ -575,16 +731,21 @@ class WorkCalendar extends TimeKeeper {
         this.loadMonth()
     }
 
-    selectedDateCount() {
-        if (!this.selectionStart) return 0
+    /** ISO dates the current selection covers, weekday filter applied. */
+    selectedDateKeys() {
+        if (!this.selectionStart) return []
         const end = localDate(this.selectionEnd || this.selectionStart)
-        let count = 0
+        const keys = []
         for (let day = localDate(this.selectionStart); day <= end; day = addDays(day, 1)) {
             if (this.selectionWeekdays === null || this.selectionWeekdays.includes(isoWeekday(day))) {
-                count++
+                keys.push(isoDate(day))
             }
         }
-        return count
+        return keys
+    }
+
+    selectedDateCount() {
+        return this.selectedDateKeys().length
     }
 
     formatRange(start, end) {

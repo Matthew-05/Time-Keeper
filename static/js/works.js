@@ -11,6 +11,8 @@
  * lives and whether the target changes while it's on screen.
  */
 
+import { confirmAction } from './base.js';
+
 /** Join for the clipboard: creation order, comma-separated. */
 export function joinWorks(works) {
     return works.map((w) => w.text).join(', ');
@@ -46,7 +48,6 @@ export class WorksList {
         // Guards against an older in-flight load painting over a newer target
         // when the client is switched twice in quick succession.
         this.loadToken = 0;
-        this.deleteTimers = {};
 
         this.container.addEventListener('click', (e) => this.handleClick(e));
         this.container.addEventListener('keydown', (e) => this.handleKeydown(e));
@@ -345,27 +346,7 @@ export class WorksList {
 
     /** Click-twice-to-confirm, matching the delete buttons elsewhere. */
     handleDeleteClick(button, id) {
-        if (button.dataset.confirmMode === 'true') {
-            clearTimeout(this.deleteTimers[id]);
-            delete this.deleteTimers[id];
-            this.handleDelete(id);
-            return;
-        }
-
-        button.dataset.confirmMode = 'true';
-        button.textContent = 'Confirm?';
-        button.classList.remove('tk-btn-danger');
-        button.classList.add('tk-btn-danger-armed');
-
-        this.deleteTimers[id] = setTimeout(() => {
-            if (button.isConnected) {
-                button.dataset.confirmMode = 'false';
-                button.textContent = 'Delete';
-                button.classList.remove('tk-btn-danger-armed');
-                button.classList.add('tk-btn-danger');
-            }
-            delete this.deleteTimers[id];
-        }, 3000);
+        confirmAction(button, () => this.handleDelete(id));
     }
 
     async handleDelete(id) {

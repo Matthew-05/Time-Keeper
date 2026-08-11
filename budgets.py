@@ -139,8 +139,7 @@ def workday_details(
     default_is_workday = day.weekday() in default_days
     is_workday = default_is_workday
     hours_override = None
-    status_overridden = False
-    hours_overridden = False
+    has_hours_rule = False
     status_rule_id = None
     hours_rule_id = None
 
@@ -162,25 +161,33 @@ def workday_details(
 
         if rule.get('reset_workday') is True:
             is_workday = default_is_workday
-            status_overridden = False
             status_rule_id = None
         elif rule.get('is_workday') is not None:
             is_workday = bool(rule['is_workday'])
-            status_overridden = True
             status_rule_id = rule.get('id')
         if rule.get('reset_hours') is True:
             hours_override = None
-            hours_overridden = False
+            has_hours_rule = False
             hours_rule_id = None
         elif rule.get('hours_per_day') is not None:
             try:
                 hours_override = float(rule['hours_per_day'])
-                hours_overridden = True
+                has_hours_rule = True
                 hours_rule_id = rule.get('id')
             except (TypeError, ValueError):
                 pass
 
-    hours = hours_override if hours_overridden else default_hours
+    hours = hours_override if has_hours_rule else default_hours
+
+    # "Overridden" means the resolved value actually differs from the default,
+    # not merely that some rule supplied one. A rule covering a Monday-to-Sunday
+    # range has to name a single status for all seven days, so it restates the
+    # default on five of them — reporting those as overridden put an Override
+    # badge on days the rule changes nothing about. Same reasoning keeps a rule
+    # out of active_rule_ids, so "Effective overrides this month" only lists
+    # rules that are actually doing something.
+    status_overridden = is_workday != default_is_workday
+    hours_overridden = round(hours, 2) != round(default_hours, 2)
 
     return {
         'is_workday': is_workday,
@@ -190,12 +197,21 @@ def workday_details(
         # day without losing the configured value.
         'configured_hours': hours,
         'default_hours': default_hours,
+        # What the recurring schedule alone says about this date. The calendar
+        # editor decides "is this an override?" by comparing the chosen value
+        # against the default rather than asking the user to say so, and an
+        # existing rule may well have set the same value the default already
+        # had — so the default can't be inferred from is_workday.
+        'default_is_workday': default_is_workday,
         'status_overridden': status_overridden,
         'hours_overridden': hours_overridden,
         'active_rule_ids': list(dict.fromkeys(
             rule_id
-            for rule_id in (status_rule_id, hours_rule_id)
-            if rule_id is not None
+            for rule_id, changed in (
+                (status_rule_id, status_overridden),
+                (hours_rule_id, hours_overridden),
+            )
+            if rule_id is not None and changed
         )),
     }
 

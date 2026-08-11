@@ -367,6 +367,7 @@ def api_work_calendar():
             # the exact value budget projections use.
             'hours': details['hours'],
             'default_hours': details['default_hours'],
+            'default_is_workday': details['default_is_workday'],
             'configured_hours': details['configured_hours'],
             'status_overridden': details['status_overridden'],
             'hours_overridden': details['hours_overridden'],
