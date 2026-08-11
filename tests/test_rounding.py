@@ -688,7 +688,7 @@ class LedgerReconciliationPropertyTests(unittest.TestCase):
     def test_allocation_is_stable_across_identical_runs(self):
         """An allocation that reshuffled between page loads would be untrustable."""
         rng = random.Random(4242)
-        for index in range(40):
+        for index in range(240):
             client_budgets, tasks, policy = self.scenario(rng)
             if not tasks:
                 continue
@@ -701,15 +701,85 @@ class LedgerReconciliationPropertyTests(unittest.TestCase):
                 )
                 self.assertEqual(first, second)
 
+    def test_seed_4242_scenario_171_uses_exact_category_reservations(self):
+        """The former iterative planner cycled forever on this exact fixture."""
+        rng = random.Random(4242)
+        for _index in range(172):
+            client_budgets, tasks, policy = self.scenario(rng)
+
+        self.assertEqual(
+            policy,
+            {'enabled': True, 'interval_minutes': 15, 'direction': 'up'},
+        )
+        used, split, unbudgeted, ledger = budgets.allocation_ledger(
+            client_budgets, tasks, now=self.NOW, rounding_policy=policy
+        )
+
+        self.assertEqual(
+            {budget_id: self.seconds(value) for budget_id, value in used.items()},
+            {1: 2251, 2: 1800, 3: 900, 4: 449},
+        )
+        self.assertEqual(self.seconds(unbudgeted), 0)
+        self.assertEqual(
+            {
+                client_day['date']: {
+                    destination['budget_id']: self.seconds(
+                        destination['billable_hours']
+                    )
+                    for destination in client_day['destinations']
+                    if destination['kind'] == 'budget'
+                }
+                for client_day in ledger
+            },
+            {
+                date(2026, 8, 3): {2: 900},
+                date(2026, 8, 4): {2: 892, 3: 8},
+                date(2026, 8, 5): {1: 2251, 4: 449},
+                date(2026, 8, 6): {2: 8, 3: 892},
+            },
+        )
+        self.assertAlmostEqual(
+            sum(hours for _budget, hours, _pinned in split[2]) * 3600,
+            451,
+            places=6,
+        )
+
 
 class BudgetDurationFormattingTests(unittest.TestCase):
+    def test_day_group_disclosure_does_not_nest_interactive_controls(self):
+        """The info button must not live inside the fold button.
+
+        Asserted structurally rather than on the tooltip's wording: nesting a
+        button inside a button is invalid HTML and makes the inner one
+        unreachable, and that stays true however the tooltip is phrased.
+        """
+        source = (
+            Path(__file__).resolve().parents[1] / 'static/js/budgets.js'
+        ).read_text(encoding='utf-8')
+        header = source.split('\n    dayGroupHeader(', 1)[1].split(
+            '\n    dayGroupBody(', 1
+        )[0]
+
+        self.assertIn('<button type="button"', header)
+        self.assertIn('data-day-group="${id}"', header)
+        self.assertNotIn('role="button"', header)
+        self.assertLess(
+            header.index('</button>'),
+            header.index('this.insightIcon('),
+        )
+
     @unittest.skipUnless(shutil.which('node'), 'Node.js is required for JS formatting test')
     def test_destination_shares_keep_second_precision(self):
+        # Imported by path rather than as a base64 data URL: the module has
+        # relative imports of its own now, and a data URL has no base to
+        # resolve them against.
         script = """
-            import { readFile } from 'node:fs/promises';
-            const source = await readFile('./static/js/budget_render.js', 'utf8');
-            const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+            import { pathToFileURL } from 'node:url';
+            const moduleUrl = pathToFileURL('./static/js/budget_render.js').href;
             const { exactDuration, exactDurationSeconds, headline, meter } = await import(moduleUrl);
+            const { insightToSentence } = await import(
+                pathToFileURL('./static/js/insight.js').href
+            );
             const overByOneSecond = {
                 status: 'over',
                 used_hours: 1,
@@ -732,6 +802,8 @@ class BudgetDurationFormattingTests(unittest.TestCase):
                 exactDurationSeconds(450),
                 headline(overByOneSecond),
                 meter(overByOneSecond),
+                insightToSentence(meter(overByOneSecond).match(/data-insight="([^"]*)"/)[1]
+                    .replaceAll('&quot;', '"').replaceAll('&amp;', '&')),
             ]));
         """
         result = subprocess.run(
@@ -750,10 +822,17 @@ class BudgetDurationFormattingTests(unittest.TestCase):
         values = json.loads(result.stdout)
         self.assertEqual(values[:5], ['7m 30s', '7m 30s', '15m', '1s', '7m 30s'])
         self.assertEqual(values[5], '1s over budget')
-        self.assertIn('Used: 1h 1s of 1 hrs.', values[6])
-        self.assertIn('Over budget: 1s.', values[6])
         self.assertIn('tk-meter-overflow', values[6])
         self.assertIn('tabindex="0"', values[6])
+
+        # The meter's tooltip is a structured insight now, so the one-second
+        # overage is asserted through the flattened reading rather than the
+        # old run-on sentence. Losing that second is the actual regression
+        # this test exists to catch; the layout around it is free to change.
+        self.assertIn('Used 1h 1s of 1 hrs.', values[7])
+        self.assertIn('Over budget 1s.', values[7])
+        self.assertIn('Period elapsed 50%.', values[7])
+        self.assertNotIn(' | ', values[7])
 
 
 if __name__ == '__main__':

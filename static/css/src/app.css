@@ -1938,13 +1938,72 @@
     font-size: 0.75rem;
     font-weight: 500;
     line-height: 1.35;
-    max-width: min(17rem, calc(100vw - 1rem));
+    /* Wider than the old one-line tooltip: these now carry a figure table, and
+       at 17rem the labels wrapped onto their own lines and destroyed the
+       column that makes a table worth reading. */
+    max-width: min(21rem, calc(100vw - 1rem));
     padding: 0.5rem 0.625rem;
     pointer-events: none;
     position: fixed;
     text-transform: none;
     letter-spacing: normal;
     z-index: 70;
+  }
+
+  /* ---- Structured insight content (see static/js/insight.js) ----
+     A plain one-line tooltip renders as a single `.tk-insight-note` and looks
+     exactly as it always did; everything below only applies to the multi-part
+     ones that were previously a run-on paragraph. */
+
+  .tk-insight-heading {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 0.3125rem;
+  }
+
+  .tk-insight-section {
+    display: block;
+    font-style: normal;
+    font-weight: 600;
+    /* Dimmed against the popover's own inverted surface, not the page's. */
+    color: color-mix(in srgb, var(--surface) 62%, transparent);
+    margin-top: 0.4375rem;
+    margin-bottom: 0.1875rem;
+  }
+
+  /* Label left, value right, values in a column so they can be compared.
+     `max-content` on the value column keeps a duration from ever wrapping —
+     "7m 30s" broken across two lines reads as two figures. */
+  .tk-insight-figures {
+    display: grid;
+    grid-template-columns: 1fr max-content;
+    column-gap: 1rem;
+    row-gap: 0.125rem;
+    margin: 0;
+  }
+
+  .tk-insight-figures dt {
+    color: color-mix(in srgb, var(--surface) 72%, transparent);
+    min-width: 0;
+  }
+
+  .tk-insight-figures dd {
+    font-variant-numeric: tabular-nums;
+    margin: 0;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .tk-insight-note {
+    margin: 0;
+    color: color-mix(in srgb, var(--surface) 78%, transparent);
+  }
+
+  /* Only *between* blocks — a tooltip that is one note keeps its old tight box. */
+  .tk-insight-note + .tk-insight-note,
+  .tk-insight-figures + .tk-insight-note,
+  .tk-insight-note + .tk-insight-figures {
+    margin-top: 0.4375rem;
   }
 
   .tk-badge-status {

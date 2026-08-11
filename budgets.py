@@ -405,7 +405,13 @@ def _largest_remainder(weights, total, sort_key):
 def _destination_sort_key(destination):
     """Stable ordering for largest-remainder ties."""
     kind, budget_id = destination
-    order = {'budget': 0, 'no_budget': 1, 'excluded': 2, 'unbudgeted': 3}
+    order = {
+        'budget': 0,
+        'no_budget': 1,
+        'auto_pool': 2,
+        'excluded': 3,
+        'unbudgeted': 4,
+    }
     return (order.get(kind, 99), budget_id if budget_id is not None else -1)
 
 
@@ -416,49 +422,6 @@ def _apportion_day(destinations, rounded_seconds):
         rounded_seconds,
         sort_key=_destination_sort_key,
     )
-
-
-def _pinned_reservations(pinned_raw_seconds, other_raw_seconds, rounded_seconds):
-    """Return an integer starting point for pinned-capacity convergence.
-
-    The pooled deferred destination is only a seed. Splitting that pool can
-    change largest-remainder winners, so :func:`allocation_ledger` repeatedly
-    pours and derives reservations from the complete destination map before it
-    exposes a ledger.
-    """
-    weights = {
-        ('budget', budget_id): seconds
-        for budget_id, seconds in pinned_raw_seconds.items()
-    }
-    deferred = ('unallocated', None)
-    if other_raw_seconds > 0:
-        weights[deferred] = other_raw_seconds
-    apportioned = _largest_remainder(
-        weights,
-        rounded_seconds,
-        sort_key=_destination_sort_key,
-    )
-    return {
-        budget_id: apportioned.get(('budget', budget_id), 0)
-        for budget_id in pinned_raw_seconds
-    }
-
-
-def _pinned_share_of_destination(pinned_raw_seconds, raw_seconds, billable_seconds):
-    """Partition an already-final destination share into pin and loose parts.
-
-    This is capacity bookkeeping, not another client-day apportionment. A
-    half-up cumulative boundary makes the two integer subparts reconcile to the
-    destination's authoritative whole-second value.
-    """
-    if pinned_raw_seconds <= 0 or raw_seconds <= 0 or billable_seconds <= 0:
-        return 0
-    if pinned_raw_seconds >= raw_seconds - 1e-7:
-        return billable_seconds
-    boundary = math.floor(
-        billable_seconds * pinned_raw_seconds / raw_seconds + 0.5
-    )
-    return min(billable_seconds, max(0, boundary))
 
 
 def _partition_subshares(weights, total):
@@ -507,17 +470,20 @@ def eligible_budgets(budgets, day):
 
 
 def allocation_ledger(budgets, tasks, now=None, rounding_policy=None):
-    """Distribute raw entries, then round once per client-day.
+    """Round known day categories once, then pour the integer automatic pool.
 
     Returns ``(used, entries, unbudgeted_hours, days)``. ``entries`` contains
     raw slices only. ``used`` and ``unbudgeted_hours`` come from the day ledger's
     billable destination amounts. Every day dictionary exposes its raw total,
     rounded total, adjustment, provisional state, and destination shares.
 
-    Pins still reserve capacity before automatic entries, loose time still
-    pours chronologically, and overflow still lands on the last eligible
-    budget. Explicit No-budget entries participate in the client's daily
-    rounding before their destination is separated from budget consumption.
+    A client-day's only largest-remainder pass has categories known before
+    allocation: each pinned budget, one explicit/coverage-gap No-budget
+    destination, and one pool for eligible automatic time. Exact pinned shares
+    reserve capacity globally. Each day's already-integer automatic share then
+    pours through integer budget headroom; its raw/billable ratio is used only
+    to reconstruct the compatibility trace. Overflow lands on the last eligible
+    budget, and no second rounding or apportionment is performed.
     """
     now = now or datetime.now()
     tasks = list(tasks)
@@ -535,204 +501,167 @@ def allocation_ledger(budgets, tasks, now=None, rounding_policy=None):
         if t.budget_id is None or t.budget_id not in by_id
     ]
 
-    # Work out each day's billable scale and finalize whole-second pin
-    # reservations before any chronological loose allocation. The final
-    # destination-level largest-remainder pass still happens exactly once,
-    # after loose time has reached its final budgets; reservations are only
-    # provisional capacity charges and are replaced by that final result.
     all_days = sorted({task.date for task in tasks})
     tasks_by_day = {}
-    pinned_raw_by_day = {}
     for task in tasks:
         tasks_by_day.setdefault(task.date, []).append(task)
+
+    pinned_by_day = {}
+    excluded_by_day = {}
+    loose_by_day = {}
     for task in pinned:
-        day_pins = pinned_raw_by_day.setdefault(task.date, {})
-        day_pins[task.budget_id] = (
-            day_pins.get(task.budget_id, 0.0) + raw_seconds[task.id]
-        )
+        pinned_by_day.setdefault(task.date, []).append(task)
+    for task in excluded:
+        excluded_by_day.setdefault(task.date, []).append(task)
+    loose.sort(key=lambda t: (t.date, t.start_time, t.id))
+    for task in loose:
+        loose_by_day.setdefault(task.date, []).append(task)
+
+    # The categories are fixed facts, so this is the sole LR pass for each day.
     day_plans = {}
     for day in all_days:
         day_tasks = tasks_by_day[day]
         total_raw_seconds = sum(raw_seconds[task.id] for task in day_tasks)
         rounded_hours = round_seconds_to_hours(total_raw_seconds, rounding_policy)
         rounded_seconds = max(0, int(round(rounded_hours * 3600)))
-        scale = rounded_seconds / total_raw_seconds if total_raw_seconds else 0.0
+        covering = eligible_budgets(budgets, day)
+        categories = {}
+
+        def add_category(destination, seconds):
+            category = categories.setdefault(destination, {'raw_seconds': 0.0})
+            category['raw_seconds'] += seconds
+
+        for task in pinned_by_day.get(day, []):
+            add_category(('budget', task.budget_id), raw_seconds[task.id])
+        for task in excluded_by_day.get(day, []):
+            add_category(('no_budget', None), raw_seconds[task.id])
+        for task in loose_by_day.get(day, []):
+            destination = ('auto_pool', None) if covering else ('no_budget', None)
+            add_category(destination, raw_seconds[task.id])
+
+        category_shares = _apportion_day(categories, rounded_seconds)
         day_plans[day] = {
             'raw_seconds': total_raw_seconds,
             'rounded_seconds': rounded_seconds,
-            'scale': scale,
-            'pinned_raw_seconds': pinned_raw_by_day.get(day, {}),
+            'covering': covering,
+            'category_shares': category_shares,
+            'auto_raw_seconds': categories.get(
+                ('auto_pool', None), {'raw_seconds': 0.0}
+            )['raw_seconds'],
+            'auto_billable_seconds': category_shares.get(('auto_pool', None), 0),
+            'pinned_billable_seconds': {
+                budget_id: seconds
+                for (kind, budget_id), seconds in category_shares.items()
+                if kind == 'budget'
+            },
+            'no_budget_billable_seconds': category_shares.get(
+                ('no_budget', None), 0
+            ),
         }
-        pinned_raw_total = sum(day_plans[day]['pinned_raw_seconds'].values())
-        day_plans[day]['pinned_reserved_seconds'] = _pinned_reservations(
-            day_plans[day]['pinned_raw_seconds'],
-            max(0.0, total_raw_seconds - pinned_raw_total),
-            rounded_seconds,
+
+    split = {}
+    per_day = {}
+
+    def record(task, destination, seconds, is_pinned=False, reason=None):
+        budget_id = destination[1] if destination[0] == 'budget' else None
+        split.setdefault(task.id, []).append(
+            (budget_id, seconds / 3600.0, is_pinned)
         )
+        day_destinations = per_day.setdefault(task.date, {})
+        part = day_destinations.setdefault(
+            destination,
+            {
+                'raw_seconds': 0.0,
+                'task_ids': set(),
+                'reason_raw_seconds': {},
+                'reason_task_ids': {},
+            },
+        )
+        part['raw_seconds'] += seconds
+        part['task_ids'].add(task.id)
+        reason = reason or destination[0]
+        part['reason_raw_seconds'][reason] = (
+            part['reason_raw_seconds'].get(reason, 0.0) + seconds
+        )
+        part['reason_task_ids'].setdefault(reason, set()).add(task.id)
 
-    # Chronological, with id as the final tiebreaker so two entries sharing a
-    # start time can't swap places between requests.
-    loose.sort(key=lambda t: (t.date, t.start_time, t.id))
-    loose_by_day = {}
-    for task in loose:
-        loose_by_day.setdefault(task.date, []).append(task)
-
-    def pour(pinned_reservations):
-        """Pour once with candidate pin reservations and return final shares."""
-        local_split = {}
-        local_per_day = {}
-
-        def record(task, destination, seconds, is_pinned=False, reason=None):
-            budget_id = destination[1] if destination[0] == 'budget' else None
-            local_split.setdefault(task.id, []).append(
-                (budget_id, seconds / 3600.0, is_pinned)
-            )
-            day_destinations = local_per_day.setdefault(task.date, {})
-            part = day_destinations.setdefault(
-                destination,
-                {
-                    'raw_seconds': 0.0,
-                    'task_ids': set(),
-                    'reason_raw_seconds': {},
-                    'reason_task_ids': {},
-                },
-            )
-            part['raw_seconds'] += seconds
-            part['task_ids'].add(task.id)
-            reason = reason or destination[0]
-            part['reason_raw_seconds'][reason] = (
-                part['reason_raw_seconds'].get(reason, 0.0) + seconds
-            )
-            part['reason_task_ids'].setdefault(reason, set()).add(task.id)
-
-        capacity_used = {b.id: 0.0 for b in budgets}
-        for reservations in pinned_reservations.values():
-            for budget_id, seconds in reservations.items():
-                capacity_used[budget_id] += seconds
-
-        for task in excluded:
-            record(
-                task,
-                ('no_budget', None),
-                raw_seconds[task.id],
-                reason='excluded',
-            )
-        for task in pinned:
-            record(
-                task,
-                ('budget', task.budget_id),
-                raw_seconds[task.id],
-                True,
-            )
-
-        apportioned_by_day = {}
-        for day in all_days:
-            plan = day_plans[day]
-            scale = plan['scale']
-            for task in loose_by_day.get(day, []):
-                remaining_raw = raw_seconds[task.id]
-                if remaining_raw <= 0:
-                    record(task, ('no_budget', None), 0.0, reason='coverage_gap')
-                    continue
-
-                covering = eligible_budgets(budgets, day)
-                if not covering:
-                    record(
-                        task,
-                        ('no_budget', None),
-                        remaining_raw,
-                        reason='coverage_gap',
-                    )
-                    continue
-
-                if scale <= 0:
-                    record(task, ('budget', covering[0].id), remaining_raw)
-                    continue
-
-                remaining_billable = remaining_raw * scale
-                for index, budget in enumerate(covering):
-                    headroom = (
-                        budget.budgeted_hours * 3600 - capacity_used[budget.id]
-                    )
-                    last = index == len(covering) - 1
-                    take_billable = (
-                        remaining_billable
-                        if last else min(remaining_billable, max(0.0, headroom))
-                    )
-                    if take_billable > 0:
-                        take_raw = (
-                            remaining_raw
-                            if last else min(remaining_raw, take_billable / scale)
-                        )
-                        capacity_used[budget.id] += take_raw * scale
-                        record(task, ('budget', budget.id), take_raw)
-                        remaining_raw -= take_raw
-                        remaining_billable -= take_raw * scale
-                    if remaining_billable <= 1e-7:
-                        break
-
-            destinations = local_per_day.get(day, {})
-            apportioned = _apportion_day(
-                destinations, plan['rounded_seconds']
-            )
-            apportioned_by_day[day] = apportioned
-            for destination, billable_value in apportioned.items():
-                kind, budget_id = destination
-                if kind != 'budget':
-                    continue
-                raw_value = destinations[destination]['raw_seconds']
-                pinned_reserved = pinned_reservations[day].get(budget_id, 0)
-                pinned_raw = plan['pinned_raw_seconds'].get(budget_id, 0.0)
-                loose_ideal = max(0.0, raw_value - pinned_raw) * scale
-                capacity_used[budget_id] += (
-                    billable_value - pinned_reserved - loose_ideal
+    for task in pinned:
+        record(task, ('budget', task.budget_id), raw_seconds[task.id], True)
+    for task in excluded:
+        record(
+            task,
+            ('no_budget', None),
+            raw_seconds[task.id],
+            reason='excluded',
+        )
+    for day, day_tasks in loose_by_day.items():
+        if not day_plans[day]['covering']:
+            for task in day_tasks:
+                record(
+                    task,
+                    ('no_budget', None),
+                    raw_seconds[task.id],
+                    reason='coverage_gap',
                 )
 
-        return local_split, local_per_day, apportioned_by_day
-
-    def reservations_from(destinations_by_day, apportioned_by_day):
-        result = {}
-        for day, plan in day_plans.items():
-            day_result = {}
-            destinations = destinations_by_day.get(day, {})
-            apportioned = apportioned_by_day.get(day, {})
-            for budget_id, pinned_raw in plan['pinned_raw_seconds'].items():
-                destination = ('budget', budget_id)
-                raw_value = destinations[destination]['raw_seconds']
-                day_result[budget_id] = _pinned_share_of_destination(
-                    pinned_raw,
-                    raw_value,
-                    apportioned.get(destination, 0),
-                )
-            result[day] = day_result
-        return result
-
-    pinned_reservations = {
-        day: dict(plan['pinned_reserved_seconds'])
-        for day, plan in day_plans.items()
+    budget_capacity = {
+        budget.id: max(0, int(round(budget.budgeted_hours * 3600)))
+        for budget in budgets
     }
-    seen = set()
-    history = []
-    max_planning_passes = 64
-    for _pass in range(max_planning_passes):
-        state = tuple(
-            (day, budget_id, seconds)
-            for day in all_days
-            for budget_id, seconds in sorted(pinned_reservations[day].items())
-        )
-        if state in seen:
-            raise RuntimeError(f'Pinned budget reservations did not converge: {history[-4:]} -> {state}')
-        seen.add(state)
-        history.append(state)
-        split, per_day, apportioned_by_day = pour(pinned_reservations)
-        exact_reservations = reservations_from(per_day, apportioned_by_day)
-        if exact_reservations == pinned_reservations:
-            break
-        pinned_reservations = exact_reservations
-    else:
-        raise RuntimeError(
-            f'Pinned budget reservations exceeded {max_planning_passes} passes'
-        )
+    capacity_used = {budget.id: 0 for budget in budgets}
+    for plan in day_plans.values():
+        for budget_id, seconds in plan['pinned_billable_seconds'].items():
+            capacity_used[budget_id] += seconds
+
+    auto_billable_by_day = {}
+    for day in all_days:
+        plan = day_plans[day]
+        auto_billable = plan['auto_billable_seconds']
+        remaining = auto_billable
+        allocations = []
+        for index, budget in enumerate(plan['covering']):
+            last = index == len(plan['covering']) - 1
+            headroom = budget_capacity[budget.id] - capacity_used[budget.id]
+            take = remaining if last else min(remaining, max(0, headroom))
+            if take > 0:
+                allocations.append([budget.id, take])
+                capacity_used[budget.id] += take
+                remaining -= take
+            if remaining <= 0:
+                break
+        auto_billable_by_day[day] = allocations
+
+        auto_tasks = loose_by_day.get(day, []) if plan['covering'] else []
+        if not auto_tasks:
+            continue
+        if auto_billable <= 0 or plan['auto_raw_seconds'] <= 0:
+            destination = ('budget', plan['covering'][0].id)
+            for task in auto_tasks:
+                record(task, destination, raw_seconds[task.id])
+            continue
+
+        scale = auto_billable / plan['auto_raw_seconds']
+        allocation_index = 0
+        billable_left = allocations[0][1]
+        for task in auto_tasks:
+            task_raw_left = raw_seconds[task.id]
+            if task_raw_left <= 0:
+                record(task, ('budget', allocations[allocation_index][0]), 0.0)
+                continue
+            while task_raw_left > 1e-7:
+                budget_id = allocations[allocation_index][0]
+                last_allocation = allocation_index == len(allocations) - 1
+                take_raw = (
+                    task_raw_left
+                    if last_allocation
+                    else min(task_raw_left, billable_left / scale)
+                )
+                record(task, ('budget', budget_id), take_raw)
+                task_raw_left -= take_raw
+                billable_left -= take_raw * scale
+                if not last_allocation and billable_left <= 1e-7:
+                    allocation_index += 1
+                    billable_left = allocations[allocation_index][1]
 
     used_seconds = {b.id: 0 for b in budgets}
     unbudgeted_seconds = 0
@@ -743,9 +672,15 @@ def allocation_ledger(budgets, tasks, now=None, rounding_policy=None):
         destinations = per_day.get(day, {})
         total_raw_seconds = plan['raw_seconds']
         rounded_seconds = plan['rounded_seconds']
-        # This is the sole largest-remainder pass for the client-day. Pins and
-        # automatic slices already sharing a budget are aggregated first.
-        apportioned = apportioned_by_day[day]
+        apportioned = {
+            ('budget', budget_id): seconds
+            for budget_id, seconds in plan['pinned_billable_seconds'].items()
+        }
+        for budget_id, seconds in auto_billable_by_day[day]:
+            destination = ('budget', budget_id)
+            apportioned[destination] = apportioned.get(destination, 0) + seconds
+        if ('no_budget', None) in destinations:
+            apportioned[('no_budget', None)] = plan['no_budget_billable_seconds']
         destination_rows = []
 
         for destination in sorted(destinations, key=_destination_sort_key):

@@ -3,6 +3,7 @@ import {
     STATUS_LABEL,
     budgetDuration,
     dateRange,
+    escapeAttribute,
     exactDurationSeconds,
     headline,
     hours,
@@ -12,6 +13,7 @@ import {
     shortDate,
 } from './budget_render.js'
 import { formatClockTime } from './time_format.js'
+import { heading, insight, insightToSentence, note, row, section } from './insight.js'
 
 /**
  * Budgets page.
@@ -711,6 +713,7 @@ class Budgets extends TimeKeeper {
         `
 
         this.drawBurnChart(detail)
+        this.bindDayGroups()
         this.bindEntryPins(detail)
         this.bindHolds(detail)
     }
@@ -1118,10 +1121,20 @@ class Budgets extends TimeKeeper {
         return null
     }
 
-    insightIcon(insight, label) {
+    /**
+     * `body` may be a plain sentence or a structured insight document.
+     *
+     * The visible popover gets the document and lays it out; `aria-label` gets
+     * it flattened to prose, because a screen reader reading a figure table
+     * would otherwise announce the separators.
+     */
+    insightIcon(body, label) {
+        // Escaped rather than interpolated raw: insight text now carries budget
+        // names, and a budget called 26" Monitor Rollout would otherwise close
+        // the attribute early and drop the rest of the sentence on the floor.
         return `
-          <button type="button" class="tk-insight" data-insight="${insight}"
-                  aria-label="${label}: ${insight}">
+          <button type="button" class="tk-insight" data-insight="${escapeAttribute(body)}"
+                  aria-label="${escapeAttribute(`${label}: ${insightToSentence(body)}`)}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="9"></circle>
@@ -1174,19 +1187,10 @@ class Budgets extends TimeKeeper {
                 ),
             ].join('')
 
-        const byDate = this.entriesByDate(detail.entries)
-        const roundingDaysByDate = new Map(
-            (detail.rounding_days ?? []).map((day) => [day.date, day])
-        )
-        const rows = [...byDate.entries()]
-            .map(([date, entries]) => `${entries.map(
-                (entry) => `
+        const groups = [...this.entriesByDate(detail.entries).entries()]
+        return this.dayGroupTable(detail, 'budget', groups, (entry) => `
           <tr>
-            <td class="tk-num whitespace-nowrap">${shortDate(entry.date)}</td>
-            <td class="tk-num whitespace-nowrap text-muted">
-              ${entry.start_time ? formatClockTime(entry.start_time) : '—'}${entry.end_time ? `–${formatClockTime(entry.end_time)}` : ''}
-              ${entry.running ? '<span class="tk-badge tk-badge-accent ml-1.5">running</span>' : ''}
-            </td>
+            ${this.entryTimeCell(entry)}
             <td class="tk-num text-right font-medium">
               <span title="Raw tracked duration">${exactDurationSeconds(entry.raw_seconds)}</span>
               ${entry.split ? `<span class="tk-badge tk-badge-neutral ml-1.5">split</span>${this.insightIcon(`This entry was split across budgets; ${exactDurationSeconds(entry.allocated_raw_seconds)} raw time landed here`, 'Split allocation details')}` : ''}
@@ -1199,24 +1203,7 @@ class Budgets extends TimeKeeper {
               </select>
             </td>
           </tr>
-        `).join('')}${this.dayRoundingRow(roundingDaysByDate, date, 'budget')}`)
-            .join('')
-
-        return `
-          <div class="overflow-hidden rounded-lg border border-border">
-            <table class="tk-table tk-table-hover">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Time</th>
-                  <th class="text-right">Raw time</th>
-                  <th>Assigned to</th>
-                </tr>
-              </thead>
-              <tbody>${rows}</tbody>
-            </table>
-          </div>
-        `
+        `)
     }
 
     unassignedEntriesTable(detail) {
@@ -1235,38 +1222,27 @@ class Budgets extends TimeKeeper {
             ),
         ].join('')
 
+        // A client-day can send time to No budget without any entry being
+        // listed here — a coverage gap is time the allocator had nowhere to
+        // put, not time anyone excluded. Those days still need a container, or
+        // the No-budget figure in the day header would have nothing to explain.
         const byDate = this.entriesByDate(detail.unassigned_entries)
-        const roundingDaysByDate = new Map(
-            (detail.rounding_days ?? []).map((day) => [day.date, day])
-        )
         noBudgetDays.forEach((day) => {
             if (!byDate.has(day.date)) byDate.set(day.date, [])
         })
-        const rows = [...byDate.entries()]
+        const groups = [...byDate.entries()]
             .sort(([left], [right]) => right.localeCompare(left))
-            .map(([date, entries]) => `${entries.map((entry) => `
+
+        return this.dayGroupTable(detail, 'no_budget', groups, (entry) => `
           <tr>
-            <td class="tk-num whitespace-nowrap">${shortDate(entry.date)}</td>
-            <td class="tk-num whitespace-nowrap text-muted">
-              ${entry.start_time ? formatClockTime(entry.start_time) : '—'}${entry.end_time ? `–${formatClockTime(entry.end_time)}` : ''}
-              ${entry.running ? '<span class="tk-badge tk-badge-accent ml-1.5">running</span>' : ''}
-            </td>
+            ${this.entryTimeCell(entry)}
             <td class="tk-num text-right font-medium" title="Raw tracked duration">${exactDurationSeconds(entry.raw_seconds)}</td>
             <td class="w-px">
               <select class="tk-select tk-select-sm w-44" data-task-id="${entry.task_id}"
                       aria-label="Budget for this entry">${options()}</select>
             </td>
           </tr>
-        `).join('')}${this.dayRoundingRow(roundingDaysByDate, date, 'no_budget')}`).join('')
-
-        return `
-          <div class="overflow-hidden rounded-lg border border-border">
-            <table class="tk-table tk-table-hover">
-              <thead><tr><th>Date</th><th>Time</th><th class="text-right">Raw time</th><th>Assigned to</th></tr></thead>
-              <tbody>${rows}</tbody>
-            </table>
-          </div>
-        `
+        `)
     }
 
     entriesByDate(entries) {
@@ -1277,58 +1253,252 @@ class Budgets extends TimeKeeper {
         }, new Map())
     }
 
-    dayRoundingRow(roundingDaysByDate, date, destination) {
-        const day = roundingDaysByDate.get(date)
-        if (!day) return ''
+    entryTimeCell(entry) {
+        return `
+            <td class="tk-num whitespace-nowrap text-muted">
+              ${entry.start_time ? formatClockTime(entry.start_time) : '—'}${entry.end_time ? `–${formatClockTime(entry.end_time)}` : ''}
+              ${entry.running ? '<span class="tk-badge tk-badge-accent ml-1.5">running</span>' : ''}
+            </td>
+        `
+    }
 
-        const raw = destination === 'budget'
-            ? day.budget_raw_seconds
-            : day.no_budget_raw_seconds
-        const billable = destination === 'budget'
-            ? day.budget_billable_seconds
-            : day.no_budget_billable_seconds
-        const adjustment = destination === 'budget'
-            ? day.budget_rounding_adjustment_seconds
-            : day.no_budget_rounding_adjustment_seconds
-        const sign = adjustment > 0 ? '+' : adjustment < 0 ? '−' : ''
-        const adjustmentText = sign
-            ? `${sign}${exactDurationSeconds(adjustment)} rounding`
-            : 'no rounding adjustment'
-        const destinationLabel = destination === 'budget' ? 'This budget' : 'No-budget share'
-        const reasons = day.no_budget_reasons ?? {}
-        const reasonText = (label, share) => {
-            const reasonSign = share.rounding_adjustment_seconds > 0
-                ? '+'
-                : share.rounding_adjustment_seconds < 0 ? '−' : ''
-            const reasonAdjustment = reasonSign
-                ? ` (${reasonSign}${exactDurationSeconds(share.rounding_adjustment_seconds)} rounding)`
-                : ''
-            return `${label}: ${exactDurationSeconds(share.raw_seconds)} raw → ${exactDurationSeconds(share.billable_seconds)} billed${reasonAdjustment}`
-        }
-        const reasonBreakdown = destination === 'no_budget'
-            ? [
-                reasons.excluded
-                    ? reasonText('Explicitly excluded (listed)', reasons.excluded)
-                    : '',
-                reasons.coverage_gap
-                    ? reasonText('Coverage gap (not listed above)', reasons.coverage_gap)
-                    : '',
-            ].filter(Boolean).join('<span class="mx-1 text-faint">·</span>')
-            : ''
+    /**
+     * One foldable container per client-day, day total as the parent row.
+     *
+     * The client-day is the unit rounding actually happens to, so it — not the
+     * entry — is the thing worth reading first. Entries are the working out;
+     * they fold away behind the figure they add up to, the same shape the
+     * history page uses for its per-client task tables.
+     *
+     * The date lives on the header rather than being repeated down a column,
+     * which is what buys the nested table room for the budget selectors.
+     */
+    dayGroupTable(detail, destination, groups, renderRow) {
+        const roundingDaysByDate = new Map(
+            (detail.rounding_days ?? []).map((day) => [day.date, day])
+        )
+        const rows = groups
+            .map(([date, entries]) => {
+                const id = `day-${destination.replace('_', '-')}-${date}`
+                return this.dayGroupHeader(
+                    detail, id, date, roundingDaysByDate.get(date),
+                    destination, entries.length
+                ) + this.dayGroupBody(id, entries, destination, renderRow)
+            })
+            .join('')
 
         return `
-          <tr class="bg-surface-2">
-            <td colspan="4" class="text-xs text-muted">
-              <span class="font-medium text-text">${shortDate(date)} client-day:</span>
-              ${exactDurationSeconds(day.raw_seconds)} raw → ${exactDurationSeconds(day.rounded_seconds)} billed
-              <span class="text-faint">(${adjustmentText})</span>
-              <span class="mx-1 text-faint">·</span>
-              ${destinationLabel}: ${exactDurationSeconds(raw)} raw → ${exactDurationSeconds(billable)} billed
-              ${day.provisional ? `<span class="tk-badge tk-badge-accent ml-1.5">provisional</span>${this.insightIcon('Today can be redistributed when more client time is recorded', 'Provisional client-day details')}` : ''}
-              ${reasonBreakdown ? `<div class="mt-1 text-faint">${reasonBreakdown}</div>` : ''}
+          <div class="overflow-hidden rounded-lg border border-border">
+            <table class="tk-table tk-table-hover">
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `
+    }
+
+    /**
+     * The collapsed header: date, this destination's figure, and nothing else.
+     *
+     * One fact per position. The date anchors the row, the line under it is the
+     * only number most people came for, and status — settled or not, how much is
+     * folded up in here — sits at the right where the eye lands after reading
+     * across. The full client-day arithmetic is one hover away rather than
+     * competing with the figure it explains.
+     */
+    dayGroupHeader(detail, id, date, day, destination, entryCount) {
+        const count = entryCount === 1 ? '1 entry' : `${entryCount} entries`
+        return `
+          <tr class="task-row">
+            <td>
+              <div class="flex items-start gap-2">
+                <button type="button"
+                        class="flex min-w-0 flex-1 cursor-pointer items-start gap-2 text-left"
+                        data-day-group="${id}" aria-expanded="false" aria-controls="${id}">
+                  <svg class="tk-chevron mt-1 h-3.5 w-3.5 flex-shrink-0 text-faint transition-transform"
+                       viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M9 18l6-6-6-6"/>
+                  </svg>
+                  <span class="min-w-0 flex-1">
+                    <span class="block font-medium text-text">${shortDate(date)}</span>
+                    ${day ? this.dayRoundingSummary(day, destination) : ''}
+                  </span>
+                </button>
+                <div class="flex flex-shrink-0 items-center gap-2">
+                  ${day?.provisional ? '<span class="tk-badge tk-badge-accent">provisional</span>' : ''}
+                  <span class="whitespace-nowrap text-xs text-faint">${count}</span>
+                  ${day ? this.insightIcon(this.dayInsight(detail, date, day, destination), 'Client-day breakdown') : ''}
+                </div>
+              </div>
             </td>
           </tr>
         `
+    }
+
+    dayGroupBody(id, entries, destination, renderRow) {
+        const rows = entries.length
+            ? entries.map(renderRow).join('')
+            : `<tr><td colspan="3" class="tk-empty">
+                 No entry to list: this is client time the allocator had no
+                 budget to put it on, not time anyone set aside.
+               </td></tr>`
+
+        return `
+          <tr class="detail-row hidden" id="${id}">
+            <td class="p-0">
+              <table class="tk-table tk-table-nested tk-table-hover">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th class="text-right">Raw time</th>
+                    <th>Assigned to</th>
+                  </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </td>
+          </tr>
+        `
+    }
+
+    /**
+     * This destination's share of the day, and what rounding did to it.
+     *
+     * Only this destination's own figures. The table already says whose share
+     * it is, and the client-day total behind it is in the tooltip — putting
+     * both on the face meant two raw→billed pairs side by side, which is
+     * exactly the confusion the ledger exists to remove.
+     */
+    dayRoundingSummary(day, destination) {
+        const isBudget = destination === 'budget'
+        const raw = isBudget ? day.budget_raw_seconds : day.no_budget_raw_seconds
+        const billable = isBudget
+            ? day.budget_billable_seconds
+            : day.no_budget_billable_seconds
+        const adjustment = isBudget
+            ? day.budget_rounding_adjustment_seconds
+            : day.no_budget_rounding_adjustment_seconds
+
+        // A split that reads "10m excluded, 23m coverage gap" is the one case
+        // where the single No-budget figure above would be actively misleading,
+        // so it stays on the face instead of folding into the tooltip.
+        const reasons = day.no_budget_reasons ?? {}
+        const mixed = !isBudget && reasons.excluded && reasons.coverage_gap
+
+        return `
+          <span class="mt-1 block text-xs text-muted">
+            ${exactDurationSeconds(raw)} → ${exactDurationSeconds(billable)} billed
+            <span class="mx-1 text-faint">·</span>
+            <span class="text-faint">${this.roundingNote(adjustment)}</span>
+          </span>
+          ${mixed ? `
+          <span class="mt-1 block text-xs text-faint">
+            ${exactDurationSeconds(reasons.excluded.billable_seconds)} excluded
+            <span class="mx-1">·</span>
+            ${exactDurationSeconds(reasons.coverage_gap.billable_seconds)} coverage gap
+          </span>` : ''}
+        `
+    }
+
+    /** Signed adjustment on its own, for a row already labelled "Rounding". */
+    signedDuration(adjustment) {
+        if (!adjustment) return 'none'
+        return `${adjustment > 0 ? '+' : '−'}${exactDurationSeconds(adjustment)}`
+    }
+
+    /** The same figure for running text, where it has to say what it is. */
+    roundingNote(adjustment) {
+        return adjustment
+            ? `${this.signedDuration(adjustment)} rounding`
+            : 'no rounding'
+    }
+
+    /**
+     * The whole day's arithmetic, as figures rather than a paragraph.
+     *
+     * Ordered the way the allocator works — what was tracked, what the policy
+     * did to the day, how that total was shared out — so the number on the row
+     * can be traced back to a stopwatch. Laid out as label/value rows because
+     * the point of opening this is to find one figure, not to read.
+     */
+    dayInsight(detail, date, day, destination) {
+        // Whatever is left after this budget and No budget went to the client's
+        // other budgets that day. Naming it stops the figures from looking like
+        // they have lost time when the shares don't obviously add up.
+        const others = day.rounded_seconds
+            - day.budget_billable_seconds
+            - day.no_budget_billable_seconds
+
+        const reasons = day.no_budget_reasons ?? {}
+        const isNoBudget = destination === 'no_budget'
+
+        return insight(
+            heading(shortDate(date)),
+
+            row('Tracked', exactDurationSeconds(day.raw_seconds)),
+            row('Billed', exactDurationSeconds(day.rounded_seconds)),
+            this.roundingEnabled
+                ? row('Rounding', this.signedDuration(day.rounding_adjustment_seconds))
+                : '',
+            this.roundingEnabled
+                ? row('Policy', `${this.roundingIntervalMinutes}-minute ${this.roundingDirection}`)
+                : '',
+            this.roundingEnabled
+                ? ''
+                : note('Rounding is disabled, so the day bills exactly as tracked.'),
+
+            section('Shared out, in proportion to tracked time'),
+            row(detail.name, exactDurationSeconds(day.budget_billable_seconds)),
+            day.no_budget_billable_seconds > 0
+                ? row('No budget', exactDurationSeconds(day.no_budget_billable_seconds))
+                : '',
+            others > 0
+                ? row("This client's other budgets", exactDurationSeconds(others))
+                : '',
+
+            isNoBudget && reasons.excluded && reasons.coverage_gap
+                ? section('The No-budget share is two different things')
+                : '',
+            isNoBudget && reasons.excluded && reasons.coverage_gap
+                ? row('Set aside explicitly',
+                      exactDurationSeconds(reasons.excluded.billable_seconds))
+                : '',
+            isNoBudget && reasons.excluded && reasons.coverage_gap
+                ? row('No budget covered it',
+                      exactDurationSeconds(reasons.coverage_gap.billable_seconds))
+                : '',
+            isNoBudget && reasons.coverage_gap && !reasons.excluded
+                ? note('This is time no budget covered rather than time anyone set '
+                       + 'aside, which is why there is no entry to list against it.')
+                : '',
+
+            day.provisional
+                ? note('Still provisional — more time recorded for this client today '
+                       + 'will redistribute these figures.')
+                : '',
+        )
+    }
+
+    /**
+     * Fold/unfold through a native disclosure button. Native button keyboard
+     * behavior supplies Enter and Space without making the table row itself an
+     * interactive container. Insight buttons are siblings, so using one can
+     * never toggle the disclosure.
+     */
+    bindDayGroups() {
+        this.detailBody.querySelectorAll('[data-day-group]').forEach((button) => {
+            button.addEventListener('click', () => this.toggleDayGroup(button))
+        })
+    }
+
+    toggleDayGroup(button) {
+        const body = document.getElementById(button.dataset.dayGroup)
+        if (!body) return
+
+        const expanded = body.classList.toggle('hidden') === false
+        button.setAttribute('aria-expanded', String(expanded))
+        const chevron = button.querySelector('.tk-chevron')
+        if (chevron) chevron.style.transform = expanded ? 'rotate(90deg)' : ''
     }
 
     bindEntryPins(detail) {

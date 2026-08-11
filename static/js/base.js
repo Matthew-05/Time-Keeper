@@ -1,4 +1,5 @@
 import { clockTimeToSeconds } from './time_format.js';
+import { renderInsight } from './insight.js';
 
 /**
  * Run `fn` once the DOM is parsed.
@@ -43,15 +44,23 @@ function bindInsightPopovers() {
     document.body.appendChild(popover);
 
     const show = (target) => {
-        popover.textContent = target.dataset.insight;
+        // Measured *after* the content is in, because a structured insight is
+        // several lines tall and the old single-line height would place it
+        // overlapping the control it describes.
+        renderInsight(popover, target.dataset.insight);
         popover.classList.remove('hidden');
 
         const anchor = target.getBoundingClientRect();
         const tip = popover.getBoundingClientRect();
         let left = anchor.left + anchor.width / 2 - tip.width / 2;
         left = Math.max(8, Math.min(left, window.innerWidth - tip.width - 8));
+
+        // Above by preference, below if it doesn't fit, and clamped either way.
+        // A figure table is several times taller than the one-liners this used
+        // to show, so "flip below" alone can now run off the bottom instead.
         let top = anchor.top - tip.height - 8;
         if (top < 8) top = anchor.bottom + 8;
+        top = Math.max(8, Math.min(top, window.innerHeight - tip.height - 8));
 
         popover.style.left = `${left}px`;
         popover.style.top = `${top}px`;

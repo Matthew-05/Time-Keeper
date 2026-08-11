@@ -1,3 +1,5 @@
+import { heading, insight, insightToSentence, note, row } from './insight.js'
+
 /**
  * Shared budget rendering.
  *
@@ -78,7 +80,9 @@ export function percent(value) {
     return value == null ? '—' : `${Math.round(value)}%`
 }
 
-function escapeAttribute(value) {
+/** Escape for an HTML attribute. Exported because insight text is built in
+ *  several modules and every one of them interpolates it into `data-insight`. */
+export function escapeAttribute(value) {
     return String(value)
         .replaceAll('&', '&amp;')
         .replaceAll('"', '&quot;')
@@ -167,25 +171,38 @@ export function headline(budget) {
  */
 export function meterBreakdown(budget, { showPeriodMarker = true } = {}) {
     const isOver = (budget.over_by_seconds ?? 0) > 0
-    const usage = `Used: ${budgetDuration(budget, 'used_hours', 'used_seconds', { exact: isOver })} of ${hours(budget.budgeted_hours)} hrs. (${percent(budget.percent_used_exact ?? budget.percent_used)}).`
-    const remaining =
-        budget.remaining_seconds == null && budget.remaining_hours == null
+    const hasRemaining =
+        budget.remaining_seconds != null || budget.remaining_hours != null
+
+    return insight(
+        heading('Budget progress'),
+
+        row(
+            'Used',
+            `${budgetDuration(budget, 'used_hours', 'used_seconds', { exact: isOver })}`
+            + ` of ${hours(budget.budgeted_hours)} hrs.`
+        ),
+        row('Share used', percent(budget.percent_used_exact ?? budget.percent_used)),
+        !hasRemaining
             ? ''
             : isOver
-              ? ` Over budget: ${budgetDuration(budget, 'over_by', 'over_by_seconds', { exact: true })}.`
-              : ` Remaining: ${budgetDuration(budget, 'remaining_hours', 'remaining_seconds', { floorAtZero: true })}.`
-    const capped = isOver
-        ? ' The filled bar is capped at 100%.'
-        : ''
-    const elapsed = !showPeriodMarker
-        ? ''
-        : budget.status === 'upcoming'
-            ? ' The budget period has not started.'
-            : budget.percent_elapsed == null
-              ? ' No elapsed-period marker is available.'
-              : ` Period marker: ${percent(budget.percent_elapsed)} elapsed.`
+              ? row('Over budget',
+                    budgetDuration(budget, 'over_by', 'over_by_seconds', { exact: true }))
+              : row('Remaining',
+                    budgetDuration(budget, 'remaining_hours', 'remaining_seconds',
+                                   { floorAtZero: true })),
+        !showPeriodMarker || budget.status === 'upcoming' || budget.percent_elapsed == null
+            ? ''
+            : row('Period elapsed', percent(budget.percent_elapsed)),
 
-    return usage + remaining + capped + elapsed
+        isOver ? note('The filled bar is capped at 100%.') : '',
+        showPeriodMarker && budget.status === 'upcoming'
+            ? note('The budget period has not started.')
+            : '',
+        showPeriodMarker && budget.status !== 'upcoming' && budget.percent_elapsed == null
+            ? note('No elapsed-period marker is available.')
+            : '',
+    )
 }
 
 export function meter(budget, { large = false, showPeriodMarker = true } = {}) {
@@ -202,7 +219,7 @@ export function meter(budget, { large = false, showPeriodMarker = true } = {}) {
 
     return `<div class="tk-meter tk-meter-tooltip${large ? ' tk-meter-lg' : ''}"
                  data-insight="${escapeAttribute(breakdown)}" role="img" tabindex="0"
-                 aria-label="${escapeAttribute(`Budget progress. ${breakdown}`)}" title="">`
+                 aria-label="${escapeAttribute(insightToSentence(breakdown))}" title="">`
         + `<div class="tk-meter-fill${over ? ' tk-meter-overflow' : ''}" style="width: ${used}%"></div>`
         + marker
         + '</div>'
