@@ -1,5 +1,6 @@
 import { TimeKeeper, ready, lockBodyScroll, unlockBodyScroll } from './base.js'
 import {
+    MATURITY_RULE,
     STATUS_LABEL,
     budgetDuration,
     dateRange,
@@ -46,17 +47,33 @@ const FILTERS = {
 
 const INSIGHTS = {
     used: '',
-    currentPace: 'End total implied by your current average pace. It stays informational until 20% of the working period has elapsed and the budget is five working days into its period — calendar working days, not days you recorded time on. Days off and held days are excluded from both counts.',
-    dailyAverage: 'Average hours used per elapsed working day. Days off and held days are excluded.',
+    currentPace: insight(
+        note('Where the budget lands if the rest of it goes at your average so far.'),
+        note(MATURITY_RULE),
+    ),
+    dailyAverage: insight(
+        note('Hours used per working day so far.'),
+        note('Days off and held days are not working days, so they never dilute this.'),
+    ),
 }
 
 class Budgets extends TimeKeeper {
     constructor() {
         super()
 
+        // A figure table rather than a sentence about rounding: the policy is
+        // two values, and reading them out of a clause was harder than reading
+        // them off a row.
         INSIGHTS.used = this.roundingEnabled
-            ? `Billable time allocated to this budget. Entries stay raw; each client-day is rounded once using the global ${this.roundingIntervalMinutes}-minute ${this.roundingDirection} policy, then shared across its budget destinations.`
-            : 'Tracked task time allocated to this budget. Rounding is disabled.'
+            ? insight(
+                  note('Billable time landing on this budget.'),
+                  row('Rounding', `${this.roundingIntervalMinutes}-minute ${this.roundingDirection}`),
+                  note("Applied once per client per day, then shared across that day's budgets."),
+              )
+            : insight(
+                  note('Tracked time landing on this budget.'),
+                  note('Rounding is off, so this bills exactly as tracked.'),
+              )
 
         this.list = document.getElementById('budget-list')
         this.subtitle = document.getElementById('budgets-subtitle')
@@ -1198,8 +1215,8 @@ class Budgets extends TimeKeeper {
             ${this.entryTimeCell(entry)}
             <td class="tk-num text-right font-medium">
               <span title="Raw tracked duration">${exactDurationSeconds(entry.raw_seconds)}</span>
-              ${entry.split ? `<span class="tk-badge tk-badge-neutral ml-1.5">split</span>${this.insightIcon(`This entry was split across budgets; ${exactDurationSeconds(entry.allocated_raw_seconds)} raw time landed here`, 'Split allocation details')}` : ''}
-              ${entry.held ? '<span class="tk-badge tk-badge-warn ml-1.5" title="Recorded on a day this project was on hold. It still counts — the hold dates may need correcting.">on hold</span>' : ''}
+              ${entry.split ? `<span class="tk-badge tk-badge-neutral ml-1.5">split</span>${this.insightIcon(`Split across budgets — ${exactDurationSeconds(entry.allocated_raw_seconds)} of it landed here.`, 'Split allocation details')}` : ''}
+              ${entry.held ? '<span class="tk-badge tk-badge-warn ml-1.5" title="Recorded on a held day. It still counts — check the hold dates.">on hold</span>' : ''}
             </td>
             <td class="w-px">
               <select class="tk-select tk-select-sm w-44" data-task-id="${entry.task_id}"
@@ -1459,7 +1476,7 @@ class Budgets extends TimeKeeper {
                 : '',
 
             isNoBudget && reasons.excluded && reasons.coverage_gap
-                ? section('The No-budget share is two different things')
+                ? section('Two kinds of No-budget time')
                 : '',
             isNoBudget && reasons.excluded && reasons.coverage_gap
                 ? row('Set aside explicitly',
@@ -1470,13 +1487,13 @@ class Budgets extends TimeKeeper {
                       exactDurationSeconds(reasons.coverage_gap.billable_seconds))
                 : '',
             isNoBudget && reasons.coverage_gap && !reasons.excluded
-                ? note('This is time no budget covered rather than time anyone set '
-                       + 'aside, which is why there is no entry to list against it.')
+                ? note('No budget covered this time — nobody set it aside, so there '
+                       + 'is no entry to list against it.')
                 : '',
 
             day.provisional
-                ? note('Still provisional — more time recorded for this client today '
-                       + 'will redistribute these figures.')
+                ? note('Provisional — more time today for this client will '
+                       + 'redistribute these figures.')
                 : '',
         )
     }

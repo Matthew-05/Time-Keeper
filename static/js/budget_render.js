@@ -10,6 +10,20 @@ import { heading, insight, insightToSentence, note, row } from './insight.js'
  * 34.5 hours against 40 look like".
  */
 
+/**
+ * The one short statement of when a projection starts being trusted.
+ *
+ * Every surface that shows a pace figure has to say this, and each used to say
+ * it at full length — "20% of the working period has elapsed and the budget is
+ * five working days into its period — calendar working days, not days with time
+ * recorded" — which is the wordiest sentence in the app and could appear three
+ * times on one screen. One phrasing, reused; the full rule with the
+ * calendar-vs-recorded caveat lives once, on the threshold field that sets it.
+ */
+export const MATURITY_RULE =
+    'Treated as an early estimate until the budget is 20% through its working '
+    + 'days and at least five in.'
+
 /** Words for a status, in the order of how alarming they are. */
 export const STATUS_LABEL = {
     on_track: 'Within budget',
@@ -405,12 +419,9 @@ export function statusInsight(budget) {
         row('Share of commitment', percent(budget.projected_percent)),
     ]
     // Said wherever a projection is shown: a number built on three days of
-    // history looks exactly like one built on thirty. Kept to a single clause —
-    // the exact maturity rule is on the Current avg. pace stat, and repeating
-    // it here was most of what made this popover hard to read.
+    // history looks exactly like one built on thirty.
     const immature = budget.projected_hours != null && !budget.projection_mature
-        ? note('Early estimate — too little of the period has run for the pace to '
-               + 'be reliable yet.')
+        ? note(MATURITY_RULE)
         : ''
 
     if (budget.status === 'over') {
