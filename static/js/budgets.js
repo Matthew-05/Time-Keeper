@@ -3,6 +3,7 @@ import {
     MATURITY_RULE,
     STATUS_LABEL,
     budgetDuration,
+    budgetDurationHtml,
     dateRange,
     exactDurationSeconds,
     headline,
@@ -14,6 +15,7 @@ import {
     policyHours,
     shortDate,
     statusInsight,
+    withHours,
 } from './budget_render.js'
 import { formatClockTime } from './time_format.js'
 import { flatpickrCalendarOptions } from './week_start.js'
@@ -205,13 +207,13 @@ class Budgets extends TimeKeeper {
         const overBudget = active.filter((b) => b.status === 'over')
 
         document.getElementById('overview-count').textContent = active.length
-        document.getElementById('overview-budgeted').textContent = policyHours(budgeted)
+        document.getElementById('overview-budgeted').innerHTML = withHours(policyHours(budgeted))
         // Printed on the rounding grid rather than to one decimal: every hour
         // in this total was already rounded per client-day by the policy, so a
         // 15-minute policy makes 3.25 the true figure and "3.3" a number that
         // nothing in the app could have produced.
-        document.getElementById('overview-used').textContent =
-            `${policyHours(used)}${budgeted ? ` · ${percent((used / budgeted) * 100)}` : ''}`
+        document.getElementById('overview-used').innerHTML =
+            `${withHours(policyHours(used))}${budgeted ? ` · ${percent((used / budgeted) * 100)}` : ''}`
 
         const atRiskEl = document.getElementById('overview-at-risk')
         atRiskEl.textContent = atRisk.length
@@ -312,7 +314,7 @@ class Budgets extends TimeKeeper {
             <div class="mt-3 grid grid-cols-4 gap-3 border-t border-border pt-3">
               <div>
                 <div class="tk-stat-label">Remaining</div>
-                <div class="tk-stat-value">${budgetDuration(budget, 'remaining_hours', 'remaining_seconds', { floorAtZero: true })}</div>
+                <div class="tk-stat-value">${budgetDurationHtml(budget, 'remaining_hours', 'remaining_seconds', { floorAtZero: true })}</div>
               </div>
               <div>
                 ${this.insightLabel('Current avg. pace', INSIGHTS.currentPace)}

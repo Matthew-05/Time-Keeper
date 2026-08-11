@@ -195,7 +195,18 @@ export function hourMinuteDuration(value) {
  * whole number of intervals, so the clock form says nothing the decimal
  * doesn't and says it in a second format, in a card full of decimals.
  */
-export function budgetDuration(
+export function budgetDuration(budget, hoursField, secondsField, options = {}) {
+    const { figure, unit } = budgetDurationParts(budget, hoursField, secondsField, options)
+    return `${figure}${unit}`
+}
+
+/**
+ * The same figure with the unit split off, so a caller can style the two
+ * separately. The clock form carries its units inside the figure and has
+ * nothing to split, which is why this returns the pair rather than assuming
+ * there is always a trailing " hrs.".
+ */
+export function budgetDurationParts(
     budget,
     hoursField,
     secondsField,
@@ -207,8 +218,27 @@ export function budgetDuration(
         seconds = 0
         value = 0
     }
-    if (exact && seconds != null && !roundingPolicy()) return hourMinuteDuration(seconds)
-    return `${policyHours(value)} hrs.`
+    if (exact && seconds != null && !roundingPolicy()) {
+        return { figure: hourMinuteDuration(seconds), unit: '' }
+    }
+    return { figure: policyHours(value), unit: ' hrs.' }
+}
+
+/** `budgetDuration` with the unit muted, for a headline figure in a stat card. */
+export function budgetDurationHtml(budget, hoursField, secondsField, options = {}) {
+    const { figure, unit } = budgetDurationParts(budget, hoursField, secondsField, options)
+    return unit ? withHours(figure) : figure
+}
+
+/**
+ * A figure with the unit trailing it, muted and unbolded.
+ *
+ * The house treatment for a headline number — the same one the budget rows and
+ * TimeKeeper.formatTimeWithDifference use — so "40" in a stat card reads as
+ * hours rather than a count, without the unit competing with the figure.
+ */
+export function withHours(value) {
+    return `${value}<span class="font-normal text-faint"> hrs.</span>`
 }
 
 /** A percentage with no decimal — nothing here is precise enough to warrant one. */
