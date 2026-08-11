@@ -69,6 +69,7 @@ class WorkCalendar extends TimeKeeper {
         this.customHoursWrap = document.getElementById('calendar-custom-hours-wrap')
         this.customHours = document.getElementById('calendar-custom-hours')
         this.saveButton = document.getElementById('calendar-save-override')
+        this.clearButton = document.getElementById('calendar-clear-selection')
         this.rules = document.getElementById('calendar-rules')
         this.ruleCount = document.getElementById('calendar-rule-count')
         this.saveBar = new SaveChangesBar({
@@ -91,7 +92,7 @@ class WorkCalendar extends TimeKeeper {
             this.month = new Date(now.getFullYear(), now.getMonth(), 1)
             this.loadMonth()
         })
-        document.getElementById('calendar-clear-selection').addEventListener('click', () => this.clearSelection())
+        this.clearButton.addEventListener('click', () => this.clearSelection())
 
         this.dailyHours.addEventListener('change', () => this.saveDailyHours())
         this.dailyHours.addEventListener('keydown', (event) => {
@@ -333,12 +334,13 @@ class WorkCalendar extends TimeKeeper {
         const hasSelection = Boolean(this.selectionStart)
         this.overrideFields.disabled = !hasSelection
         this.saveButton.disabled = !hasSelection
+        this.clearButton.disabled = !hasSelection
         if (!hasSelection) {
             this.selectionLabel.textContent = 'Select a date on the calendar.'
         } else if (this.selectionWeekdays !== null) {
             const names = this.selectionWeekdays.map((day) => `${WEEKDAY_NAMES[day]}s`)
             const count = this.selectedDateCount()
-            this.selectionLabel.textContent = `${names.join(', ')} in ${this.formatRange(this.selectionStart, this.selectionEnd)} · ${count} dates`
+            this.selectionLabel.textContent = `${names.join(', ')} in ${this.formatSpan(this.selectionStart, this.selectionEnd)} · ${count} dates`
         } else {
             const end = this.selectionEnd || this.selectionStart
             this.selectionLabel.textContent = this.formatRange(this.selectionStart, end)
@@ -587,6 +589,22 @@ class WorkCalendar extends TimeKeeper {
     formatRange(start, end) {
         if (start === end) return RANGE_FORMAT.format(localDate(start))
         return `${RANGE_FORMAT.format(localDate(start))} – ${RANGE_FORMAT.format(localDate(end))}`
+    }
+
+    /* Clicking a weekday heading always selects the whole visible month, and
+       "Thursdays in August 2026" reads better there than repeating both
+       endpoints. A saved rule can span any dates, so anything that isn't
+       exactly one calendar month falls back to the range. */
+    formatSpan(start, end) {
+        const from = localDate(start)
+        const to = localDate(end || start)
+        const lastOfMonth = new Date(to.getFullYear(), to.getMonth() + 1, 0).getDate()
+        const wholeMonth =
+            from.getDate() === 1
+            && to.getDate() === lastOfMonth
+            && from.getFullYear() === to.getFullYear()
+            && from.getMonth() === to.getMonth()
+        return wholeMonth ? MONTH_FORMAT.format(from) : this.formatRange(start, end || start)
     }
 }
 

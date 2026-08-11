@@ -31,7 +31,7 @@
 
         <div>
           <span class="tk-label">Usual workdays</span>
-          <div id="calendar-workdays" class="flex flex-wrap gap-2" role="group" aria-label="Usual workdays">
+          <div id="calendar-workdays" class="tk-day-toggle-group" role="group" aria-label="Usual workdays">
             {% for short in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
               <button type="button" class="tk-day-toggle" data-weekday="{{ loop.index0 }}" aria-pressed="false" disabled>{{ short }}</button>
             {% endfor %}
@@ -45,30 +45,32 @@
 
     <div class="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
       <section class="tk-card overflow-hidden">
-        <div class="tk-card-header flex-wrap">
-          <div class="flex items-center gap-2">
-            <button id="calendar-previous" type="button" class="tk-btn-icon" aria-label="Previous month">&larr;</button>
-            <button id="calendar-today" type="button" class="tk-btn tk-btn-ghost">Today</button>
-            <button id="calendar-next" type="button" class="tk-btn-icon" aria-label="Next month">&rarr;</button>
+        <div class="tk-card-header tk-calendar-header">
+          <div class="tk-calendar-nav">
+            <button id="calendar-previous" type="button" class="tk-calendar-nav-arrow" aria-label="Previous month">&larr;</button>
+            <button id="calendar-today" type="button" class="tk-calendar-nav-today">Today</button>
+            <button id="calendar-next" type="button" class="tk-calendar-nav-arrow" aria-label="Next month">&rarr;</button>
           </div>
-          <div class="text-right">
-            <h2 id="calendar-month-title" class="text-base font-semibold text-text" aria-live="polite"></h2>
-            <p id="calendar-month-capacity" class="mt-0.5 text-xs text-muted"></p>
-          </div>
+          <h2 id="calendar-month-title" class="tk-calendar-month" aria-live="polite"></h2>
+          <p id="calendar-month-capacity" class="tk-calendar-month-capacity"></p>
         </div>
 
         <div class="p-3 sm:p-5">
-          <div id="calendar-weekday-headers" class="tk-work-calendar-weekdays" role="group" aria-label="Select a weekday in this month">
-            {% for short in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
-              <button type="button" data-calendar-weekday="{{ loop.index0 }}" aria-pressed="false" title="Select every {{ short }} in this month">{{ short }}</button>
-            {% endfor %}
+          <div class="tk-work-calendar">
+            <div id="calendar-weekday-headers" class="tk-work-calendar-weekdays" role="group" aria-label="Select a weekday in this month">
+              {% for short in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
+                <button type="button" data-calendar-weekday="{{ loop.index0 }}" aria-pressed="false" title="Select every {{ short }} in this month">{{ short }}</button>
+              {% endfor %}
+            </div>
+            <div id="work-calendar-grid" class="tk-work-calendar-grid" role="grid" aria-label="Work capacity calendar"></div>
           </div>
-          <div id="work-calendar-grid" class="tk-work-calendar-grid" role="grid" aria-label="Work capacity calendar"></div>
         </div>
 
         <div class="tk-card-footer flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted">
-          <span class="inline-flex items-center gap-1.5"><span class="tk-calendar-key bg-accent-soft"></span> Override</span>
-          <span class="inline-flex items-center gap-1.5"><span class="tk-calendar-key bg-surface-3"></span> Non-working</span>
+          <span class="inline-flex items-center gap-1.5"><span class="tk-calendar-key tk-calendar-key-selected"></span> Selected</span>
+          <span class="inline-flex items-center gap-1.5"><span class="tk-calendar-key tk-calendar-key-off"></span> Non-working</span>
+          <span class="inline-flex items-center gap-1.5"><span class="tk-calendar-key tk-calendar-key-outside"></span> Other month</span>
+          <span class="inline-flex items-center gap-1.5"><span class="tk-calendar-key tk-calendar-key-today"></span> Today</span>
           <span>Click a date for one day, Shift-click another date for a range, or click a weekday heading for every matching day.</span>
         </div>
       </section>
@@ -76,7 +78,7 @@
       <aside class="tk-card xl:sticky xl:top-4">
         <div class="tk-card-header">
           <h2 class="tk-card-title">Selected range</h2>
-          <button id="calendar-clear-selection" type="button" class="text-xs text-muted hover:text-text">Clear</button>
+          <button id="calendar-clear-selection" type="button" class="tk-btn tk-btn-secondary tk-btn-sm" disabled>Clear</button>
         </div>
 
         <div class="space-y-5 p-5">
