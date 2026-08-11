@@ -98,6 +98,55 @@ function bindInsightPopovers() {
 
 ready(bindInsightPopovers);
 
+/**
+ * Sliding highlight for `.tk-segmented` controls.
+ *
+ * Each caller (settings, budgets filter, work calendar overrides, the
+ * summary tabs, …) just toggles `.active` on a `.tk-segment` the way it
+ * always has — none of that click-handling code needs to know this exists.
+ * This mounts one absolutely-positioned `.tk-segment-indicator` per
+ * container, watches for the `.active` class moving via MutationObserver,
+ * and re-measures the newly active button so the fill slides over to it
+ * instead of the two buttons cross-fading their own backgrounds.
+ */
+function bindSegmentedIndicators() {
+    document.querySelectorAll('.tk-segmented').forEach((container) => {
+        const indicator = document.createElement('span');
+        indicator.className = 'tk-segment-indicator';
+        indicator.setAttribute('aria-hidden', 'true');
+        container.insertBefore(indicator, container.firstChild);
+
+        const place = (skipTransition = false) => {
+            const activeSegment = container.querySelector(':scope > .tk-segment.active');
+            if (!activeSegment) {
+                indicator.style.width = '0px';
+                return;
+            }
+
+            // Resize/first paint shouldn't visibly slide in from the corner —
+            // jump straight there, then hand control back to the stylesheet's
+            // transition for every change after this one.
+            if (skipTransition) indicator.style.transition = 'none';
+            indicator.style.left = `${activeSegment.offsetLeft}px`;
+            indicator.style.width = `${activeSegment.offsetWidth}px`;
+            if (skipTransition) {
+                indicator.offsetHeight; // eslint-disable-line no-unused-expressions -- force reflow
+                indicator.style.transition = '';
+            }
+        };
+
+        place(true);
+        new MutationObserver(() => place()).observe(container, {
+            attributes: true,
+            attributeFilter: ['class'],
+            subtree: true,
+        });
+        window.addEventListener('resize', () => place(true));
+    });
+}
+
+ready(bindSegmentedIndicators);
+
 /** Surface anything that escapes a promise chain instead of failing silently. */
 window.addEventListener('unhandledrejection', (event) => {
     console.error('Unhandled promise rejection:', event.reason);

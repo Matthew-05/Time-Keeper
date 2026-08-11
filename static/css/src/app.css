@@ -1673,26 +1673,71 @@
   /* ---- Segmented control (tabs) ---- */
 
   .tk-segmented {
-    @apply inline-flex gap-0.5 rounded-lg p-0.5;
+    @apply inline-flex rounded-lg;
     background-color: var(--control-fill);
     border: 1px solid var(--control-border);
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* The fill itself, decoupled from any one button. base.js measures
+     whichever `.tk-segment.active` is inside the container and moves this on
+     top of it, so switching segments slides the highlight over rather than
+     cross-fading two buttons' backgrounds at once. */
+  .tk-segment-indicator {
+    background-color: var(--accent);
+    bottom: 0;
+    box-shadow: var(--shadow-sm);
+    left: 0;
+    pointer-events: none;
+    position: absolute;
+    top: 0;
+    transition:
+      left 0.25s ease,
+      width 0.25s ease,
+      background-color 0.2s ease;
+    width: 0;
+    z-index: 0;
+  }
+
+  /* Hovering the active segment should darken the indicator it's sitting on
+     top of, not swap in the inactive-hover fill — see .tk-segment.active
+     below, which drops its own background so the indicator reads through. */
+  .tk-segmented:has(.tk-segment.active:hover) .tk-segment-indicator {
+    background-color: var(--accent-hover);
   }
 
   .tk-segment {
-    @apply cursor-pointer rounded-md border-0 px-3 py-1.5 text-sm font-medium transition-colors;
+    @apply cursor-pointer border-0 px-3 py-1.5 text-sm font-medium;
     background: transparent;
     color: var(--muted);
+    position: relative;
+    transition: color 0.2s ease;
+    z-index: 1;
   }
 
-  .tk-segment:hover:not(:disabled) {
+  /* Buttons now sit flush against each other and the track's border (no
+     gap/padding), so a hairline divider takes over the job the gap used to
+     do — except where it would cut across the sliding fill. */
+  .tk-segment:not(:first-child) {
+    border-left: 1px solid var(--control-border);
+  }
+
+  .tk-segment:hover:not(:disabled):not(.active) {
     background-color: var(--control-hover);
     color: var(--text);
   }
 
   .tk-segment.active {
-    background-color: var(--accent-soft);
-    box-shadow: inset 0 0 0 1px var(--accent), var(--shadow-sm);
-    color: var(--accent-text);
+    /* No background/box-shadow here — the indicator behind it provides both,
+       and staying transparent is what lets :hover darken that indicator
+       instead of masking it with the inactive-hover grey. */
+    color: var(--accent-fg);
+  }
+
+  .tk-segment.active,
+  .tk-segment.active + .tk-segment {
+    border-left-color: transparent;
   }
 
   .tk-segment:disabled {
