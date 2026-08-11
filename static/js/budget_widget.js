@@ -108,6 +108,12 @@ export class BudgetWidget {
     strip(budget) {
         // The whole point of this widget is the glance, so the layout is one
         // line of identity, one bar, one line of consequence.
+        //
+        // That bar is the same one the Budgets cards draw, period marker
+        // included. The marker was suppressed here while it was a faint
+        // hairline that only added noise at this size; drawn clearly it earns
+        // its place, because it is the one thing that makes "62% used" mean
+        // anything without reading a second number.
         return `
           <a href="/budgets?budget_id=${encodeURIComponent(budget.id)}"
              class="tk-budget-strip block no-underline" data-status="${budget.status}"
@@ -119,7 +125,7 @@ export class BudgetWidget {
               </span>
             </div>
 
-            ${meter(budget, { showPeriodMarker: false })}
+            ${meter(budget, { large: true })}
 
             <div class="mt-1.5 flex items-baseline justify-between gap-2 text-xs">
               <span class="tabular text-muted">

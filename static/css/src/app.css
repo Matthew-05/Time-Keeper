@@ -1896,14 +1896,14 @@
   .tk-meter {
     background-color: var(--surface-3);
     border-radius: 999px;
-    height: 0.5rem;
+    height: 0.625rem;
     overflow: hidden;
     position: relative;
     width: 100%;
   }
 
   .tk-meter-lg {
-    height: 0.75rem;
+    height: 1rem;
   }
 
   .tk-meter-tooltip {
@@ -1917,17 +1917,20 @@
     transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  /* The share of the *period* that has gone, drawn as a hairline on top of the
+  /* The share of the *period* that has gone, drawn as a tick on top of the
      fill. This is the comparison that makes a percentage mean anything: 60%
      used is good news at the 80% mark and bad news at the 30% mark, and the
-     tick is what lets you see which without reading two numbers. */
+     tick is what lets you see which without reading two numbers — so it is
+     drawn at full strength rather than as a hairline, with a sliver of the card
+     colour either side to hold it apart from whichever it lands on, the filled
+     bar or the empty track. */
   .tk-meter-marker {
     background-color: var(--text);
     bottom: -2px;
-    opacity: 0.55;
+    box-shadow: 0 0 0 1.5px var(--surface);
     position: absolute;
     top: -2px;
-    width: 2px;
+    width: 3px;
   }
 
   .tk-meter-overflow {
