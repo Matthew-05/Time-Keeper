@@ -3,17 +3,18 @@ import {
     STATUS_LABEL,
     budgetDuration,
     dateRange,
-    escapeAttribute,
     exactDurationSeconds,
     headline,
     hours,
+    insightIcon,
     meter,
     paceNote,
     percent,
     shortDate,
+    statusInsight,
 } from './budget_render.js'
 import { formatClockTime } from './time_format.js'
-import { heading, insight, insightToSentence, note, row, section } from './insight.js'
+import { heading, insight, note, row, section } from './insight.js'
 
 /**
  * Budgets page.
@@ -236,7 +237,7 @@ class Budgets extends TimeKeeper {
 
     card(budget) {
         const pace = paceNote(budget)
-        const diagnosis = this.diagnosisInsight(budget)
+        const diagnosis = statusInsight(budget)
 
         // Days-left reads better than a second date on a card that already
         // carries the range in its subhead.
@@ -270,7 +271,7 @@ class Budgets extends TimeKeeper {
               </div>
               <div class="flex flex-shrink-0 items-center gap-1.5">
                 <span class="tk-badge tk-badge-status">${STATUS_LABEL[budget.status]}</span>
-                ${diagnosis ? this.insightIcon(diagnosis, `${STATUS_LABEL[budget.status]} diagnosis`) : ''}
+                ${diagnosis ? this.insightIcon(diagnosis, 'Status breakdown') : ''}
               </div>
             </div>
 
@@ -635,7 +636,7 @@ class Budgets extends TimeKeeper {
 
     renderDetail(detail) {
         const canClose = detail.is_active && !detail.closed_at
-        const diagnosis = this.diagnosisInsight(detail)
+        const diagnosis = statusInsight(detail)
         this.detailCloseBudget.classList.toggle('hidden', !canClose)
         this.resetCloseBudgetButton()
 
@@ -660,7 +661,7 @@ class Budgets extends TimeKeeper {
               </span>
               <div class="flex items-center gap-1.5">
                 <span class="tk-badge tk-badge-status">${STATUS_LABEL[detail.status]}</span>
-                ${diagnosis ? this.insightIcon(diagnosis, `${STATUS_LABEL[detail.status]} diagnosis`) : ''}
+                ${diagnosis ? this.insightIcon(diagnosis, 'Status breakdown') : ''}
               </div>
             </div>
             ${meter(detail, { large: true })}
@@ -1111,37 +1112,8 @@ class Budgets extends TimeKeeper {
         if (this.detailId === budgetId) await this.openDetail(budgetId)
     }
 
-    diagnosisInsight(budget) {
-        if (budget.status === 'at_risk') {
-            return `At risk because the current average pace implies ${hours(budget.projected_hours)} hrs. total (${percent(budget.projected_percent)} of the ${hours(budget.budgeted_hours)}-hr commitment), ${hours(budget.projected_overage)} hrs. over. Pace warnings begin only after 20% of the working period and five working days have elapsed. This budget's threshold is ${hours(budget.risk_threshold_percent)}% over.`
-        }
-        if (budget.status === 'over') {
-            return `Over budget because ${budgetDuration(budget, 'used_hours', 'used_seconds', { exact: true })} have already been used against ${hours(budget.budgeted_hours)} hrs. committed, ${budgetDuration(budget, 'over_by', 'over_by_seconds', { exact: true })} over.`
-        }
-        return null
-    }
-
-    /**
-     * `body` may be a plain sentence or a structured insight document.
-     *
-     * The visible popover gets the document and lays it out; `aria-label` gets
-     * it flattened to prose, because a screen reader reading a figure table
-     * would otherwise announce the separators.
-     */
     insightIcon(body, label) {
-        // Escaped rather than interpolated raw: insight text now carries budget
-        // names, and a budget called 26" Monitor Rollout would otherwise close
-        // the attribute early and drop the rest of the sentence on the floor.
-        return `
-          <button type="button" class="tk-insight" data-insight="${escapeAttribute(body)}"
-                  aria-label="${escapeAttribute(`${label}: ${insightToSentence(body)}`)}">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="9"></circle>
-              <path d="M12 11v5M12 8h.01"></path>
-            </svg>
-          </button>
-        `
+        return insightIcon(body, label)
     }
 
     insightLabel(label, insight) {

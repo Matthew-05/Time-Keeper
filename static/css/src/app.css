@@ -1929,6 +1929,35 @@
     width: 0.75rem;
   }
 
+  /* An insight target that *is* a piece of text, rather than the circled-i.
+     The Today strip is one big anchor, so it can't nest a button; a span
+     carries the popover there instead. Without this it would inherit the
+     icon's fixed 0.875rem box and crush the text inside it. Declared after
+     the base rules so it wins the equal-specificity :hover match. */
+  .tk-insight-inline {
+    border-radius: 5px;
+    color: inherit;
+    display: inline;
+    height: auto;
+    width: auto;
+  }
+
+  .tk-insight-inline:hover {
+    background-color: transparent;
+    color: inherit;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+  }
+
+  /* The icon swaps the focus ring for a filled pill, which reads as a control.
+     Inline text isn't one, so it keeps the app's standard ring. */
+  .tk-insight-inline:focus-visible {
+    background-color: transparent;
+    color: inherit;
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
   .tk-insight-popover {
     background-color: var(--text);
     border: 1px solid color-mix(in srgb, var(--surface) 18%, transparent);

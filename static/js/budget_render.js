@@ -1,4 +1,4 @@
-import { heading, insight, insightToSentence, note, row } from './insight.js'
+import { heading, insight, insightToSentence, note, row, section } from './insight.js'
 
 /**
  * Shared budget rendering.
@@ -203,6 +203,118 @@ export function meterBreakdown(budget, { showPeriodMarker = true } = {}) {
             ? note('No elapsed-period marker is available.')
             : '',
     )
+}
+
+/**
+ * The circled-i button that opens an insight popover.
+ *
+ * Shared so the Budgets page and the Today strip can't drift into different
+ * markup. `body` may be a plain sentence or a structured document; the popover
+ * lays the document out, while `aria-label` gets it flattened to prose, since a
+ * screen reader announcing the separators would be worse than the paragraph
+ * this replaced.
+ */
+export function insightIcon(body, label) {
+    return `
+      <button type="button" class="tk-insight" data-insight="${escapeAttribute(body)}"
+              aria-label="${escapeAttribute(`${label}: ${insightToSentence(body)}`)}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"></circle>
+          <path d="M12 11v5M12 8h.01"></path>
+        </svg>
+      </button>
+    `
+}
+
+/**
+ * What a status badge means, as figures.
+ *
+ * Written once and used by both the Budgets page and the Today strip, because
+ * the two disagreeing about why something is at risk is exactly the kind of
+ * small wrongness that makes people stop trusting the colour.
+ *
+ * Only the three states that are a judgement get one. Upcoming, On hold and
+ * Closed are statements of fact the badge already makes in full.
+ */
+export function statusInsight(budget) {
+    const used = row(
+        'Used',
+        `${budgetDuration(budget, 'used_hours', 'used_seconds',
+                          { exact: budget.status === 'over' })}`
+        + ` of ${hours(budget.budgeted_hours)} hrs.`
+    )
+    const shareUsed = row(
+        'Share used', percent(budget.percent_used_exact ?? budget.percent_used)
+    )
+    const threshold = budget.risk_threshold_percent == null
+        ? ''
+        : row('Warning threshold', `${hours(budget.risk_threshold_percent)}% over`)
+    const projection = budget.projected_hours == null ? [] : [
+        row('Pace implies', `${hours(budget.projected_hours)} hrs. total`),
+        row('Share of commitment', percent(budget.projected_percent)),
+    ]
+    // Said wherever a projection is shown: a number built on three days of
+    // history looks exactly like one built on thirty.
+    const immature = budget.projected_hours != null && !budget.projection_mature
+        ? note('The projection stays an early estimate until 20% of the working '
+               + 'period and five working days have elapsed.')
+        : ''
+
+    if (budget.status === 'over') {
+        return insight(
+            heading('Over budget'),
+            used,
+            row('Committed', `${hours(budget.budgeted_hours)} hrs.`),
+            row('Over by',
+                budgetDuration(budget, 'over_by', 'over_by_seconds', { exact: true })),
+            shareUsed,
+            note('This is time already recorded, not a projection.'),
+        )
+    }
+
+    if (budget.status === 'at_risk') {
+        return insight(
+            heading('At risk'),
+            used,
+            shareUsed,
+            row('Remaining', budgetDuration(budget, 'remaining_hours',
+                                            'remaining_seconds', { floorAtZero: true })),
+            section('Why this is flagged'),
+            ...projection,
+            budget.projected_overage == null
+                ? ''
+                : row('Over commitment by', `${hours(budget.projected_overage)} hrs.`),
+            threshold,
+            note('This is about pace, not what has been spent — the budget is not '
+                 + 'over yet. Warnings begin only after 20% of the working period '
+                 + 'and five working days have elapsed.'),
+            immature,
+        )
+    }
+
+    if (budget.status === 'on_track') {
+        return insight(
+            heading('Within budget'),
+            used,
+            shareUsed,
+            row('Remaining', budgetDuration(budget, 'remaining_hours',
+                                            'remaining_seconds', { floorAtZero: true })),
+            budget.percent_elapsed == null
+                ? ''
+                : row('Period elapsed', percent(budget.percent_elapsed)),
+            projection.length ? section('Looking ahead') : '',
+            ...projection,
+            threshold,
+            projection.length
+                ? note('Nothing is flagged while the projected total stays under '
+                       + 'the threshold.')
+                : '',
+            immature,
+        )
+    }
+
+    return null
 }
 
 export function meter(budget, { large = false, showPeriodMarker = true } = {}) {

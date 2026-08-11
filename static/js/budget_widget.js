@@ -1,4 +1,15 @@
-import { STATUS_LABEL, budgetDuration, headline, hours, meter, percent, shortDate } from './budget_render.js'
+import {
+    STATUS_LABEL,
+    budgetDuration,
+    escapeAttribute,
+    headline,
+    hours,
+    meter,
+    percent,
+    shortDate,
+    statusInsight,
+} from './budget_render.js'
+import { insightToSentence } from './insight.js'
 
 /**
  * The Today page's budget strip.
@@ -119,7 +130,11 @@ export class BudgetWidget {
                     budget.status === 'at_risk' || budget.status === 'over'
                         ? this.warningBadge(budget)
                         : budget.status === 'on_track'
-                        ? this.escape(`${budgetDuration(budget, 'remaining_hours', 'remaining_seconds', { floorAtZero: true })} left`)
+                        ? this.statusTarget(
+                              statusInsight(budget),
+                              'Status breakdown',
+                              `${budgetDuration(budget, 'remaining_hours', 'remaining_seconds', { floorAtZero: true })} left`,
+                          )
                         // The full paused headline carries dates and a resume
                         // date and is far too long for one line here. On this
                         // screen the useful fact is just that you're about to
@@ -135,13 +150,30 @@ export class BudgetWidget {
         `
     }
 
-    warningBadge(budget) {
-        const label = budget.status === 'over' ? 'Over budget' : 'Pace at risk'
-        const detail = headline(budget)
+    /**
+     * The status badge, doubling as its own explanation.
+     *
+     * Deliberately *not* the shared `insightIcon` used on the Budgets page: the
+     * whole strip is an anchor, and a button inside a link is invalid and makes
+     * the inner control unreachable. A span carries the same insight document
+     * without nesting interactive content, and `tabindex` gets it back on the
+     * keyboard path that the button would have given for free.
+     */
+    statusTarget(body, label, text, className = '') {
+        if (!body) return this.escape(text)
+        return `<span class="tk-insight tk-insight-inline ${className}" tabindex="0"
+                      data-insight="${escapeAttribute(body)}"
+                      aria-label="${escapeAttribute(`${label}: ${insightToSentence(body)}`)}"
+                >${this.escape(text)}</span>`
+    }
 
-        return `<span class="tk-badge tk-badge-status tk-insight tk-budget-warning"
-                      data-insight="${this.escape(detail)}"
-                      aria-label="${this.escape(`${label}: ${detail}`)}">${label}</span>`
+    warningBadge(budget) {
+        return this.statusTarget(
+            statusInsight(budget),
+            'Status breakdown',
+            budget.status === 'over' ? 'Over budget' : 'Pace at risk',
+            'tk-badge tk-badge-status tk-budget-warning',
+        )
     }
 
     escape(value) {
