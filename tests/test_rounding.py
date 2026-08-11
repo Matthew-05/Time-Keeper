@@ -820,17 +820,23 @@ class BudgetDurationFormattingTests(unittest.TestCase):
         )
 
         values = json.loads(result.stdout)
+        # Destination shares still carry seconds: a half-minute share is the
+        # difference between the day's visible pieces adding up and not.
         self.assertEqual(values[:5], ['7m 30s', '7m 30s', '15m', '1s', '7m 30s'])
-        self.assertEqual(values[5], '1s over budget')
+
+        # Summary figures are read to the minute — nobody reconciles a budget
+        # to the second, and the seconds were noise around the two numbers
+        # anyone reads. What must survive the coarser form is the *fact* of the
+        # overage: a badge saying Over next to a magnitude of nothing reads as
+        # a bug, so a non-zero amount is floored at "1m" rather than allowed to
+        # round away to "0m". That, not the second itself, is the regression
+        # this test now catches.
+        self.assertEqual(values[5], '1m over budget')
         self.assertIn('tk-meter-overflow', values[6])
         self.assertIn('tabindex="0"', values[6])
 
-        # The meter's tooltip is a structured insight now, so the one-second
-        # overage is asserted through the flattened reading rather than the
-        # old run-on sentence. Losing that second is the actual regression
-        # this test exists to catch; the layout around it is free to change.
-        self.assertIn('Used 1h 1s of 1 hrs.', values[7])
-        self.assertIn('Over budget 1s.', values[7])
+        self.assertIn('Used 1h of 1 hrs.', values[7])
+        self.assertIn('Over budget 1m.', values[7])
         self.assertIn('Period elapsed 50%.', values[7])
         self.assertNotIn(' | ', values[7])
 

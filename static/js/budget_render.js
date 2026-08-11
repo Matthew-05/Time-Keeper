@@ -136,6 +136,36 @@ export function exactDurationSeconds(value) {
 }
 
 /**
+ * A duration to the minute — "41h 30m" — for summary figures.
+ *
+ * Seconds belong in the day-group tables, where a half-minute destination
+ * share is the difference between the visible pieces adding up to the day and
+ * not. A budget total is not that: nobody reconciles a 40-hour commitment to
+ * the second, and "41h 30m 12s" in a summary card is noise around the two
+ * figures anyone is actually reading.
+ *
+ * A non-zero amount is floored at "1m" rather than allowed to round away to
+ * "0m". The case this form exists to survive is an Over badge sitting next to
+ * its own magnitude, and a magnitude of nothing reads as a bug. A minute is
+ * the smallest true thing this format can say, so a stray twenty seconds is
+ * reported as one — an overstatement bounded by half a minute, which is the
+ * cheaper error of the two.
+ */
+export function hourMinuteDuration(value) {
+    if (value == null || Number.isNaN(Number(value))) return '—'
+    const totalSeconds = Math.abs(Number(value))
+    if (!totalSeconds) return '0m'
+    const totalMinutes = Math.max(1, Math.round(totalSeconds / 60))
+
+    const wholeHours = Math.floor(totalMinutes / 60)
+    const minutes = totalMinutes % 60
+    const parts = []
+    if (wholeHours) parts.push(`${wholeHours}h`)
+    if (minutes || !wholeHours) parts.push(`${minutes}m`)
+    return parts.join(' ')
+}
+
+/**
  * Summary duration that keeps familiar decimal hours unless exactness matters.
  *
  * Decimal hours go through `policyHours` rather than `hours`: every figure this
@@ -143,13 +173,13 @@ export function exactDurationSeconds(value) {
  * time taken out of it, so under a 15-minute policy a quarter-hour has to read
  * "3.25" and not "3.3".
  *
- * `exact` asks for the whole-second form — "3h 15m" — and only survives while
- * rounding is switched off. That form exists because an overage of a few
- * seconds is real when time is recorded raw, and decimal hours would round it
- * away into a figure that reads as exactly on budget next to an Over badge.
- * With a policy in force there is no such overage to hide: every figure here
- * is already a whole number of intervals, so the h/m form says nothing the
- * decimal doesn't and says it in a second format, in a card full of decimals.
+ * `exact` asks for the clock form — "41h 30m" — and only survives while
+ * rounding is switched off. That form exists because a small overage is real
+ * when time is recorded raw, and decimal hours would round it away into a
+ * figure that reads as exactly on budget next to an Over badge. With a policy
+ * in force there is no such overage to hide: every figure here is already a
+ * whole number of intervals, so the clock form says nothing the decimal
+ * doesn't and says it in a second format, in a card full of decimals.
  */
 export function budgetDuration(
     budget,
@@ -163,7 +193,7 @@ export function budgetDuration(
         seconds = 0
         value = 0
     }
-    if (exact && seconds != null && !roundingPolicy()) return exactDurationSeconds(seconds)
+    if (exact && seconds != null && !roundingPolicy()) return hourMinuteDuration(seconds)
     return `${policyHours(value)} hrs.`
 }
 
@@ -237,7 +267,10 @@ export function headline(budget) {
         if (remainingSeconds != null) {
             return remainingSeconds >= 0
                 ? `Finished ${budgetDuration(budget, 'remaining_hours', 'remaining_seconds')} under budget`
-                : `Finished ${exactDurationSeconds(-remainingSeconds)} over budget`
+                // Routed through budgetDuration like every other overage, so a
+                // closed budget can't be the one place that still says
+                // "1h 30m over" while the card beside it says "1.5 hrs.".
+                : `Finished ${budgetDuration(budget, 'over_by', 'over_by_seconds', { exact: true })} over budget`
         }
         const left = budget.remaining_hours
         return left >= 0
