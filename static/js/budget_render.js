@@ -421,6 +421,34 @@ export function insightIcon(body, label) {
 }
 
 /**
+ * The same circled-i, as a `<span>`, for use inside a link.
+ *
+ * The Today strip is one big anchor to the budget's detail view, and a
+ * `<button>` inside an `<a>` is invalid — browsers unnest it, which puts the
+ * icon outside the row it belongs to and makes it unreachable. A span carries
+ * the identical `data-insight` contract without nesting interactive content;
+ * `tabindex` puts it back on the keyboard path the button gave for free, and
+ * base.js already calls `preventDefault`/`stopPropagation` on `.tk-insight`
+ * clicks, so opening the popover doesn't also follow the link.
+ *
+ * Markup below the class is deliberately identical to `insightIcon` — the two
+ * must look like one control, so they share a stylesheet rule and differ only
+ * in the tag they can legally use.
+ */
+export function insightIconInline(body, label) {
+    return `
+      <span class="tk-insight" tabindex="0" data-insight="${escapeAttribute(body)}"
+            aria-label="${escapeAttribute(`${label}: ${insightToSentence(body)}`)}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"></circle>
+          <path d="M12 11v5M12 8h.01"></path>
+        </svg>
+      </span>
+    `
+}
+
+/**
  * Why the badge says what it says.
  *
  * Written once and used by both the Budgets page and the Today strip, because

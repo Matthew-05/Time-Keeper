@@ -1,16 +1,14 @@
 import {
     STATUS_LABEL,
     budgetDuration,
-    escapeAttribute,
     headline,
-    hours,
+    insightIconInline,
     meter,
     percent,
     policyHours,
     shortDate,
     statusInsight,
 } from './budget_render.js'
-import { insightToSentence } from './insight.js'
 
 /**
  * The Today page's budget strip.
@@ -132,16 +130,12 @@ export class BudgetWidget {
                 ${budgetDuration(budget, 'used_hours', 'used_seconds', { exact: budget.status === 'over' })} / ${policyHours(budget.budgeted_hours)} hrs.
                 <span class="text-faint">· to ${shortDate(budget.end_date)}</span>
               </span>
-              <span class="flex-shrink-0 text-right" style="color: var(--status-text)">
+              <span class="flex flex-shrink-0 items-center gap-1.5 text-right" style="color: var(--status-text)">
                 ${
                     budget.status === 'at_risk' || budget.status === 'over'
-                        ? this.warningBadge(budget)
+                        ? `<span class="tk-badge tk-badge-status">${budget.status === 'over' ? 'Over budget' : 'Pace at risk'}</span>`
                         : budget.status === 'on_track'
-                        ? this.statusTarget(
-                              statusInsight(budget),
-                              'Status breakdown',
-                              `${budgetDuration(budget, 'remaining_hours', 'remaining_seconds', { floorAtZero: true })} left`,
-                          )
+                        ? this.escape(`${budgetDuration(budget, 'remaining_hours', 'remaining_seconds', { floorAtZero: true })} left`)
                         // The full paused headline carries dates and a resume
                         // date and is far too long for one line here. On this
                         // screen the useful fact is just that you're about to
@@ -151,6 +145,7 @@ export class BudgetWidget {
                           ? this.escape(`On hold · ${budgetDuration(budget, 'remaining_hours', 'remaining_seconds', { floorAtZero: true })} left`)
                           : this.escape(headline(budget))
                 }
+                ${this.statusIcon(budget)}
               </span>
             </div>
           </a>
@@ -158,29 +153,23 @@ export class BudgetWidget {
     }
 
     /**
-     * The status badge, doubling as its own explanation.
+     * The circled-i that opens the status breakdown.
      *
-     * Deliberately *not* the shared `insightIcon` used on the Budgets page: the
-     * whole strip is an anchor, and a button inside a link is invalid and makes
-     * the inner control unreachable. A span carries the same insight document
-     * without nesting interactive content, and `tabindex` gets it back on the
-     * keyboard path that the button would have given for free.
+     * The consequence line used to *be* the hover target — the words "6.5 hrs.
+     * left" carried the popover themselves, with a dotted underline as the only
+     * hint. Nothing else in the app asks you to discover a tooltip by hovering
+     * prose: every other explanation in Budgets, Settings and Summary hangs off
+     * a circled-i placed after the label it explains. So the text is now just
+     * text and the icon is the trigger, which also means the whole strip reads
+     * as a link again, with one small exception in it rather than two.
+     *
+     * `insightIconInline` rather than `insightIcon` because the strip is an
+     * anchor — see the note on that helper.
      */
-    statusTarget(body, label, text, className = '') {
-        if (!body) return this.escape(text)
-        return `<span class="tk-insight tk-insight-inline ${className}" tabindex="0"
-                      data-insight="${escapeAttribute(body)}"
-                      aria-label="${escapeAttribute(`${label}: ${insightToSentence(body)}`)}"
-                >${this.escape(text)}</span>`
-    }
-
-    warningBadge(budget) {
-        return this.statusTarget(
-            statusInsight(budget),
-            'Status breakdown',
-            budget.status === 'over' ? 'Over budget' : 'Pace at risk',
-            'tk-badge tk-badge-status tk-budget-warning',
-        )
+    statusIcon(budget) {
+        const body = statusInsight(budget)
+        if (!body) return ''
+        return insightIconInline(body, 'Status breakdown')
     }
 
     escape(value) {

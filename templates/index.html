@@ -5,6 +5,19 @@
 {% endblock %}
 
 {% block content %}
+  {#
+    One card per section, like every other page. This used to be a single
+    "Time tracking" card with Client, Budget, Works and Time nested inside it as
+    tinted sub-panels, which made Today the only screen in the app where a card
+    contained cards.
+
+    The id each section is toggled by now sits on the `<section>` itself rather
+    than on an inner wrapper, so hiding a section takes its heading with it and
+    no state can leave an orphaned card header behind. Those ids are the
+    contract with timekeeper.js — `client-field`, `budget-widget`,
+    `works-container`, `timepicker-container` and `ended-day-actions` are all
+    shown and hidden from there.
+  #}
   <div class="tk-page tk-page-narrow">
     <div class="tk-page-header">
       <div>
@@ -13,146 +26,168 @@
       </div>
     </div>
 
-    <section class="tk-card overflow-visible">
-      <div class="tk-card-header">
-        <span class="tk-card-title">Time tracking</span>
-        <!-- Completed time plus the current task's not-yet-logged time for the
-             running task's client today. Hidden when nothing is running. -->
-        <span id="client-day-total" class="tabular hidden max-w-full flex-wrap items-center justify-end gap-x-2 gap-y-1 text-sm"></span>
-      </div>
+    {#
+      Cards are spaced by a grid gap rather than `mt-4` on each one, because
+      every card here except Time is conditional. A gap is only drawn between
+      items that actually render, so a hidden Client card can't leave its
+      margin behind above whatever follows it — on a day that has ended, the
+      one visible card still sits directly under the page header.
+      `grid-cols-1` (not bare `grid`) for the `minmax(0, 1fr)` that stops a
+      long client name from widening the column.
+    #}
+    <div class="grid grid-cols-1 gap-4">
+      {# overflow-visible so the Choices dropdown can escape the card. #}
+      <section id="client-field" class="tk-card overflow-visible" aria-labelledby="client-heading">
+        <div class="tk-card-header">
+          <h2 class="tk-card-title" id="client-heading">Client</h2>
+          <!-- Completed time plus the current task's not-yet-logged time for the
+               running task's client today. Hidden when nothing is running, and
+               sits beside the client it is about. -->
+          <span id="client-day-total" class="tabular hidden max-w-full flex-wrap items-center justify-end gap-x-2 gap-y-1 text-sm"></span>
+        </div>
 
-      <div class="space-y-5 p-5">
-        <!-- Client -->
-        <div id="client-field">
-          <label class="tk-label" for="autocomplete-input">Client</label>
+        <div class="p-5">
+          <label class="sr-only" for="autocomplete-input">Client</label>
           <select id="autocomplete-input"></select>
         </div>
+      </section>
 
-        <!-- Budgets in force for the running task's client. Same lifecycle as
-             the works list — it's about "the client I'm on right now", so it
-             appears and disappears with it. Silent when the client has no
-             active budget, which is the common case and shouldn't cost a row
-             of empty chrome. -->
-        <div id="budget-widget" class="hidden">
-          <label class="tk-label">Budget</label>
-          <div id="budget-widget-list" class="space-y-2"></div>
+      <!-- Budgets in force for the running task's client. Same lifecycle as the
+           works list — it's about "the client I'm on right now", so it appears
+           and disappears with it. Silent when the client has no active budget,
+           which is the common case and shouldn't cost an empty card. -->
+      <section id="budget-widget" class="tk-card hidden" aria-labelledby="budget-heading">
+        <div class="tk-card-header">
+          <h2 class="tk-card-title" id="budget-heading">Budget</h2>
+        </div>
+        <div id="budget-widget-list" class="space-y-2 p-5"></div>
+      </section>
+
+      <!-- Works (only shown while a task is running). Scoped to the running
+           task's client for today, so it persists across separate blocks of time
+           spent on the same client. -->
+      <section id="works-container" class="tk-card hidden" aria-labelledby="works-heading">
+        <div class="tk-card-header">
+          <h2 class="tk-card-title" id="works-heading">Works</h2>
+        </div>
+        <div id="works-list" class="p-5"></div>
+      </section>
+
+      <!-- Time, and the action that consumes it. The action row stays in the
+           card body with the time it acts on; it's disabled with a tooltip
+           rather than hidden when its prerequisites aren't met. -->
+      <section id="timepicker-container" class="tk-card" aria-labelledby="time-heading">
+        <div class="tk-card-header">
+          <h2 class="tk-card-title" id="time-heading">Time</h2>
         </div>
 
-        <!-- Works (only shown while a task is running). Scoped to the running
-             task's client for today, so it persists across separate blocks of
-             time spent on the same client. -->
-        <section id="works-container" class="hidden" aria-labelledby="works-heading">
-          <h2 id="works-heading" class="tk-label">Works</h2>
-          <div id="works-list" class="tk-works-panel"></div>
-        </section>
-
-        <!-- Time and the action that consumes it stay together. The action row
-             remains hidden until the state-specific prerequisites are met. -->
-        <section id="timepicker-container" aria-labelledby="time-heading">
-          <h2 id="time-heading" class="tk-label">Time</h2>
-          <div class="tk-time-panel">
-            <div class="tk-time-control-row">
-              <div id="task-start-time" class="tk-time-context hidden">
-                <div>
-                  <span class="mb-1 block text-xs font-medium text-muted">Start time</span>
-                  <span id="task-start-time-value" class="tk-time-context-value tabular"></span>
-                </div>
-                <span class="tk-time-context-arrow" aria-hidden="true">&rarr;</span>
+        <div class="p-5">
+          <div class="tk-time-control-row">
+            <div id="task-start-time" class="tk-time-context hidden">
+              <div>
+                <span class="mb-1 block text-xs font-medium text-muted">Start time</span>
+                <span id="task-start-time-value" class="tk-time-context-value tabular"></span>
               </div>
-
-              <button
-                type="button"
-                id="recent-task-end-time"
-                class="tk-previous-time hidden rounded-lg border px-3 py-1.5 text-left transition-colors"
-                title="Click to use this time"
-              >
-                <div class="text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-faint">Previous end</div>
-                <div class="tabular text-sm font-semibold leading-tight text-text" id="recent-task-time-value"></div>
-              </button>
-
-              <div class="tk-time-field">
-                <label id="time-field-label" for="timepicker" class="mb-1 block text-xs font-medium text-muted">Time</label>
-                <input
-                  type="text"
-                  id="timepicker"
-                  class="tk-input tk-time w-full py-2 text-center text-2xl font-semibold tracking-[-0.01em]"
-                />
-              </div>
-
-              <button type="button" id="current-time-button" class="tk-btn tk-btn-secondary">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M12 7v5l3 2" />
-                </svg>
-                Now
-              </button>
-
-              <div id="time-actions" class="hidden flex-wrap items-center justify-end gap-2">
-                <span class="tk-action-control hidden">
-                  <button id="start-button" class="tk-btn tk-btn-primary tk-btn-lg" aria-describedby="start-button-tooltip">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <polygon points="6 4 19 12 6 20 6 4" fill="currentColor" stroke="none" />
-                    </svg>
-                    Start task
-                  </button>
-                  <span id="start-button-tooltip" class="tk-action-tooltip" role="tooltip"></span>
-                </span>
-
-                <span class="tk-action-control hidden">
-                  <button id="complete-button" class="tk-btn tk-btn-primary tk-btn-lg" aria-describedby="complete-button-tooltip">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M20 6L9 17l-5-5" />
-                    </svg>
-                    Complete task
-                  </button>
-                  <span id="complete-button-tooltip" class="tk-action-tooltip" role="tooltip"></span>
-                </span>
-
-                <span class="tk-action-control hidden">
-                  <button id="start-day-button" class="tk-btn tk-btn-primary tk-btn-lg" aria-describedby="start-day-button-tooltip">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <rect x="3" y="5" width="18" height="16" rx="2" />
-                      <path d="M16 3v4M8 3v4M3 11h18" />
-                    </svg>
-                    Start day
-                  </button>
-                  <span id="start-day-button-tooltip" class="tk-action-tooltip" role="tooltip"></span>
-                </span>
-
-                <span class="tk-action-control hidden">
-                  <button id="end-day-button" class="tk-btn tk-btn-secondary tk-btn-lg" aria-describedby="end-day-button-tooltip">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
-                    </svg>
-                    End day
-                  </button>
-                  <span id="end-day-button-tooltip" class="tk-action-tooltip" role="tooltip"></span>
-                </span>
-              </div>
+              <span class="tk-time-context-arrow" aria-hidden="true">&rarr;</span>
             </div>
 
-            <div id="lowestTimeAllowed" class="tk-time-guidance tabular text-xs text-faint"></div>
-
-            <div
-              id="task-duration-preview"
-              class="tk-task-duration-preview hidden"
-              role="status"
-              aria-live="polite"
+            <button
+              type="button"
+              id="recent-task-end-time"
+              class="tk-previous-time hidden rounded-lg border px-3 py-1.5 text-left transition-colors"
+              title="Click to use this time"
             >
-              <div class="tk-task-duration-metric">
-                <span class="tk-task-duration-label">Actual</span>
-                <span id="task-actual-duration-value" class="tabular font-semibold text-text"></span>
-              </div>
+              <div class="text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-faint">Previous end</div>
+              <div class="tabular text-sm font-semibold leading-tight text-text" id="recent-task-time-value"></div>
+            </button>
+
+            <div class="tk-time-field">
+              <label id="time-field-label" for="timepicker" class="mb-1 block text-xs font-medium text-muted">Time</label>
+              <input
+                type="text"
+                id="timepicker"
+                class="tk-input tk-time w-full py-2 text-center text-2xl font-semibold tracking-[-0.01em]"
+              />
+            </div>
+
+            <button type="button" id="current-time-button" class="tk-btn tk-btn-secondary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+              Now
+            </button>
+
+            <div id="time-actions" class="hidden flex-wrap items-center justify-end gap-2">
+              <span class="tk-action-control hidden">
+                <button id="start-button" class="tk-btn tk-btn-primary tk-btn-lg" aria-describedby="start-button-tooltip">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="6 4 19 12 6 20 6 4" fill="currentColor" stroke="none" />
+                  </svg>
+                  Start task
+                </button>
+                <span id="start-button-tooltip" class="tk-action-tooltip" role="tooltip"></span>
+              </span>
+
+              <span class="tk-action-control hidden">
+                <button id="complete-button" class="tk-btn tk-btn-primary tk-btn-lg" aria-describedby="complete-button-tooltip">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20 6L9 17l-5-5" />
+                  </svg>
+                  Complete task
+                </button>
+                <span id="complete-button-tooltip" class="tk-action-tooltip" role="tooltip"></span>
+              </span>
+
+              <span class="tk-action-control hidden">
+                <button id="start-day-button" class="tk-btn tk-btn-primary tk-btn-lg" aria-describedby="start-day-button-tooltip">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="5" width="18" height="16" rx="2" />
+                    <path d="M16 3v4M8 3v4M3 11h18" />
+                  </svg>
+                  Start day
+                </button>
+                <span id="start-day-button-tooltip" class="tk-action-tooltip" role="tooltip"></span>
+              </span>
+
+              <span class="tk-action-control hidden">
+                <button id="end-day-button" class="tk-btn tk-btn-secondary tk-btn-lg" aria-describedby="end-day-button-tooltip">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
+                  </svg>
+                  End day
+                </button>
+                <span id="end-day-button-tooltip" class="tk-action-tooltip" role="tooltip"></span>
+              </span>
             </div>
           </div>
-        </section>
-      </div>
 
-      <!-- Re-opening is the only action that exists after the Time section is
-           gone, so it keeps a separate ended-state footer. -->
-      <div id="ended-day-actions" class="tk-card-footer hidden">
-        <div class="flex justify-end">
-          <button id="reopen-day-button" class="tk-btn tk-btn-warn tk-btn-lg hidden">
+          <div id="lowestTimeAllowed" class="tk-time-guidance tabular text-xs text-faint"></div>
+
+          <div
+            id="task-duration-preview"
+            class="tk-task-duration-preview hidden"
+            role="status"
+            aria-live="polite"
+          >
+            <div class="tk-task-duration-metric">
+              <span class="tk-task-duration-label">Actual</span>
+              <span id="task-actual-duration-value" class="tabular font-semibold text-text"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Every other section is hidden once the day is ended, so re-opening gets
+           a card of its own rather than a footer hanging off an empty one. -->
+      <section id="ended-day-actions" class="tk-card hidden" aria-labelledby="day-ended-heading">
+        <div class="tk-card-header">
+          <h2 class="tk-card-title" id="day-ended-heading">Day ended</h2>
+        </div>
+
+        <div class="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <p class="text-sm text-muted">Today is closed. Re-open it to record more time against today.</p>
+          <button id="reopen-day-button" class="tk-btn tk-btn-warn tk-btn-lg hidden flex-shrink-0">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 12a9 9 0 109-9 9 9 0 00-6.36 2.64L3 8" />
               <path d="M3 3v5h5" />
@@ -160,8 +195,8 @@
             Re-open day
           </button>
         </div>
-      </div>
-    </section>
+      </section>
+    </div>
   </div>
 {% endblock %}
 

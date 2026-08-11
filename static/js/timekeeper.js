@@ -1079,7 +1079,14 @@ export class TimeKeeperIndex extends TimeKeeper {
 
             // If successful, show a success message
             this.showToast('Day reopened successfully', 'success');
+
+            // Retire the whole ended-day card, not just its button. The next
+            // await is a round trip, and hiding only the button would leave a
+            // card headed "Day ended" — with copy saying so — sitting above a
+            // day that has just been re-opened. updateButtonVisibility settles
+            // both again once the state below is known.
             this.reopenDayButton.style.display = 'none';
+            this.endedDayActions.classList.add('hidden');
 
             // Check for unfinished tasks
             const tasks = await this.fetchFromAPI('/unfinished_tasks');
