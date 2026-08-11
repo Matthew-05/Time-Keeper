@@ -10,6 +10,7 @@ import {
     meter,
     paceNote,
     percent,
+    policyHours,
     shortDate,
     statusInsight,
 } from './budget_render.js'
@@ -45,7 +46,7 @@ const FILTERS = {
 
 const INSIGHTS = {
     used: '',
-    currentPace: 'End total implied by your current average pace. It stays informational until at least 20% of the working period and five working days have elapsed. Days off and held days are excluded.',
+    currentPace: 'End total implied by your current average pace. It stays informational until 20% of the working period has elapsed and the budget is five working days into its period — calendar working days, not days you recorded time on. Days off and held days are excluded from both counts.',
     dailyAverage: 'Average hours used per elapsed working day. Days off and held days are excluded.',
 }
 
@@ -186,9 +187,13 @@ class Budgets extends TimeKeeper {
         const overBudget = active.filter((b) => b.status === 'over')
 
         document.getElementById('overview-count').textContent = active.length
-        document.getElementById('overview-budgeted').textContent = hours(budgeted)
+        document.getElementById('overview-budgeted').textContent = policyHours(budgeted)
+        // Printed on the rounding grid rather than to one decimal: every hour
+        // in this total was already rounded per client-day by the policy, so a
+        // 15-minute policy makes 3.25 the true figure and "3.3" a number that
+        // nothing in the app could have produced.
         document.getElementById('overview-used').textContent =
-            `${hours(used)}${budgeted ? ` · ${percent((used / budgeted) * 100)}` : ''}`
+            `${policyHours(used)}${budgeted ? ` · ${percent((used / budgeted) * 100)}` : ''}`
 
         const atRiskEl = document.getElementById('overview-at-risk')
         atRiskEl.textContent = atRisk.length
@@ -277,7 +282,7 @@ class Budgets extends TimeKeeper {
 
             <div class="mb-2 flex items-baseline justify-between gap-3">
               <span class="tabular text-sm font-semibold text-text">
-                ${budgetDuration(budget, 'used_hours', 'used_seconds', { exact: budget.status === 'over' })}<span class="font-normal text-faint"> / ${hours(budget.budgeted_hours)} hrs.</span>
+                ${budgetDuration(budget, 'used_hours', 'used_seconds', { exact: budget.status === 'over' })}<span class="font-normal text-faint"> / ${policyHours(budget.budgeted_hours)} hrs.</span>
               </span>
               <span class="tabular text-sm font-semibold" style="color: var(--status-text)">${percent(budget.percent_used_exact ?? budget.percent_used)}</span>
             </div>
@@ -360,7 +365,7 @@ class Budgets extends TimeKeeper {
                 return
             }
             this.unbudgetedNote.innerHTML =
-                `<span class="tabular font-semibold text-text">${hours(loose)} hrs.</span>`
+                `<span class="tabular font-semibold text-text">${policyHours(loose)} hrs.</span>`
                 + ' recorded for this client fall outside every budget.'
             this.unbudgetedNote.classList.remove('hidden')
         } catch (error) {
@@ -657,7 +662,7 @@ class Budgets extends TimeKeeper {
           <div class="tk-budget-card border-0 p-0 shadow-none" data-status="${detail.status}">
             <div class="mb-2 flex items-baseline justify-between gap-3">
               <span class="tabular text-lg font-semibold text-text">
-                ${budgetDuration(detail, 'used_hours', 'used_seconds', { exact: detail.status === 'over' })}<span class="font-normal text-faint"> / ${hours(detail.budgeted_hours)} hrs.</span>
+                ${budgetDuration(detail, 'used_hours', 'used_seconds', { exact: detail.status === 'over' })}<span class="font-normal text-faint"> / ${policyHours(detail.budgeted_hours)} hrs.</span>
               </span>
               <div class="flex items-center gap-1.5">
                 <span class="tk-badge tk-badge-status">${STATUS_LABEL[detail.status]}</span>
@@ -684,7 +689,7 @@ class Budgets extends TimeKeeper {
             (<span class="tabular">${hours(detail.total_capacity_hours)}</span> hrs).
             ${
                 detail.required_hours_per_day != null && detail.required_hours_per_day >= 0
-                    ? `From tomorrow you have <span class="tabular font-semibold text-text">${hours(detail.required_hours_per_day)}</span> hrs/day to play with.`
+                    ? `From tomorrow you have <span class="tabular font-semibold text-text">${policyHours(detail.required_hours_per_day, { direction: 'down' })}</span> hrs/day to play with.`
                     : ''
             }
           </p>
@@ -785,7 +790,7 @@ class Budgets extends TimeKeeper {
         const heldWarning =
             detail.held_hours > 0.05
                 ? `<p class="mt-2 text-xs" style="color: var(--warn)">
-                     ${hours(detail.held_hours)} hrs. were recorded on days this project was on hold.
+                     ${policyHours(detail.held_hours)} hrs. were recorded on days this project was on hold.
                      They still count — check the dates below.
                    </p>`
                 : ''

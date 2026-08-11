@@ -33,6 +33,83 @@ export function hours(value) {
 }
 
 /**
+ * The global rounding policy, or null when rounding is off.
+ *
+ * Read from the document on each call rather than captured at import time:
+ * this module is loaded directly by the Node-based formatting tests, where
+ * there is no document at all.
+ */
+export function roundingPolicy() {
+    if (typeof document === 'undefined') return null
+    const root = document.documentElement?.dataset
+    if (!root || root.roundingEnabled !== 'true') return null
+    const interval = Number(root.roundingIntervalMinutes)
+    if (!Number.isInteger(interval) || interval < 1 || interval > 60) return null
+    return { intervalMinutes: interval }
+}
+
+/**
+ * How far off the interval a figure may sit and still count as on it.
+ *
+ * Purely a float guard: 3.25 arriving out of a division as 3.2499999996 is on
+ * the quarter-hour grid in every sense that matters, and without a tolerance
+ * `floor()` would drag it a whole interval down to 3. At a quarter-hour
+ * interval this is worth about a hundredth of a second, so nothing real fits
+ * inside it.
+ */
+const GRID_TOLERANCE = 1e-6
+
+/**
+ * Two decimals, only as many as the number needs: 3.5 stays "3.5", 2.25 stays
+ * "2.25", 7 stays "7".
+ *
+ * Two is both the house precision for a policy-rounded figure and what the
+ * server rounds to. An interval that isn't a clean fraction of an hour — seven
+ * minutes, say — can't be printed exactly at any width, so there is nothing to
+ * gain from going wider.
+ */
+function twoDecimals(value) {
+    return Number(Number(value).toFixed(2)).toString()
+}
+
+/**
+ * Hours printed against the rounding policy's grid.
+ *
+ * `hours()` shows one decimal, which under a 15-minute policy renders 3.25 as
+ * "3.3" — a figure the policy could never have produced. Anything derived from
+ * policy-rounded time gets printed here instead. With rounding disabled there
+ * is no grid to print against and this is just `hours()`.
+ *
+ * By default nothing is moved that isn't already on the grid. A figure that
+ * came out of the policy — used time, and anything a whole commitment is
+ * subtracted from — lands on an interval to within float noise and prints
+ * exactly. One that genuinely doesn't (remaining against an odd commitment, a
+ * half-minute destination share) is printed as it stands rather than dragged
+ * onto a grid it was never on, because a displayed figure that no arithmetic
+ * on this page produces is worse than an awkward one.
+ *
+ * `direction` opts into real snapping, and exists for advice rather than for
+ * totals: a remaining-pace figure rounds down so it never authorises more than
+ * the budget holds, and an overage rounds up so it never flatters one.
+ */
+export function policyHours(value, { direction = null } = {}) {
+    if (value == null || Number.isNaN(Number(value))) return '—'
+    const policy = roundingPolicy()
+    if (!policy) return hours(value)
+
+    const step = policy.intervalMinutes / 60
+    const units = Number(value) / step
+
+    if (direction === 'down') return twoDecimals(Math.floor(units + GRID_TOLERANCE) * step)
+    if (direction === 'up') return twoDecimals(Math.ceil(units - GRID_TOLERANCE) * step)
+
+    const nearest = Math.round(units)
+    return Math.abs(units - nearest) < GRID_TOLERANCE
+        ? twoDecimals(nearest * step)
+        : twoDecimals(value)
+}
+
+/**
  * A duration that preserves the ledger's whole-second apportionment.
  *
  * Destination shares can legitimately contain half-minutes (for example, a
@@ -58,7 +135,22 @@ export function exactDurationSeconds(value) {
     return parts.join(' ')
 }
 
-/** Summary duration that keeps familiar decimal hours unless exactness matters. */
+/**
+ * Summary duration that keeps familiar decimal hours unless exactness matters.
+ *
+ * Decimal hours go through `policyHours` rather than `hours`: every figure this
+ * renders is either policy-rounded time or a commitment with policy-rounded
+ * time taken out of it, so under a 15-minute policy a quarter-hour has to read
+ * "3.25" and not "3.3".
+ *
+ * `exact` asks for the whole-second form — "3h 15m" — and only survives while
+ * rounding is switched off. That form exists because an overage of a few
+ * seconds is real when time is recorded raw, and decimal hours would round it
+ * away into a figure that reads as exactly on budget next to an Over badge.
+ * With a policy in force there is no such overage to hide: every figure here
+ * is already a whole number of intervals, so the h/m form says nothing the
+ * decimal doesn't and says it in a second format, in a card full of decimals.
+ */
 export function budgetDuration(
     budget,
     hoursField,
@@ -71,8 +163,8 @@ export function budgetDuration(
         seconds = 0
         value = 0
     }
-    if (exact && seconds != null) return exactDurationSeconds(seconds)
-    return `${hours(value)} hrs.`
+    if (exact && seconds != null && !roundingPolicy()) return exactDurationSeconds(seconds)
+    return `${policyHours(value)} hrs.`
 }
 
 /** A percentage with no decimal — nothing here is precise enough to warrant one. */
@@ -121,7 +213,7 @@ export function dateRange(budget) {
  */
 export function headline(budget) {
     if (budget.status === 'upcoming') {
-        return `Starts ${shortDate(budget.start_date)} · ${hours(budget.budgeted_hours)} hrs. budgeted`
+        return `Starts ${shortDate(budget.start_date)} · ${policyHours(budget.budgeted_hours)} hrs. budgeted`
     }
 
     if (budget.status === 'over') {
@@ -149,8 +241,8 @@ export function headline(budget) {
         }
         const left = budget.remaining_hours
         return left >= 0
-            ? `Finished ${hours(left)} hrs. under budget`
-            : `Finished ${hours(-left)} hrs. over budget`
+            ? `Finished ${policyHours(left)} hrs. under budget`
+            : `Finished ${policyHours(-left)} hrs. over budget`
     }
 
     if (budget.status === 'at_risk') {
@@ -180,7 +272,7 @@ export function meterBreakdown(budget, { showPeriodMarker = true } = {}) {
         row(
             'Used',
             `${budgetDuration(budget, 'used_hours', 'used_seconds', { exact: isOver })}`
-            + ` of ${hours(budget.budgeted_hours)} hrs.`
+            + ` of ${policyHours(budget.budgeted_hours)} hrs.`
         ),
         row('Share used', percent(budget.percent_used_exact ?? budget.percent_used)),
         !hasRemaining
@@ -242,7 +334,7 @@ export function statusInsight(budget) {
         'Used',
         `${budgetDuration(budget, 'used_hours', 'used_seconds',
                           { exact: budget.status === 'over' })}`
-        + ` of ${hours(budget.budgeted_hours)} hrs.`
+        + ` of ${policyHours(budget.budgeted_hours)} hrs.`
     )
     const shareUsed = row(
         'Share used', percent(budget.percent_used_exact ?? budget.percent_used)
@@ -258,14 +350,16 @@ export function statusInsight(budget) {
     // history looks exactly like one built on thirty.
     const immature = budget.projected_hours != null && !budget.projection_mature
         ? note('The projection stays an early estimate until 20% of the working '
-               + 'period and five working days have elapsed.')
+               + 'period has elapsed and the budget is five working days into '
+               + 'its period. Both count working days on the calendar, not days '
+               + 'you recorded time on.')
         : ''
 
     if (budget.status === 'over') {
         return insight(
             heading('Over budget'),
             used,
-            row('Committed', `${hours(budget.budgeted_hours)} hrs.`),
+            row('Committed', `${policyHours(budget.budgeted_hours)} hrs.`),
             row('Over by',
                 budgetDuration(budget, 'over_by', 'over_by_seconds', { exact: true })),
             shareUsed,
@@ -287,8 +381,9 @@ export function statusInsight(budget) {
                 : row('Over commitment by', `${hours(budget.projected_overage)} hrs.`),
             threshold,
             note('This is about pace, not what has been spent — the budget is not '
-                 + 'over yet. Warnings begin only after 20% of the working period '
-                 + 'and five working days have elapsed.'),
+                 + 'over yet. Warnings begin only once 20% of the working period '
+                 + 'has elapsed and the budget is five working days into its '
+                 + 'period — calendar working days, not days with time recorded.'),
             immature,
         )
     }
@@ -352,7 +447,11 @@ export function paceNote(budget) {
     if (budget.required_hours_per_day == null) return null
 
     if (budget.required_hours_per_day < 0) {
-        return `${hours(-budget.required_hours_per_day)} hrs/day over for the rest`
+        // Away from zero: an overage snapped down reads as a smaller problem
+        // than it is.
+        return `${policyHours(-budget.required_hours_per_day, { direction: 'up' })} hrs/day over for the rest`
     }
-    return `${hours(budget.required_hours_per_day)} hrs/day left to stay on budget`
+    // Down, because this is an allowance. Snapped up, it would quietly
+    // authorise a quarter of an hour a day the budget doesn't hold.
+    return `${policyHours(budget.required_hours_per_day, { direction: 'down' })} hrs/day left to stay on budget`
 }

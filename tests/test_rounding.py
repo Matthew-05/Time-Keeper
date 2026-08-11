@@ -834,6 +834,97 @@ class BudgetDurationFormattingTests(unittest.TestCase):
         self.assertIn('Period elapsed 50%.', values[7])
         self.assertNotIn(' | ', values[7])
 
+    @unittest.skipUnless(shutil.which('node'), 'Node.js is required for JS formatting test')
+    def test_policy_hours_prints_on_the_rounding_grid(self):
+        """Figures derived from rounded time must print on the interval.
+
+        One decimal renders a quarter-hour as "3.3", a figure the 15-minute
+        policy could never have produced. Only as many decimals as the number
+        needs, though: 3.5 must not become "3.50".
+
+        Nothing is snapped by default — a figure that isn't on the grid is
+        printed as it stands rather than moved onto one it was never on. The
+        pace sentence opts into snapping and is directional with it: an
+        allowance rounds down and an overage rounds up, so neither flatters the
+        budget.
+        """
+        script = """
+            import { pathToFileURL } from 'node:url';
+            const { budgetDuration, paceNote, policyHours } = await import(
+                pathToFileURL('./static/js/budget_render.js').href
+            );
+            const setPolicy = (enabled, interval) => {
+                globalThis.document = { documentElement: { dataset: {
+                    roundingEnabled: enabled,
+                    roundingIntervalMinutes: String(interval),
+                } } };
+            };
+            const pace = (value) => paceNote(
+                { status: 'on_track', required_hours_per_day: value }
+            );
+
+            setPolicy('true', 15);
+            const quarters = [
+                policyHours(3.25),
+                policyHours(3.5),
+                policyHours(7),
+                // Off the grid: printed as it stands, not dragged onto one.
+                policyHours(3.2666),
+                // A grid value arriving with division noise must not be
+                // dragged a whole interval by the downward snap.
+                policyHours(3.2499999996, { direction: 'down' }),
+                policyHours(3.2666, { direction: 'down' }),
+                policyHours(3.2666, { direction: 'up' }),
+                policyHours(null),
+                pace(3.2666),
+                pace(-1.1),
+                // The per-budget Used figure and its denominator.
+                budgetDuration(
+                    { used_hours: 3.25, used_seconds: 11700 },
+                    'used_hours', 'used_seconds'
+                ),
+                // An over-budget card asks for the exact whole-second form.
+                // Under a policy there are no stray seconds for it to rescue,
+                // so it must stay decimal rather than turn into "41h 30m" in
+                // the middle of a card of decimals.
+                budgetDuration(
+                    { used_hours: 41.5, used_seconds: 149400 },
+                    'used_hours', 'used_seconds', { exact: true }
+                ),
+            ];
+
+            setPolicy('true', 6);
+            const sixths = [policyHours(3.3), policyHours(3.2666, { direction: 'down' })];
+
+            setPolicy('false', 15);
+            const off = [policyHours(3.2666), pace(3.2666)];
+
+            process.stdout.write(JSON.stringify([quarters, sixths, off]));
+        """
+        result = subprocess.run(
+            [shutil.which('node'), '--input-type=module', '--eval', script],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        quarters, sixths, off = json.loads(result.stdout)
+
+        self.assertEqual(
+            quarters,
+            [
+                '3.25', '3.5', '7', '3.27', '3.25', '3.25', '3.5', '—',
+                '3.25 hrs/day left to stay on budget',
+                '1.25 hrs/day over for the rest',
+                '3.25 hrs.',
+                '41.5 hrs.',
+            ],
+        )
+        self.assertEqual(sixths, ['3.3', '3.2'])
+        # With rounding off there is no grid, so the house one-decimal form
+        # stands and the sentence is unchanged.
+        self.assertEqual(off, ['3.3', '3.3 hrs/day left to stay on budget'])
+
 
 if __name__ == '__main__':
     unittest.main()

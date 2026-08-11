@@ -6,6 +6,7 @@ import {
     hours,
     meter,
     percent,
+    policyHours,
     shortDate,
     statusInsight,
 } from './budget_render.js'
@@ -122,7 +123,7 @@ export class BudgetWidget {
 
             <div class="mt-1.5 flex items-baseline justify-between gap-2 text-xs">
               <span class="tabular text-muted">
-                ${budgetDuration(budget, 'used_hours', 'used_seconds', { exact: budget.status === 'over' })} / ${hours(budget.budgeted_hours)} hrs.
+                ${budgetDuration(budget, 'used_hours', 'used_seconds', { exact: budget.status === 'over' })} / ${policyHours(budget.budgeted_hours)} hrs.
                 <span class="text-faint">· to ${shortDate(budget.end_date)}</span>
               </span>
               <span class="flex-shrink-0 text-right" style="color: var(--status-text)">
