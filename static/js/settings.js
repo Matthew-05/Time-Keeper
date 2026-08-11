@@ -1,6 +1,7 @@
 import { TimeKeeper, ready } from './base.js'
 import { applyTheme, currentMode } from './theme.js'
 import { applyTimeFormat, currentTimeFormat } from './time_format.js'
+import { applyWeekStart, currentWeekStart } from './week_start.js'
 import { SaveChangesBar } from './save_changes.js'
 
 /**
@@ -24,6 +25,7 @@ class Settings extends TimeKeeper {
         super()
         this.themeGroup = document.getElementById('theme-mode')
         this.timeFormatGroup = document.getElementById('time-format')
+        this.weekStartGroup = document.getElementById('week-start')
 
         this.roundingToggle = document.getElementById('rounding-enabled')
         this.roundingOptions = document.getElementById('rounding-options')
@@ -47,6 +49,7 @@ class Settings extends TimeKeeper {
         this.saved = {
             theme: currentMode(),
             time_format: currentTimeFormat(),
+            week_start: currentWeekStart(),
             rounding_enabled: this.roundingToggle.getAttribute('aria-checked') === 'true',
             rounding_interval_minutes: Number(this.roundingIntervalInput.value),
             rounding_direction: document.documentElement.dataset.roundingDirection,
@@ -64,6 +67,7 @@ class Settings extends TimeKeeper {
     init() {
         this.initTheme()
         this.initTimeFormat()
+        this.initWeekStart()
         this.initRounding()
         this.initReminders()
         this.initDevTools()
@@ -155,6 +159,53 @@ class Settings extends TimeKeeper {
         applyTimeFormat(timeFormat)
         this.markTimeFormatSelected(timeFormat)
         this.stage('time_format', timeFormat)
+    }
+
+    // -- week start --------------------------------------------------------
+
+    initWeekStart() {
+        this.markWeekStartSelected(currentWeekStart())
+
+        this.weekStartGroup.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-week-start-option]')
+            if (!button) return
+            this.setWeekStart(button.dataset.weekStartOption)
+        })
+
+        this.weekStartGroup.addEventListener('keydown', (event) => {
+            if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(event.key)) return
+            const options = [
+                ...this.weekStartGroup.querySelectorAll('[data-week-start-option]'),
+            ]
+            const index = options.findIndex(
+                (button) => button.dataset.weekStartOption === currentWeekStart()
+            )
+            const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
+            const next = options[(index + step + options.length) % options.length]
+            event.preventDefault()
+            next.focus()
+            this.setWeekStart(next.dataset.weekStartOption)
+        })
+    }
+
+    markWeekStartSelected(weekStart) {
+        this.weekStartGroup.querySelectorAll('[data-week-start-option]').forEach((button) => {
+            const selected = button.dataset.weekStartOption === weekStart
+            button.classList.toggle('active', selected)
+            button.setAttribute('aria-checked', selected ? 'true' : 'false')
+            button.tabIndex = selected ? 0 : -1
+        })
+    }
+
+    setWeekStart(weekStart) {
+        if (weekStart === currentWeekStart()) return
+        // Nothing on this page shows a calendar, so there is nothing to
+        // repaint; applying it keeps `currentWeekStart()` honest for the
+        // comparison above and for a rollback. Calendars elsewhere read the
+        // stored value when the page that hosts them loads.
+        applyWeekStart(weekStart)
+        this.markWeekStartSelected(weekStart)
+        this.stage('week_start', weekStart)
     }
 
     // -- rounding ---------------------------------------------------------
@@ -463,6 +514,8 @@ class Settings extends TimeKeeper {
         this.markThemeSelected(state.theme)
         applyTimeFormat(state.time_format)
         this.markTimeFormatSelected(state.time_format)
+        applyWeekStart(state.week_start)
+        this.markWeekStartSelected(state.week_start)
         this.markRoundingEnabled(state.rounding_enabled)
         this.roundingIntervalInput.value = String(state.rounding_interval_minutes)
         this.markRoundingInterval(state.rounding_interval_minutes)

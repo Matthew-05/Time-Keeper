@@ -5,6 +5,16 @@
 {% endblock %}
 
 {% block content %}
+  {#
+    Weekday numbers are ISO everywhere they are stored or sent — Monday is 0 —
+    and that is what `data-weekday` / `data-calendar-weekday` carry. `week_start`
+    only decides the order the seven buttons appear in, so a Sunday start puts
+    day 6 first without renumbering anything. Rendered server-side, like the
+    theme, so the strip is already in the right order on first paint.
+  #}
+  {% set weekday_labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
+  {% set weekday_order = [6, 0, 1, 2, 3, 4, 5] if settings.week_start == 'sunday' else [0, 1, 2, 3, 4, 5, 6] %}
+
   <div class="tk-page">
     <div class="tk-page-header">
       <div>
@@ -32,8 +42,8 @@
         <div>
           <span class="tk-label">Usual workdays</span>
           <div id="calendar-workdays" class="tk-day-toggle-group" role="group" aria-label="Usual workdays">
-            {% for short in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
-              <button type="button" class="tk-day-toggle" data-weekday="{{ loop.index0 }}" aria-pressed="false" disabled>{{ short }}</button>
+            {% for day in weekday_order %}
+              <button type="button" class="tk-day-toggle" data-weekday="{{ day }}" aria-pressed="false" disabled>{{ weekday_labels[day] }}</button>
             {% endfor %}
           </div>
         </div>
@@ -58,8 +68,8 @@
         <div class="p-3 sm:p-5">
           <div class="tk-work-calendar">
             <div id="calendar-weekday-headers" class="tk-work-calendar-weekdays" role="group" aria-label="Select a weekday in this month">
-              {% for short in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
-                <button type="button" data-calendar-weekday="{{ loop.index0 }}" aria-pressed="false" title="Select every {{ short }} in this month">{{ short }}</button>
+              {% for day in weekday_order %}
+                <button type="button" data-calendar-weekday="{{ day }}" aria-pressed="false" title="Select every {{ weekday_labels[day] }} in this month">{{ weekday_labels[day] }}</button>
               {% endfor %}
             </div>
             <div id="work-calendar-grid" class="tk-work-calendar-grid" role="grid" aria-label="Work capacity calendar"></div>

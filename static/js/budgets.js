@@ -16,6 +16,7 @@ import {
     statusInsight,
 } from './budget_render.js'
 import { formatClockTime } from './time_format.js'
+import { flatpickrCalendarOptions } from './week_start.js'
 import { heading, insight, note, row, section } from './insight.js'
 
 /**
@@ -408,7 +409,7 @@ class Budgets extends TimeKeeper {
 
         // Capacity context updates as you pick, so an unrealistic figure is
         // obvious before it's saved rather than after it's blown.
-        this.rangePicker = flatpickr(this.fields.range, {
+        this.rangePicker = flatpickr(this.fields.range, flatpickrCalendarOptions({
             mode: 'range',
             dateFormat: 'Y-m-d',
             showMonths: 2,
@@ -436,7 +437,7 @@ class Budgets extends TimeKeeper {
                 const end = new Date(y, m - 1 + 1, d - 1)
                 this.rangePicker.setDate([selectedDates[0], end], true)
             },
-        })
+        }))
         this.fields.hours.addEventListener('input', () => this.updateCapacityHint())
     }
 
@@ -930,7 +931,7 @@ class Budgets extends TimeKeeper {
         this.editingHold = null
         this.holdRange = { start: '', end: '' }
 
-        this.holdPicker = flatpickr(this.detailBody.querySelector('#hold-range'), {
+        this.holdPicker = flatpickr(this.detailBody.querySelector('#hold-range'), flatpickrCalendarOptions({
             mode: 'range',
             dateFormat: 'Y-m-d',
             showMonths: 2,
@@ -945,7 +946,7 @@ class Budgets extends TimeKeeper {
                 this.holdRange.start = dates[0] ? this.toISO(dates[0]) : ''
                 this.holdRange.end = dates[1] ? this.toISO(dates[1]) : ''
             },
-        })
+        }))
 
         this.detailBody
             .querySelector('#add-hold')

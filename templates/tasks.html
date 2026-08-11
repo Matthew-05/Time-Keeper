@@ -61,6 +61,7 @@
   <script type="module">
     import { TimeKeeper } from "{{ url_for('static', filename='js/base.js') }}"
     import { formatClockTime, serializeClockTime } from "{{ url_for('static', filename='js/time_format.js') }}"
+    import { flatpickrCalendarOptions } from "{{ url_for('static', filename='js/week_start.js') }}"
 
     const tk = new TimeKeeper()
     const tbody = document.getElementById('task-table-body')
@@ -108,11 +109,11 @@
       }
     }
 
-    const picker = flatpickr('#task-date', {
+    const picker = flatpickr('#task-date', flatpickrCalendarOptions({
       dateFormat: 'Y-m-d',
       defaultDate: new Date(),
       onChange: (_dates, dateStr) => load(dateStr),
-    })
+    }))
 
     load(picker.input.value)
 

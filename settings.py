@@ -33,6 +33,9 @@ SETTINGS_PATH = os.path.join(USER_DATA_DIR, 'settings.json')
 
 THEME_CHOICES = ('light', 'dark', 'auto')
 TIME_FORMAT_CHOICES = ('12h', '24h')
+# Which day a calendar grid starts on. Purely presentational: weekday *numbers*
+# stay ISO throughout (Monday is 0) wherever they are stored or compared.
+WEEK_START_CHOICES = ('sunday', 'monday')
 ROUNDING_DIRECTION_CHOICES = ('nearest', 'up', 'down')
 ROUNDING_INTERVAL_MIN = 1
 ROUNDING_INTERVAL_MAX = 60
@@ -241,6 +244,9 @@ _SCHEMA = {
     # How clock times are presented in the UI. API and database values remain
     # canonical 24-hour clock strings regardless of this display preference.
     'time_format': ('12h', _validate_choice(TIME_FORMAT_CHOICES)),
+    # Which column every calendar grid and date picker starts on. Display only:
+    # it never moves a date, and `work_days` stays Monday-indexed regardless.
+    'week_start': ('sunday', _validate_choice(WEEK_START_CHOICES)),
     # One policy controls reports, History, Today, and budget allocation. It is
     # intentionally not effective-dated: changes recalculate historical time.
     'rounding_enabled': (True, _validate_bool),

@@ -10,6 +10,7 @@ import {
     serializeClockTime,
     visTimelineTimeFormat,
 } from './time_format.js';
+import { flatpickrCalendarOptions } from './week_start.js';
 
 /**
  * Collapse touching task ranges for the same active client into one visual
@@ -76,11 +77,11 @@ export class TaskBrowser extends TimeKeeper {
         this.originalStartTime = '';
         this.originalEndTime = '';
         
-        this.datePicker = flatpickr(this.selectedDate, {
+        this.datePicker = flatpickr(this.selectedDate, flatpickrCalendarOptions({
             defaultDate: new Date(),
             dateFormat: "Y-m-d",
             onChange: () => this.fetchTasks()
-        });
+        }));
 
         // Prev/next day buttons
         this.prevDayBtn = document.getElementById('prev-day-btn');
@@ -916,12 +917,12 @@ export class TaskBrowser extends TimeKeeper {
     }
 
     initializeTimePicker() {
-        this.timePicker = flatpickr(this.selectedDate, {
+        this.timePicker = flatpickr(this.selectedDate, flatpickrCalendarOptions({
             enableTime: false,
             dateFormat: "Y-m-d",
             defaultDate: new Date(),
             onChange: () => this.fetchTasks()
-        });
+        }));
     }
 
     async checkDayStatus() {

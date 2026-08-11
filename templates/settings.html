@@ -56,6 +56,28 @@
           </div>
         </div>
       </div>
+
+      <div class="border-t border-border p-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <span class="tk-label mb-0.5 block">Week starts on</span>
+            <p class="text-sm text-muted">
+              Which column every calendar and date picker begins with. Display only &mdash; it
+              doesn't change your workdays or any total.
+            </p>
+          </div>
+
+          <div
+            id="week-start"
+            class="tk-segmented flex-shrink-0"
+            role="radiogroup"
+            aria-label="First day of the week"
+          >
+            <button type="button" class="tk-segment" role="radio" aria-checked="false" data-week-start-option="sunday">Sunday</button>
+            <button type="button" class="tk-segment" role="radio" aria-checked="false" data-week-start-option="monday">Monday</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="tk-card mt-4">

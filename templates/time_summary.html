@@ -65,6 +65,7 @@
   <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.min.js') }}"></script>
   <script type="module">
     import { ready, clientColor, formatDecimalHours, formatDurationMinutes } from "{{ url_for('static', filename='js/base.js') }}"
+    import { flatpickrCalendarOptions } from "{{ url_for('static', filename='js/week_start.js') }}"
 
     let chart
     let dailyChart
@@ -323,13 +324,13 @@
     // ready(), not DOMContentLoaded: this block is a module now, and modules are
     // deferred — a listener registered after the event has fired never runs.
     ready(() => {
-      flatpickr('#date-range', {
+      flatpickr('#date-range', flatpickrCalendarOptions({
         mode: 'range',
         dateFormat: 'Y-m-d',
         onChange: (selectedDates) => {
           if (selectedDates.length === 2) refreshCharts()
         },
-      })
+      }))
 
       document.querySelectorAll('.tk-segment').forEach((button) => {
         button.addEventListener('click', () => {

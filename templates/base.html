@@ -10,6 +10,7 @@
   class="h-full{% if settings.theme == 'dark' %} dark{% endif %}"
   data-theme-mode="{{ settings.theme }}"
   data-time-format="{{ settings.time_format }}"
+  data-week-start="{{ settings.week_start }}"
   data-rounding-enabled="{{ 'true' if settings.rounding_enabled else 'false' }}"
   data-rounding-interval-minutes="{{ settings.rounding_interval_minutes }}"
   data-rounding-direction="{{ settings.rounding_direction }}"

@@ -1,5 +1,6 @@
 import { TimeKeeper, ready } from './base.js'
 import { SaveChangesBar } from './save_changes.js'
+import { daysSinceWeekStart, isoWeekday } from './week_start.js'
 
 const MONTH_FORMAT = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' })
 const RANGE_FORMAT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
@@ -23,18 +24,18 @@ function addDays(value, amount) {
     return next
 }
 
-function weekdayNumber(value) {
-    return (value.getDay() + 6) % 7
-}
-
+/* The grid always renders whole weeks, so it runs from the start of the week
+   containing the 1st to the end of the week containing the last day. Which
+   weekday that is depends on the week-start preference; the weekday *numbers*
+   used everywhere else remain ISO. */
 function startOfCalendar(month) {
     const first = new Date(month.getFullYear(), month.getMonth(), 1)
-    return addDays(first, -((first.getDay() + 6) % 7))
+    return addDays(first, -daysSinceWeekStart(first))
 }
 
 function endOfCalendar(month) {
     const last = new Date(month.getFullYear(), month.getMonth() + 1, 0)
-    return addDays(last, 6 - ((last.getDay() + 6) % 7))
+    return addDays(last, 6 - daysSinceWeekStart(last))
 }
 
 class WorkCalendar extends TimeKeeper {
@@ -243,7 +244,7 @@ class WorkCalendar extends TimeKeeper {
         const end = this.selectionEnd || this.selectionStart
         if (key < this.selectionStart || key > end) return false
         if (this.selectionWeekdays === null) return true
-        return this.selectionWeekdays.includes(weekdayNumber(localDate(key)))
+        return this.selectionWeekdays.includes(isoWeekday(localDate(key)))
     }
 
     renderWeekdayHeaders() {
@@ -579,7 +580,7 @@ class WorkCalendar extends TimeKeeper {
         const end = localDate(this.selectionEnd || this.selectionStart)
         let count = 0
         for (let day = localDate(this.selectionStart); day <= end; day = addDays(day, 1)) {
-            if (this.selectionWeekdays === null || this.selectionWeekdays.includes(weekdayNumber(day))) {
+            if (this.selectionWeekdays === null || this.selectionWeekdays.includes(isoWeekday(day))) {
                 count++
             }
         }
