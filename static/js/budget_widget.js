@@ -125,7 +125,11 @@ export class BudgetWidget {
 
             ${meter(budget, { large: true })}
 
-            <div class="mt-1.5 flex items-baseline justify-between gap-2 text-xs">
+            <!-- items-center, not items-baseline: the right-hand side is text
+                 for one status, a badge for another and either of those plus a
+                 circled-i, and an icon has no baseline worth aligning to. The
+                 identity row above is two pieces of text and keeps its. -->
+            <div class="mt-1.5 flex items-center justify-between gap-2 text-xs">
               <span class="tabular text-muted">
                 ${budgetDuration(budget, 'used_hours', 'used_seconds', { exact: budget.status === 'over' })} / ${policyHours(budget.budgeted_hours)} hrs.
                 <span class="text-faint">· to ${shortDate(budget.end_date)}</span>

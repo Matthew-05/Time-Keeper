@@ -73,6 +73,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.endedDayActions = document.getElementById('ended-day-actions');
         this.timePicker = document.getElementById('timepicker');
         this.currentTimeButton = document.getElementById('current-time-button');
+        this.clearTimeButton = document.getElementById('clear-time-button');
         this.taskStartTimeDisplay = document.getElementById('task-start-time');
         this.taskStartTimeValue = document.getElementById('task-start-time-value');
         this.taskDurationPreview = document.getElementById('task-duration-preview');
@@ -275,6 +276,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.completeButton.addEventListener('click', () => this.completeTask());
         this.reopenDayButton.addEventListener('click', () => this.handleReopenDay());
         this.currentTimeButton.addEventListener('click', () => this.setCurrentTime());
+        this.clearTimeButton.addEventListener('click', () => this.clearTime());
         this.recentTaskEndTime.addEventListener('click', () => this.useRecentTaskEndTime());
         this.timePicker.addEventListener('input', () => this.syncContextualActions());
         this.timePicker.addEventListener('change', () => this.syncContextualActions());
@@ -308,6 +310,11 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.timePickerInstance.setDate(now, true);
         this.syncContextualActions();
         this.showToast('Time set to current time', 'success');
+    }
+
+    clearTime() {
+        this.timePickerInstance.clear();
+        this.syncContextualActions();
     }
 
     async updateRecentTaskEndTime() {
@@ -947,6 +954,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         contextualButtons.forEach(button => configureButton(button));
 
         const hasTime = Boolean(this.timePicker.value.trim());
+        this.clearTimeButton.classList.toggle('hidden', !hasTime);
         const selectedClient = this.autocomplete
             ? this.autocomplete.getValue(true)
             : this.clientInput.value;
