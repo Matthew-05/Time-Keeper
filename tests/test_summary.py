@@ -9,6 +9,12 @@ this module exists to prevent.
 The rest guard the empty and boundary cases the dashboard actually meets: a
 range with nothing in it, a day worked outside the schedule, a range that runs
 into the future, and a weekday filter that selects nothing.
+
+`TotalsTests` goes through `summary.elapsed` first, because the overview
+endpoint does and the two together are the unit the page actually sees.
+Everything there takes an explicit `today` for that reason: with the cut in
+place almost every figure moves as the range fills in, and a test that let
+`date.today()` decide would pass or fail depending on the day it was run.
 """
 
 import unittest
@@ -175,6 +181,28 @@ class ClientRollupTests(unittest.TestCase):
         self.assertIsNone(client['share_percent'])
 
 
+class ElapsedTests(unittest.TestCase):
+    """The cut every figure on the dashboard is taken after."""
+
+    def test_today_is_kept_and_tomorrow_is_not(self):
+        rows = build({})
+        kept = summary.elapsed(rows, today=TUESDAY)
+        self.assertEqual([row['date'] for row in kept], ['2026-08-10', '2026-08-11'])
+
+    def test_a_range_entirely_ahead_leaves_nothing(self):
+        self.assertEqual(summary.elapsed(build({}), today=date(2026, 8, 1)), [])
+
+    def test_a_range_entirely_past_is_untouched(self):
+        rows = build({})
+        self.assertEqual(summary.elapsed(rows, today=date(2027, 1, 1)), rows)
+
+    def test_the_rows_themselves_are_not_copied(self):
+        # The overview hands the same list to the rollup, the totals and the
+        # payload; they must all be looking at one set of objects.
+        rows = build({('Acme', MONDAY): 3600})
+        self.assertIs(summary.elapsed(rows, today=SUNDAY)[0], rows[0])
+
+
 class TotalsTests(unittest.TestCase):
     def setUp(self):
         self.rows = build({
@@ -182,31 +210,57 @@ class TotalsTests(unittest.TestCase):
             ('Globex', MONDAY): 4 * 3600,
             ('Acme', TUESDAY): 45 * 60,
         })
-        self.clients = summary.client_rollup(self.rows)
 
-    def totals(self, today=TUESDAY):
-        return summary.totals(self.rows, self.clients, today=today)
+    def totals(self, rows=None, today=SUNDAY):
+        """What `/api/summary/overview` computes: cut to elapsed, then roll up.
 
-    def test_utilisation_measures_against_elapsed_capacity(self):
+        `today` defaults to the end of the range, so a test that isn't about
+        the cut sees the whole week and reads as it did before there was one.
+        """
+        rows = self.rows if rows is None else rows
+        elapsed = summary.elapsed(rows, today=today)
+        return summary.totals(elapsed, summary.client_rollup(elapsed), selected=rows)
+
+    def test_every_figure_stops_at_today(self):
         # Mon–Sun holds five 8-hour workdays, but only two have elapsed by
         # Tuesday. 7.75 billable over 16 elapsed hours is 48.4%, not the 19.4%
         # that measuring against the whole week would give.
-        totals = self.totals()
-        self.assertEqual(totals['capacity_hours'], 40.0)
-        self.assertEqual(totals['elapsed_capacity_hours'], 16.0)
-        self.assertEqual(totals['elapsed_workdays'], 2)
+        totals = self.totals(today=TUESDAY)
+        self.assertEqual(totals['capacity_hours'], 16.0)
+        self.assertEqual(totals['workdays'], 2)
+        self.assertEqual(totals['days_in_range'], 2)
         self.assertEqual(totals['utilisation_percent'], 48.4)
+
+    def test_the_selection_is_reported_beside_the_elapsed_part(self):
+        # Context for the "2 of 7 days" label, and the only place the days
+        # ahead are counted at all.
+        totals = self.totals(today=TUESDAY)
+        self.assertEqual(totals['days_selected'], 7)
+        self.assertEqual(totals['workdays_selected'], 5)
+        # Nothing ahead: the two pairs agree, and the label says "7 days".
+        whole = self.totals()
+        self.assertEqual(whole['days_selected'], whole['days_in_range'])
+        self.assertEqual(whole['workdays_selected'], whole['workdays'])
+
+    def test_selected_defaults_to_the_rows_given(self):
+        totals = summary.totals(self.rows, [])
+        self.assertEqual(totals['days_selected'], 7)
 
     def test_today_counts_as_fully_elapsed(self):
         # Time recorded this morning is already in the numerator, so today's
         # capacity has to be in the denominator too.
-        self.assertEqual(summary.totals(self.rows, self.clients, today=MONDAY)
-                         ['elapsed_capacity_hours'], 8.0)
+        self.assertEqual(self.totals(today=MONDAY)['capacity_hours'], 8.0)
 
-    def test_a_range_entirely_in_the_future_has_no_utilisation(self):
-        totals = summary.totals(self.rows, self.clients, today=date(2026, 8, 1))
-        self.assertEqual(totals['elapsed_capacity_hours'], 0.0)
+    def test_a_range_entirely_in_the_future_is_empty_rather_than_zero(self):
+        totals = self.totals(today=date(2026, 8, 1))
+        self.assertEqual(totals['capacity_hours'], 0.0)
+        self.assertEqual(totals['days_in_range'], 0)
+        self.assertEqual(totals['days_selected'], 7)
         self.assertIsNone(totals['utilisation_percent'])
+        self.assertIsNone(totals['avg_vs_capacity_percent'])
+        # The days are ahead, not unworked — nothing may be attributed to them.
+        self.assertEqual(totals['billable_hours'], 0.0)
+        self.assertEqual(totals['days_worked'], 0)
 
     def test_days_worked_counts_days_with_tracked_time(self):
         totals = self.totals()
@@ -215,8 +269,7 @@ class TotalsTests(unittest.TestCase):
         self.assertEqual(totals['workdays'], 5)
 
     def test_a_day_that_rounds_away_still_counts_as_worked(self):
-        rows = build({('Acme', MONDAY): 60})
-        totals = summary.totals(rows, summary.client_rollup(rows), today=TUESDAY)
+        totals = self.totals(build({('Acme', MONDAY): 60}))
         self.assertEqual(totals['billable_hours'], 0)
         self.assertEqual(totals['days_worked'], 1)
         self.assertEqual(totals['avg_billable_per_worked_day'], 0.0)
@@ -225,13 +278,12 @@ class TotalsTests(unittest.TestCase):
         # 45 minutes is exact; 3h and 4h are exact. Nothing moves.
         self.assertEqual(self.totals()['rounding_delta_hours'], 0.0)
         # 50 minutes rounds down to 45, giving away five minutes.
-        rows = build({('Acme', MONDAY): 50 * 60})
-        delta = summary.totals(rows, summary.client_rollup(rows))['rounding_delta_hours']
-        self.assertLess(delta, 0)
+        self.assertLess(
+            self.totals(build({('Acme', MONDAY): 50 * 60}))['rounding_delta_hours'], 0
+        )
         # 8 minutes rounds up to 15, billing seven that weren't tracked.
-        rows = build({('Acme', MONDAY): 8 * 60})
         self.assertGreater(
-            summary.totals(rows, summary.client_rollup(rows))['rounding_delta_hours'], 0
+            self.totals(build({('Acme', MONDAY): 8 * 60}))['rounding_delta_hours'], 0
         )
 
     def test_active_days_are_workdays_plus_any_other_day_billed(self):
@@ -240,49 +292,41 @@ class TotalsTests(unittest.TestCase):
         self.assertEqual(self.totals()['avg_billable_per_active_day'], 1.55)
 
     def test_a_billed_weekend_joins_the_average(self):
-        rows = build({('Acme', MONDAY): 8 * 3600, ('Acme', SATURDAY): 4 * 3600})
-        totals = summary.totals(rows, summary.client_rollup(rows))
+        totals = self.totals(build({
+            ('Acme', MONDAY): 8 * 3600, ('Acme', SATURDAY): 4 * 3600,
+        }))
         # Five workdays plus the Saturday, not the whole seven-day week.
         self.assertEqual(totals['active_days'], 6)
         self.assertEqual(totals['avg_billable_per_active_day'], 2.0)
 
     def test_an_empty_weekend_never_joins_the_average(self):
-        rows = build({('Acme', MONDAY): 5 * 3600})
-        totals = summary.totals(rows, summary.client_rollup(rows))
+        totals = self.totals(build({('Acme', MONDAY): 5 * 3600}))
         self.assertEqual(totals['active_days'], 5)
         self.assertEqual(totals['avg_billable_per_active_day'], 1.0)
 
     def test_a_non_working_day_that_rounds_away_is_not_active(self):
         # One tracked minute on a Saturday rounds to nothing billable, so the
         # day contributes no numerator and must not widen the denominator.
-        rows = build({('Acme', SATURDAY): 60})
-        totals = summary.totals(rows, summary.client_rollup(rows))
-        self.assertEqual(totals['active_days'], 5)
+        self.assertEqual(self.totals(build({('Acme', SATURDAY): 60}))['active_days'], 5)
 
     def test_a_range_of_only_empty_non_working_days_has_no_average(self):
-        rows = build({}, start=SATURDAY, end=SUNDAY)
-        totals = summary.totals(rows, [])
+        totals = self.totals(build({}, start=SATURDAY, end=SUNDAY))
         self.assertEqual(totals['active_days'], 0)
         self.assertEqual(totals['avg_billable_per_active_day'], 0.0)
 
-    def test_the_average_ignores_where_today_falls(self):
-        # Unlike utilisation, this one describes the range, not progress
-        # through it — so it must not move as the week goes on.
-        for today in (MONDAY, SUNDAY, date(2027, 1, 1)):
-            with self.subTest(today=today):
-                self.assertEqual(
-                    summary.totals(self.rows, self.clients, today=today)
-                    ['avg_billable_per_active_day'],
-                    1.55,
-                )
+    def test_the_average_moves_as_the_range_elapses(self):
+        # It used to describe the whole range and stay put. It now describes
+        # what has happened, which is the point: 7.75 hours over the two days
+        # that exist so far, not spread across five that mostly don't.
+        self.assertEqual(self.totals(today=TUESDAY)['avg_billable_per_active_day'], 3.88)
+        self.assertEqual(self.totals(today=SUNDAY)['avg_billable_per_active_day'], 1.55)
 
     def test_busiest_day_is_the_largest_billable_day(self):
         self.assertEqual(self.totals()['busiest_day'],
                          {'date': '2026-08-10', 'billable_hours': 7.0})
 
     def test_an_empty_range_has_no_busiest_day_and_no_top_share(self):
-        rows = build({})
-        totals = summary.totals(rows, summary.client_rollup(rows))
+        totals = self.totals(build({}))
         self.assertIsNone(totals['busiest_day'])
         self.assertIsNone(totals['top_client_share_percent'])
         self.assertEqual(totals['client_count'], 0)
@@ -290,6 +334,82 @@ class TotalsTests(unittest.TestCase):
 
     def test_amount_and_currency_fields_ship_null(self):
         self.assertIsNone(self.totals()['billable_amount'])
+
+
+class AverageAgainstCapacityTests(unittest.TestCase):
+    """The average billed day as a share of the average scheduled day."""
+
+    def totals(self, rows, today=SUNDAY):
+        elapsed = summary.elapsed(rows, today=today)
+        return summary.totals(elapsed, summary.client_rollup(elapsed), selected=rows)
+
+    def test_capacity_per_workday_is_a_mean_of_the_elapsed_workdays(self):
+        totals = self.totals(build({}), today=TUESDAY)
+        self.assertEqual(totals['capacity_hours'], 16.0)
+        self.assertEqual(totals['avg_capacity_per_workday'], 8.0)
+
+    def test_a_full_schedule_reads_as_one_hundred_percent(self):
+        rows = build({('Acme', day): 8 * 3600 for day in (
+            MONDAY, TUESDAY, date(2026, 8, 12), date(2026, 8, 13), date(2026, 8, 14),
+        )})
+        self.assertEqual(self.totals(rows)['avg_vs_capacity_percent'], 100.0)
+
+    def test_weekend_work_pulls_it_down_where_it_pushes_utilisation_up(self):
+        # 12 hours over six active days is 2.0 a day, against an 8-hour
+        # scheduled day: 25%. Utilisation sees the same 12 hours against the
+        # week's 40 and reads 30%. The gap is the Saturday, which adds a day to
+        # the average without adding any capacity to divide by.
+        totals = self.totals(build({
+            ('Acme', MONDAY): 8 * 3600, ('Acme', SATURDAY): 4 * 3600,
+        }))
+        self.assertEqual(totals['avg_vs_capacity_percent'], 25.0)
+        self.assertEqual(totals['utilisation_percent'], 30.0)
+
+    def test_the_two_agree_when_nothing_was_worked_off_schedule(self):
+        totals = self.totals(build({('Acme', MONDAY): 10 * 3600}))
+        self.assertEqual(totals['avg_vs_capacity_percent'], totals['utilisation_percent'])
+
+    def test_no_workdays_means_no_ratio_rather_than_zero(self):
+        totals = self.totals(build({('Acme', SATURDAY): 3600}, start=SATURDAY, end=SUNDAY))
+        self.assertEqual(totals['avg_capacity_per_workday'], 0.0)
+        self.assertIsNone(totals['avg_vs_capacity_percent'])
+
+
+class NonWorkingDayTests(unittest.TestCase):
+    """Time billed on days the schedule never asked for."""
+
+    def totals(self, rows, today=SUNDAY):
+        elapsed = summary.elapsed(rows, today=today)
+        return summary.totals(elapsed, summary.client_rollup(elapsed), selected=rows)
+
+    def test_only_non_working_days_are_counted(self):
+        off = self.totals(build({
+            ('Acme', MONDAY): 8 * 3600,
+            ('Acme', SATURDAY): 4 * 3600,
+            ('Globex', SUNDAY): 90 * 60,
+        }))['non_working']
+        self.assertEqual(off['billable_hours'], 5.5)
+        self.assertEqual(off['days'], 2)
+        self.assertEqual(off['days_worked'], 2)
+
+    def test_an_untouched_weekend_reports_zero_across_its_days(self):
+        off = self.totals(build({('Acme', MONDAY): 8 * 3600}))['non_working']
+        self.assertEqual(off['billable_hours'], 0.0)
+        self.assertEqual(off['days'], 2)
+        self.assertEqual(off['days_worked'], 0)
+
+    def test_a_day_that_rounds_away_was_still_worked(self):
+        off = self.totals(build({('Acme', SATURDAY): 60}))['non_working']
+        self.assertEqual(off['billable_hours'], 0.0)
+        self.assertAlmostEqual(off['tracked_hours'], 0.02, places=2)
+        self.assertEqual(off['days_worked'], 1)
+
+    def test_a_weekend_still_ahead_is_not_counted(self):
+        off = self.totals(build({('Acme', MONDAY): 8 * 3600}), today=TUESDAY)['non_working']
+        self.assertEqual(off['days'], 0)
+
+    def test_the_amount_ships_null_like_every_other_figure(self):
+        self.assertIsNone(self.totals(build({}))['non_working']['billable_amount'])
 
 
 class ParseWindowTests(unittest.TestCase):

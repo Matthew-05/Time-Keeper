@@ -26,6 +26,17 @@ Figures also travel as exact ``*_seconds`` alongside the two-decimal
 loses up to half a minute per client per day: two seven-minute entries are
 0.12 hrs each on screen but 0.23 hrs together, not 0.24, and over a month that
 drift is large enough to see.
+
+**The dashboard describes elapsed time only.** ``day_rows`` still returns every
+date in the window — the calendar grid needs a cell for each — but the overview
+cuts that to ``elapsed()`` before rolling anything up, so the trend chart, the
+client table and every figure in ``totals`` are all about days that have
+actually happened. A Wednesday should not read as a third of a week wasted
+because Thursday and Friday haven't arrived; that reading was already special-
+cased for utilisation, and applying it everywhere is the only way the cards
+agree with each other. Today counts as elapsed: time recorded this morning is
+already in the numerator, so leaving today's capacity out of the denominator
+would flatter every reading until midnight.
 """
 
 from datetime import date, timedelta
@@ -141,23 +152,37 @@ def client_rollup(rows):
     return rollup
 
 
-def totals(rows, clients, today=None):
-    """The KPI strip, from the same rows every card below it uses.
+def elapsed(rows, today=None):
+    """``rows`` cut to the days that have actually happened, today included.
 
-    Utilisation measures against *elapsed* capacity rather than the range's
-    whole capacity, for the same reason `budgets.summarise` does: a range
-    running to Friday would otherwise read as 40% utilised on the Tuesday and
-    look like a crisis every Monday morning. Today counts as elapsed — time
-    recorded this morning is already in the numerator, so leaving today's
-    capacity out of the denominator would flatter every reading until midnight.
+    Applied once, by the caller, before anything is rolled up — the alternative
+    is every function here taking a ``today`` and each deciding for itself what
+    counts, which is exactly how two cards on one page start to disagree.
+
+    Not applied to the calendar's rows: that grid goes on painting amounts for
+    dates outside the selection, and a month with days left in it should still
+    draw the whole month.
     """
     today = (today or date.today()).isoformat()
+    return [row for row in rows if row['date'] <= today]
+
+
+def totals(rows, clients, selected=None):
+    """The KPI strip, from the same rows every card below it uses.
+
+    ``rows`` has already been through `elapsed()`, so every figure below
+    describes the part of the range that has happened and none of them need to
+    know today's date. ``selected`` is the range *before* that cut, and is used
+    for nothing but saying how much of the selection is still ahead — the
+    difference between "3 days" and "3 of 7 days" is the whole reason a
+    Wednesday reading doesn't look like a bad week.
+    """
+    selected = rows if selected is None else selected
 
     billable_seconds = sum(row['billable_seconds'] for row in rows)
     tracked_seconds = sum(row['tracked_seconds'] for row in rows)
     capacity = round(sum(row['capacity_hours'] for row in rows), 2)
-    elapsed = [row for row in rows if row['date'] <= today]
-    elapsed_capacity = round(sum(row['capacity_hours'] for row in elapsed), 2)
+    workdays = sum(1 for row in rows if row['is_workday'])
     # "Worked" is any day with time on it, not any day with billable hours: a
     # ten-minute entry that rounds down to zero was still a day at the desk.
     worked = [row for row in rows if row['tracked_seconds'] > 0]
@@ -170,13 +195,23 @@ def totals(rows, clients, today=None):
     # only by days worked answers a different question, and
     # `avg_billable_per_worked_day` above already answers that one.
     #
-    # The numerator stays the range's whole billable total, which is the same
-    # thing as the total across these days — a day outside the set is by
-    # definition a non-working day with nothing billed on it.
+    # The numerator stays the elapsed billable total, which is the same thing as
+    # the total across these days — a day outside the set is by definition a
+    # non-working day with nothing billed on it.
     active = [
         row for row in rows
         if row['is_workday'] or row['billable_seconds'] > 0
     ]
+
+    # Time billed on days the schedule never asked for. Counted separately
+    # rather than folded into utilisation, because a Saturday adds to the
+    # numerator without adding any capacity to the denominator: without this
+    # figure beside it, weekend work reads as a productive week rather than as
+    # a week that spilled.
+    off_days = [row for row in rows if not row['is_workday']]
+    off_billable = sum(row['billable_seconds'] for row in off_days)
+    off_tracked = sum(row['tracked_seconds'] for row in off_days)
+    off_worked = [row for row in off_days if row['tracked_seconds'] > 0]
 
     return {
         'billable_hours': billable,
@@ -188,14 +223,16 @@ def totals(rows, clients, today=None):
         # billed that wasn't tracked; negative is tracked time given away.
         'rounding_delta_hours': round((billable_seconds - tracked_seconds) / 3600, 2),
         'capacity_hours': capacity,
-        'elapsed_capacity_hours': elapsed_capacity,
         'utilisation_percent': (
-            round(billable_seconds / 3600 / elapsed_capacity * 100, 1)
-            if elapsed_capacity else None
+            round(billable_seconds / 3600 / capacity * 100, 1)
+            if capacity else None
         ),
-        'workdays': sum(1 for row in rows if row['is_workday']),
-        'elapsed_workdays': sum(1 for row in elapsed if row['is_workday']),
+        'workdays': workdays,
         'days_in_range': len(rows),
+        # The selection as clicked, elapsed or not. Context for a label, never
+        # a denominator.
+        'days_selected': len(selected),
+        'workdays_selected': sum(1 for row in selected if row['is_workday']),
         'days_worked': len(worked),
         'avg_billable_per_worked_day': (
             round(billable_seconds / len(worked) / 3600, 2) if worked else 0.0
@@ -204,6 +241,25 @@ def totals(rows, clients, today=None):
         'avg_billable_per_active_day': (
             round(billable_seconds / len(active) / 3600, 2) if active else 0.0
         ),
+        # A mean, because capacity moves across a range whenever an override
+        # does — so the pair below is "a typical day billed" against "a typical
+        # day scheduled" rather than two figures for one particular day.
+        'avg_capacity_per_workday': round(capacity / workdays, 2) if workdays else 0.0,
+        # Those two as a ratio. Deliberately *not* the same question as
+        # utilisation: this one divides by the average scheduled day, so a
+        # weekend that was worked pulls it down (one more day billed, no more
+        # capacity) where it pushes utilisation up. The two agreeing means
+        # nothing was worked off-schedule.
+        'avg_vs_capacity_percent': (
+            round(billable_seconds / len(active) / 3600 / (capacity / workdays) * 100, 1)
+            if active and workdays and capacity else None
+        ),
+        'non_working': _figures({
+            'billable_seconds': off_billable,
+            'tracked_seconds': off_tracked,
+            'days': len(off_days),
+            'days_worked': len(off_worked),
+        }),
         'busiest_day': {
             'date': busiest['date'],
             'billable_hours': busiest['billable_hours'],

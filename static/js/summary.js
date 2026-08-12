@@ -12,6 +12,14 @@
  * disagreeing with the total above it is the fastest way to make the whole page
  * untrustworthy.
  *
+ * That payload is already cut to the elapsed part of the range — `days` holds
+ * no date past today and every figure in `totals` is taken over those days
+ * alone. Nothing here re-filters or compensates for it: the selection can run
+ * to Sunday while the page describes Monday to Wednesday, and the only place
+ * that difference is visible is the labels, which say which of the two they
+ * mean. The calendar grid is the exception and keeps painting every date,
+ * because it is a calendar.
+ *
  * Budgets are the one exception, and deliberately so: `/api/budgets` already
  * returns every budget with its live figures, and those figures are the
  * budget's own lifetime totals, not the range's. They don't change when the
@@ -35,6 +43,7 @@ import {
     dateRange,
     escapeAttribute,
     headline,
+    insightIcon,
     insightIconInline,
     meter,
     percent,
@@ -42,6 +51,7 @@ import {
     shortDate,
     statusInsight,
 } from './budget_render.js'
+import { insight, note, row } from './insight.js'
 
 /** "Fri, 7 Aug 2026" — for a tooltip, where there's room to be unambiguous. */
 function longDate(iso) {
@@ -387,20 +397,34 @@ class SummaryDashboard extends TimeKeeper {
         this.renderBudgets()
     }
 
+    /**
+     * The badge and meta line beside the calendar.
+     *
+     * The badge counts the selection, elapsed or not — it describes what was
+     * clicked, and a range that shrank the moment you picked it would be
+     * baffling. When part of that selection is still ahead it says so as
+     * "3 of 7 days", which is the one place on the page the gap between the
+     * two is stated outright, and the thing that explains why every figure
+     * below describes less than the range appears to cover.
+     */
     renderSelectionHeader() {
         setText(document.getElementById('summary-selection-label'), this.calendar.label())
+        const totals = this.overview?.totals
         const count = this.calendar.selectedDateKeys().length
+        const elapsed = totals?.days_in_range ?? count
         setText(
             document.getElementById('summary-selection-count'),
-            `${count} ${count === 1 ? 'day' : 'days'}`,
+            elapsed < count
+                ? `${elapsed} of ${count} days`
+                : `${count} ${count === 1 ? 'day' : 'days'}`,
         )
 
-        const totals = this.overview?.totals
         setText(
             document.getElementById('summary-selection-meta'),
             totals
                 ? `${totals.workdays} ${totals.workdays === 1 ? 'workday' : 'workdays'}`
                     + ` · ${totals.days_worked} worked`
+                    + (totals.days_in_range < totals.days_selected ? ' · so far' : '')
                 : ' ',
         )
     }
@@ -425,15 +449,17 @@ class SummaryDashboard extends TimeKeeper {
         )
         setText(
             document.getElementById('kpi-utilisation-note'),
-            totals.elapsed_capacity_hours
-                ? `of ${this.hours(totals.elapsed_capacity_hours, { compact: true })} capacity so far`
+            totals.capacity_hours
+                ? `of ${this.hours(totals.capacity_hours, { compact: true })} capacity`
+                    + (totals.days_in_range < totals.days_selected ? ' so far' : '')
                 : 'no working days yet',
         )
 
         setText(document.getElementById('kpi-days'), String(totals.days_worked))
         setText(
             document.getElementById('kpi-days-note'),
-            `of ${totals.workdays} ${totals.workdays === 1 ? 'workday' : 'workdays'} in range`,
+            `of ${totals.workdays} ${totals.workdays === 1 ? 'workday' : 'workdays'}`
+                + (totals.workdays < totals.workdays_selected ? ' so far' : ' in range'),
         )
 
         setText(
@@ -458,7 +484,7 @@ class SummaryDashboard extends TimeKeeper {
     }
 
     /**
-     * Billable against capacity for the range.
+     * Billable against the capacity that has elapsed.
      *
      * Deliberately uncoloured: unlike a budget, there is no such thing as a
      * correct utilisation, and painting 120% red would be inventing a judgement
@@ -476,11 +502,13 @@ class SummaryDashboard extends TimeKeeper {
         setText(document.getElementById('summary-capacity-percent'), percent(used))
         setText(
             document.getElementById('summary-capacity-note'),
-            totals.elapsed_capacity_hours
-                ? `${this.amount(totals)} of ${this.hours(totals.elapsed_capacity_hours)} `
-                    + `across ${totals.elapsed_workdays} elapsed `
-                    + `${totals.elapsed_workdays === 1 ? 'workday' : 'workdays'}`
-                : 'No working days have elapsed in this range.',
+            totals.capacity_hours
+                ? `${this.amount(totals)} of ${this.hours(totals.capacity_hours)} `
+                    + `across ${totals.workdays} elapsed `
+                    + `${totals.workdays === 1 ? 'workday' : 'workdays'}`
+                : totals.days_in_range
+                    ? 'No working days have elapsed in this range.'
+                    : 'This range hasn\'t started yet.',
         )
     }
 
@@ -521,7 +549,8 @@ class SummaryDashboard extends TimeKeeper {
      *
      * `--accent` and `--muted` were dropped from here when the bars went
      * per-client and the legend went away — they were the single bar colour and
-     * the legend's label colour, and nothing else asked for either.
+     * the legend's label colour, and nothing else asked for either. `--surface`
+     * went the same way with the hairline between stacked segments.
      */
     tokens() {
         const css = getComputedStyle(document.documentElement)
@@ -530,7 +559,6 @@ class SummaryDashboard extends TimeKeeper {
             text: read('--text'),
             faint: read('--faint'),
             border: read('--border'),
-            surface: read('--surface'),
         }
     }
 
@@ -581,9 +609,13 @@ class SummaryDashboard extends TimeKeeper {
      * holidays, nothing else.
      *
      * That leaves the visible bars identical to the set the average is taken
-     * over (`totals.active_days`), which is why the line always sits where it
-     * looks like it should. Turning the switch on adds empty days around it and
-     * does not move it.
+     * over (`totals.active_days`), which is why the figure always reads as the
+     * bars look. Turning the switch on adds empty days around it and does not
+     * move it.
+     *
+     * `overview.days` arrives already cut to the elapsed range, so the switch
+     * can't reveal a day that hasn't happened — an empty Friday column on a
+     * Wednesday would be indistinguishable from a Friday nobody worked.
      */
     trendDays() {
         const days = this.overview.days
@@ -595,13 +627,17 @@ class SummaryDashboard extends TimeKeeper {
         const days = this.trendDays()
         const body = document.getElementById('summary-trend-body')
 
-        // Reachable: a weekend selected on its own with nothing logged has no
-        // day left to plot once the empties are hidden.
+        // Both reachable: a weekend selected on its own with nothing logged has
+        // no day left to plot once the empties are hidden, and a range picked
+        // entirely in the future has no elapsed day to plot at all.
         if (!days.length) {
             this.charts.trend?.destroy()
             this.charts.trend = null
             setHtml(body, '<div class="tk-empty flex h-full items-center justify-center">'
-                + 'Nothing to plot — this range is all non-working days with no time on them.</div>')
+                + (this.overview.totals.days_in_range
+                    ? 'Nothing to plot — this range is all non-working days with no time on them.'
+                    : 'Nothing to plot yet — this range is still ahead.')
+                + '</div>')
             return
         }
 
@@ -617,10 +653,14 @@ class SummaryDashboard extends TimeKeeper {
            so the hover gets it for free — no hand-built afterBody listing the
            split under a single-colour bar.
 
-           A hairline in the card colour between segments, because two clients
-           whose hashed hues land near each other would otherwise read as one
-           tall block. Only the outer edges are rounded: rounding every segment
-           turns a stack into a column of separate pills. */
+           No border between segments. There was a hairline in the card colour,
+           on the theory that two clients whose hashed hues land near each other
+           would read as one block; in practice it cut a gap through every bar
+           and the stack read as a dashed column rather than a day. The colours
+           carry the split on their own, and the hover names them exactly.
+
+           Only the outer edges are rounded: rounding every segment turns a
+           stack into a column of separate pills. */
         const datasets = groups.map((group) => ({
             label: group.label,
             data: days.map((day) => round2(
@@ -636,11 +676,7 @@ class SummaryDashboard extends TimeKeeper {
             // the two reference lines below each need a key of their own.
             stack: 'clients',
             backgroundColor: group.colour,
-            borderColor: token.surface,
-            // Scriptable, because a zero-height segment still strokes its
-            // border — and with a client per dataset that would lay a hairline
-            // across the axis on every day nobody worked that client.
-            borderWidth: (ctx) => (ctx.dataset.data[ctx.dataIndex] > 0 ? 1 : 0),
+            borderWidth: 0,
             borderRadius: 2,
             borderSkipped: false,
             maxBarThickness: 44,
@@ -814,46 +850,153 @@ class SummaryDashboard extends TimeKeeper {
     }
 
     /**
-     * The two figures that used to be lines across the plot.
+     * The three figures under the plot.
      *
-     * Both are range-level constants rather than anything that varies day to
-     * day, so they belong under the chart as numbers. Each states its own
-     * basis — the average especially, since the KPI strip carries a *different*
-     * average (per day worked) and the two would otherwise look like a
-     * contradiction.
+     * All three are range-level constants rather than anything that varies day
+     * to day, so they belong here as numbers rather than as rules across the
+     * chart. Each states its own basis — the average especially, since the KPI
+     * strip carries a *different* average (per day worked) and the two would
+     * otherwise look like a contradiction.
      */
     renderTrendStats() {
         const totals = this.overview.totals
         const average = totals.avg_billable_per_active_day
 
-        if (Number.isFinite(average)) {
+        if (Number.isFinite(average) && totals.active_days) {
             setText(document.getElementById('trend-average'),
                 `${this.amount({ billable_hours: average }, { compact: true })} / day`)
             setText(document.getElementById('trend-average-note'),
                 `over ${totals.active_days} ${totals.active_days === 1 ? 'day' : 'days'}`
                 + ' — workdays, plus any day billed')
+        } else if (Number.isFinite(average)) {
+            // A real payload with no day to average over: nothing has elapsed
+            // yet, or the selection is a weekend nobody worked. There is no
+            // average here, and "0h / day over 0 days" reads as a figure rather
+            // than as the absence of one — the same trap the stale branch below
+            // exists to avoid, arrived at from the other direction.
+            setText(document.getElementById('trend-average'), '—')
+            setText(document.getElementById('trend-average-note'),
+                totals.days_in_range
+                    ? 'No days billed or scheduled in this range'
+                    : 'This range is still ahead')
         } else {
-            // A stale Flask process: templates and static JS reload on their
-            // own in dev, but a change to summary.py needs the app restarting,
-            // so the page can be new while the payload is old.
             setText(document.getElementById('trend-average'), '—')
             setText(document.getElementById('trend-average-note'), ' ')
-            console.warn(
-                'Summary: totals.avg_billable_per_active_day is missing. '
-                + 'Restart the app if summary.py has changed.',
-            )
+            this.warnStale('avg_billable_per_active_day')
         }
 
-        // Capacity varies across a range whenever an override does, so the
-        // per-day figure is a mean and the note says what it's a mean of.
-        const perDay = totals.workdays ? totals.capacity_hours / totals.workdays : 0
-        setText(document.getElementById('trend-capacity'),
-            totals.workdays ? `${this.hours(perDay, { compact: true })} / day` : '—')
-        setText(document.getElementById('trend-capacity-note'),
-            totals.workdays
-                ? `${this.hours(totals.capacity_hours, { compact: true })} across `
-                    + `${totals.workdays} ${totals.workdays === 1 ? 'workday' : 'workdays'}`
-                : 'No working days in this range')
+        this.renderCapacityRatio()
+        this.renderNonWorkingStat()
+    }
+
+    /**
+     * A field the payload should have carried and didn't.
+     *
+     * Always a stale Flask process: templates and static JS reload on their own
+     * in dev, but a change to summary.py needs the app restarting, so the page
+     * can be new while the payload it's reading is old.
+     *
+     * Every caller pairs this with an em dash rather than a zero, which matters
+     * more than it looks: a missing capacity rendered as "0h / day" is a
+     * perfectly plausible reading of a real schedule, so it gets investigated
+     * as a capacity bug instead of as the restart it is.
+     */
+    warnStale(field) {
+        console.warn(
+            `Summary: totals.${field} is missing from the payload. `
+            + 'Restart the app if summary.py has changed.',
+        )
+    }
+
+    /**
+     * The average day against the scheduled day, as one percentage.
+     *
+     * Not the same question as the Utilisation card above, though the two agree
+     * whenever nothing was worked off-schedule. Utilisation divides the whole
+     * billable total by the whole elapsed capacity. This divides the average
+     * *billed* day by the average *scheduled* day, and those have different
+     * denominators the moment a weekend is worked: a Saturday is another day in
+     * the average without being another day of capacity, so it pulls this
+     * figure down while pushing utilisation up. That divergence is the useful
+     * part — read together, the pair says whether a good week was a good week
+     * or a week that spilled into the weekend.
+     *
+     * Which two averages those are is the only thing anyone needs to know about
+     * the number, so they go in the popover rather than in a note under it.
+     */
+    renderCapacityRatio() {
+        const totals = this.overview.totals
+        const ratio = totals.avg_vs_capacity_percent
+        const average = totals.avg_billable_per_active_day
+        const capacity = totals.avg_capacity_per_workday
+        const value = document.getElementById('trend-capacity')
+        const detail = document.getElementById('trend-capacity-note')
+        const icon = document.getElementById('trend-capacity-insight')
+
+        if (capacity == null) {
+            setText(value, '—')
+            setText(detail, ' ')
+            setHtml(icon, '')
+            this.warnStale('avg_capacity_per_workday')
+            return
+        }
+
+        setText(value, percent(ratio))
+
+        if (ratio == null) {
+            // No scheduled capacity to be a share of: a weekend picked on its
+            // own, a stretch of leave, or a range still ahead.
+            setText(detail, totals.days_in_range
+                ? 'No capacity scheduled in this range'
+                : 'This range is still ahead')
+            // And nothing for the popover to explain — it would name two
+            // averages that are both zero, contradicting the line above it.
+            setHtml(icon, '')
+            return
+        }
+
+        setText(detail, `${this.hours(average, { compact: true })} of `
+            + `${this.hours(capacity, { compact: true })} a day`)
+
+        setHtml(icon, insightIcon(
+            insight(
+                row('Average billed', `${this.hours(average, { compact: true })} / day`),
+                row('Average capacity', `${this.hours(capacity, { compact: true })} / day`),
+                note(`Billed over ${totals.active_days} active `
+                    + `${totals.active_days === 1 ? 'day' : 'days'}, scheduled over `
+                    + `${totals.workdays} ${totals.workdays === 1 ? 'workday' : 'workdays'}. `
+                    + 'Days still ahead are not counted.'),
+            ),
+            'Average against capacity',
+        ))
+    }
+
+    /**
+     * Time billed on days the schedule never asked for.
+     *
+     * Every other figure on the page treats a worked weekend as ordinary
+     * billable time — it is, and the invoice agrees — which leaves nothing
+     * saying the week ran over its own edges. This is that. It sits under the
+     * chart rather than in the strip because the bars it describes are right
+     * above it: the days with no capacity line under them.
+     */
+    renderNonWorkingStat() {
+        const off = this.overview.totals.non_working
+        const value = document.getElementById('trend-non-working')
+        const note_ = document.getElementById('trend-non-working-note')
+
+        if (!off) {
+            setText(value, '—')
+            setText(note_, ' ')
+            this.warnStale('non_working')
+            return
+        }
+
+        setText(value, this.amount(off, { compact: true }))
+        setText(note_, off.days_worked
+            ? `across ${off.days_worked} non-working `
+                + `${off.days_worked === 1 ? 'day' : 'days'}`
+            : 'no time on non-working days')
     }
 
     renderMixChart() {
@@ -926,10 +1069,17 @@ class SummaryDashboard extends TimeKeeper {
         })
     }
 
+    /* Five columns whether rounding is on or not. There used to be a sixth
+       holding each client's unrounded "Logged" figure, which is the one number
+       here nobody bills and nobody reconciles against — the range-level
+       rounding delta in the KPI strip already says what the policy is worth,
+       and it says it in one figure rather than a column of near-duplicates of
+       the column beside it. */
+    static COLUMNS = 5
+
     renderClientTable() {
         const clients = this.sortedClients()
         const body = document.getElementById('summary-client-rows')
-        const columns = this.roundingEnabled ? 6 : 5
 
         setText(
             document.getElementById('summary-client-count'),
@@ -947,7 +1097,7 @@ class SummaryDashboard extends TimeKeeper {
         })
 
         if (!clients.length) {
-            setHtml(body, `<tr><td colspan="${columns}">`
+            setHtml(body, `<tr><td colspan="${SummaryDashboard.COLUMNS}">`
                 + '<div class="tk-empty py-8">Nothing logged in this range.</div></td></tr>')
             return
         }
@@ -961,9 +1111,6 @@ class SummaryDashboard extends TimeKeeper {
                 </span>
               </td>
               <td class="tk-num text-right font-semibold">${this.amount(client, { compact: true })}</td>
-              ${this.roundingEnabled
-                ? `<td class="tk-num text-right text-muted">${this.hours(client.tracked_hours, { compact: true })}</td>`
-                : ''}
               <td class="tk-num text-right">${client.days_worked}</td>
               <td class="tk-num text-right">${this.hours(client.avg_billable_per_day, { compact: true })}</td>
               <td class="tk-num text-right">
@@ -1044,7 +1191,7 @@ class SummaryDashboard extends TimeKeeper {
         setHtml(document.getElementById('summary-selection-clients'), message)
         setHtml(
             document.getElementById('summary-client-rows'),
-            `<tr><td colspan="${this.roundingEnabled ? 6 : 5}">${message}</td></tr>`,
+            `<tr><td colspan="${SummaryDashboard.COLUMNS}">${message}</td></tr>`,
         )
     }
 }

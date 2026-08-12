@@ -1506,7 +1506,13 @@ def api_summary_overview():
     if error:
         return jsonify({'error': error}), 400
 
-    rows = _summary_day_rows(start, end, weekdays)
+    selected = _summary_day_rows(start, end, weekdays)
+    # Cut to the elapsed part once, here, and hand the same list to all three.
+    # Days that haven't happened have no time on them but plenty of capacity,
+    # and counting that capacity makes every mid-week reading look like a
+    # shortfall. `days` ships cut too, so the trend chart plots exactly the
+    # days the figures above it are taken over.
+    rows = summary_report.elapsed(selected)
     clients = summary_report.client_rollup(rows)
 
     return jsonify({
@@ -1515,7 +1521,7 @@ def api_summary_overview():
         'start_date': start.isoformat(),
         'end_date': end.isoformat(),
         'weekdays': sorted(weekdays) if weekdays else None,
-        'totals': summary_report.totals(rows, clients),
+        'totals': summary_report.totals(rows, clients, selected=selected),
         'days': rows,
         'clients': clients,
     })

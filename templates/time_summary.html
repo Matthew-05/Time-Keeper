@@ -60,8 +60,8 @@
               <button
                 type="button"
                 class="tk-insight"
-                data-insight="Billable hours as a share of the working capacity your work calendar defines for the selected days. Over 100% means you billed more than a full schedule."
-                aria-label="Utilisation: billable hours as a share of the capacity your work calendar defines for the selected days."
+                data-insight="Billable hours as a share of the working capacity your work calendar defines. Only days that have elapsed are counted — a range running past today is measured against the part of it that has happened, so a Wednesday isn't dragged down by a Thursday nobody has worked yet. Over 100% means you billed more than a full schedule."
+                aria-label="Utilisation: billable hours as a share of the capacity your work calendar defines for the elapsed days in the selection."
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <circle cx="12" cy="12" r="9" />
@@ -195,6 +195,12 @@
           under the chart than as two flat rules across it. Each states its own
           basis, which is also what keeps the average here from being confused
           with the per-day-worked figure in the strip at the top.
+
+          The middle figure carries an insight icon rather than a second line of
+          text: it is a ratio of two averages, and which two is the only thing
+          anyone needs to know about it — but not often enough to spend a line
+          of the footer on. The icon is rendered from JS because the numbers it
+          names change with the range.
         #}
         <div class="tk-card-footer flex flex-wrap items-start gap-x-10 gap-y-3">
           <div>
@@ -203,9 +209,17 @@
             <div class="mt-0.5 text-xs text-faint" id="trend-average-note">&nbsp;</div>
           </div>
           <div>
-            <div class="tk-stat-label">Capacity</div>
+            <div class="tk-stat-label flex items-center gap-1">
+              Average vs capacity
+              <span id="trend-capacity-insight"></span>
+            </div>
             <div class="tabular mt-0.5 text-sm font-semibold text-text" id="trend-capacity">—</div>
             <div class="mt-0.5 text-xs text-faint" id="trend-capacity-note">&nbsp;</div>
+          </div>
+          <div>
+            <div class="tk-stat-label">Off-schedule</div>
+            <div class="tabular mt-0.5 text-sm font-semibold text-text" id="trend-non-working">—</div>
+            <div class="mt-0.5 text-xs text-faint" id="trend-non-working-note">&nbsp;</div>
           </div>
         </div>
       </section>
@@ -227,9 +241,6 @@
                 <tr>
                   <th><button type="button" class="tk-sort" data-sort="client_name">Client</button></th>
                   <th class="text-right"><button type="button" class="tk-sort" data-sort="billable_hours">{% if settings.rounding_enabled %}Billable{% else %}Tracked{% endif %}</button></th>
-                  {% if settings.rounding_enabled %}
-                    <th class="text-right"><button type="button" class="tk-sort" data-sort="tracked_hours">Logged</button></th>
-                  {% endif %}
                   <th class="text-right"><button type="button" class="tk-sort" data-sort="days_worked">Days</button></th>
                   <th class="text-right"><button type="button" class="tk-sort" data-sort="avg_billable_per_day">Avg / day</button></th>
                   <th class="text-right"><button type="button" class="tk-sort" data-sort="share_percent">Share</button></th>
