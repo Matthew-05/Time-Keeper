@@ -30,17 +30,6 @@
           {% endif %}
         </p>
       </div>
-
-      {# Presets set the calendar's selection rather than living beside it, so
-         there is only ever one answer to "what range is this". #}
-      <div id="summary-presets" class="tk-chip-row" role="group" aria-label="Quick ranges">
-        <button type="button" class="tk-chip" data-preset="this-week">This week</button>
-        <button type="button" class="tk-chip" data-preset="last-week">Last week</button>
-        <button type="button" class="tk-chip" data-preset="this-month">This month</button>
-        <button type="button" class="tk-chip" data-preset="last-month">Last month</button>
-        <button type="button" class="tk-chip" data-preset="last-30">Last 30 days</button>
-        <button type="button" class="tk-chip" data-preset="this-quarter">This quarter</button>
-      </div>
     </div>
 
     {# One grid, one gap. Two of these cards hide themselves when they have
@@ -60,7 +49,7 @@
               <button
                 type="button"
                 class="tk-insight"
-                data-insight="Billable hours as a share of the working capacity your work calendar defines. Only days that have elapsed are counted — a range running past today is measured against the part of it that has happened, so a Wednesday isn't dragged down by a Thursday nobody has worked yet. Over 100% means you billed more than a full schedule."
+                data-insight="Billable hours as a share of the working capacity your work calendar defines. Only days that have elapsed are counted. Over 100% means you billed more than a full schedule."
                 aria-label="Utilisation: billable hours as a share of the capacity your work calendar defines for the elapsed days in the selection."
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -106,6 +95,25 @@
           </div>
 
           <div class="p-3 sm:p-5">
+            {#
+              The chips set the calendar's selection rather than being a second
+              control beside it, so they belong in the same card as the grid
+              they move — directly above it, where the change they make is
+              visible in the same glance as the click. Every range is cut off
+              at *yesterday*: "this month" is the month up to the last complete
+              day, because a day still in progress has no total to report. A
+              preset with nothing left in it — "This week" on a Monday — comes
+              back disabled rather than clickable.
+            #}
+            <div id="summary-presets" class="tk-chip-row mb-3" role="group" aria-label="Quick ranges">
+              <button type="button" class="tk-chip" data-preset="this-week">This week</button>
+              <button type="button" class="tk-chip" data-preset="last-week">Last week</button>
+              <button type="button" class="tk-chip" data-preset="this-month">This month</button>
+              <button type="button" class="tk-chip" data-preset="last-month">Last month</button>
+              <button type="button" class="tk-chip" data-preset="last-30">Last 30 days</button>
+              <button type="button" class="tk-chip" data-preset="this-quarter">This quarter</button>
+            </div>
+
             <div class="tk-work-calendar">
               <div id="summary-calendar-weekdays" class="tk-work-calendar-weekdays" role="group" aria-label="Select a weekday in this month">
                 {% for day in weekday_order %}
@@ -118,9 +126,7 @@
 
           <div class="tk-card-footer flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted">
             <span class="inline-flex items-center gap-1.5"><span class="tk-calendar-key tk-calendar-key-selected"></span> Selected</span>
-            <span class="inline-flex items-center gap-1.5"><span class="tk-calendar-key tk-calendar-key-off"></span> Non-working</span>
             <span class="inline-flex items-center gap-1.5"><span class="tk-calendar-key tk-calendar-key-today"></span> Today</span>
-            <span>The bar under each amount is that day against a full day of capacity.</span>
             <span>Click a date for one day, Shift-click another for a range, or click a weekday heading for every matching day.</span>
           </div>
         </section>

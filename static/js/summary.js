@@ -12,13 +12,14 @@
  * disagreeing with the total above it is the fastest way to make the whole page
  * untrustworthy.
  *
- * That payload is already cut to the elapsed part of the range — `days` holds
- * no date past today and every figure in `totals` is taken over those days
- * alone. Nothing here re-filters or compensates for it: the selection can run
- * to Sunday while the page describes Monday to Wednesday, and the only place
- * that difference is visible is the labels, which say which of the two they
- * mean. The calendar grid is the exception and keeps painting every date,
- * because it is a calendar.
+ * **A selection can't run past today.** Future dates aren't selectable on the
+ * grid and every preset chip is cut off at today, so "this month" means the
+ * month so far. There is nothing to report on a day that hasn't happened, and
+ * a range that included one only ever produced a figure the page then had to
+ * explain away. The server's `elapsed()` cut still applies on top — the two
+ * agree, and it stays as the backstop for a hand-built request. The calendar
+ * grid is the exception and keeps painting future dates, greyed out, because
+ * it is a calendar.
  *
  * Budgets are the one exception, and deliberately so: `/api/budgets` already
  * returns every budget with its live figures, and those figures are the
@@ -177,10 +178,14 @@ class SummaryDashboard extends TimeKeeper {
 
     init() {
         this.bindEvents()
-        // Monday–Sunday of the current week, or Sunday-first if that's the
-        // preference. Not clamped to today: utilisation measures against
-        // elapsed capacity server-side, so a Tuesday doesn't read as a crisis.
+        /* This week so far — Monday (or Sunday, if that's the preference) up to
+           yesterday. On the first day of the week that range is empty, so the
+           page opens on last week rather than on nothing; `last-week` is always
+           complete and always selectable. Utilisation still measures against
+           *elapsed* capacity server-side, so a Tuesday doesn't read as a crisis
+           either way. */
         const selection = this.presetSelection('this-week')
+            ?? this.presetSelection('last-week')
         this.calendar.start(selection)
         this.selectRange(selection)
     }
@@ -188,7 +193,8 @@ class SummaryDashboard extends TimeKeeper {
     bindEvents() {
         document.getElementById('summary-presets').addEventListener('click', (event) => {
             const chip = event.target.closest('[data-preset]')
-            if (chip) this.calendar.setRange(...this.presetArgs(chip.dataset.preset))
+            const args = chip && this.presetArgs(chip.dataset.preset)
+            if (args) this.calendar.setRange(...args)
         })
 
         document.getElementById('summary-client-table').addEventListener('click', (event) => {
@@ -238,22 +244,46 @@ class SummaryDashboard extends TimeKeeper {
                 const first = new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3, 1)
                 return [first, endOfMonth(new Date(first.getFullYear(), first.getMonth() + 2, 1))]
             }
-            // 30 days *including* today, so the chip and the calendar agree
-            // about how many cells are lit.
+            // 30 *complete* days, ending yesterday. Counting back from today
+            // would give 29 of them once the clamp had taken today off the end,
+            // and a chip that says 30 has to light 30 cells.
             case 'last-30':
             default:
-                return [addDays(today, -29), today]
+                return [addDays(today, -30), addDays(today, -1)]
         }
     }
 
+    /**
+     * A preset as an ISO selection, **cut off at yesterday**, or null if none
+     * of it has finished happening.
+     *
+     * "This week" on a Wednesday is Monday to Tuesday: today's total is still
+     * moving, so including it would put a figure on the page that changes
+     * while you read it. On the first day of a week or a month the preset has
+     * nothing left in it at all — hence the null, which the chip renders as
+     * disabled rather than as a click that does nothing.
+     *
+     * The clamp lives here as well as in the calendar because
+     * `markActivePreset()` compares a chip's range against the selection
+     * character for character — a chip that set a range the calendar then
+     * trimmed would never light up again.
+     */
     presetSelection(name) {
         const [start, end] = this.presetRange(name)
-        return { start: isoDate(start), end: isoDate(end), weekdays: null }
+        const limit = isoDate(addDays(new Date(), -1))
+        const startKey = isoDate(start)
+        if (startKey > limit) return null
+        const endKey = isoDate(end)
+        return {
+            start: startKey,
+            end: endKey > limit ? limit : endKey,
+            weekdays: null,
+        }
     }
 
     presetArgs(name) {
-        const { start, end } = this.presetSelection(name)
-        return [start, end]
+        const selection = this.presetSelection(name)
+        return selection && [selection.start, selection.end]
     }
 
     /** Adopt a range and reload everything that depends on it. */
@@ -275,10 +305,14 @@ class SummaryDashboard extends TimeKeeper {
      */
     markActivePreset() {
         document.querySelectorAll('#summary-presets [data-preset]').forEach((chip) => {
-            const [start, end] = this.presetArgs(chip.dataset.preset)
-            const active = this.selection.weekdays === null
-                && this.selection.start === start
-                && this.selection.end === end
+            const range = this.presetArgs(chip.dataset.preset)
+            // "This week" on a Monday has no completed day in it. Disabled
+            // rather than hidden: the row of chips shouldn't reflow by the day.
+            chip.disabled = range === null
+            const active = range !== null
+                && this.selection.weekdays === null
+                && this.selection.start === range[0]
+                && this.selection.end === range[1]
             chip.classList.toggle('active', active)
             chip.setAttribute('aria-pressed', active ? 'true' : 'false')
         })

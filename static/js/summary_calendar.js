@@ -18,6 +18,14 @@
  * - **`selectionEnd` is always set.** Settings distinguishes a one-day pick
  *   from a range; every consumer here wants a start/end pair, so a single day
  *   is a range of one and there is no null case to handle downstream.
+ * - **Nothing from today onwards can be selected.** There is nothing to report
+ *   on a day that hasn't happened, and today hasn't finished happening — its
+ *   total moves while you look at it. `lastComplete` (yesterday) is the hard
+ *   right-hand edge, and every range arriving here — a click, a Shift-drag, a
+ *   weekday heading, a preset chip — goes through `clampRange()`. Today and
+ *   the days after it are still *drawn*, greyed and disabled, and today still
+ *   gets its ring: a calendar that stopped painting the rest of the month
+ *   would read as broken, and where you are in it is worth knowing.
  *
  * Amount formatting is injected rather than decided here, so the cells, the
  * KPI strip and the charts can't disagree about what a figure looks like.
@@ -63,6 +71,13 @@ export class SummaryCalendar {
         const now = new Date()
         this.month = startOfMonth(now)
         this.today = isoDate(now)
+        /* The right-hand edge of every selection, and it is *yesterday*.
+           Today's total is still moving — a task is probably running as you
+           read it — so a figure that includes it describes a day that hasn't
+           finished, and reloading the page changes it. The grid still marks
+           today, because where you are in the month is worth knowing; it just
+           isn't a day you can report on yet. */
+        this.lastComplete = isoDate(addDays(now, -1))
         this.days = new Map()
         // What a full heat bar means. Never the window's own peak alone — see
         // renderScale().
@@ -89,26 +104,42 @@ export class SummaryCalendar {
      * would make it fetch the same thing twice on every page load.
      */
     start({ start, end, weekdays = null }) {
-        this.selectionStart = start
-        this.selectionEnd = end
+        const range = this.clampRange(start, end) ?? [this.lastComplete, this.lastComplete]
+        this.selectionStart = range[0]
+        this.selectionEnd = range[1]
         this.selectionWeekdays = weekdays
-        this.rangeAnchor = weekdays === null ? start : null
-        this.month = this.focusMonth(start, end)
+        this.rangeAnchor = weekdays === null ? range[0] : null
+        this.month = this.focusMonth(range[0], range[1])
         this.bindEvents()
         return this.load()
     }
 
     /**
+     * A range trimmed to the part that has happened, or null if none of it has.
+     *
+     * The single choke point for the no-future-dates rule: clicks, Shift-drags,
+     * weekday headings and preset chips all pass through it, so there is one
+     * place to read rather than four places to keep in step. Null means "this
+     * gesture selects nothing" — a weekday heading clicked in next month — and
+     * every caller treats it as a no-op rather than inventing a fallback.
+     */
+    clampRange(start, end) {
+        if (start > this.lastComplete) return null
+        return [start, end > this.lastComplete ? this.lastComplete : end]
+    }
+
+    /**
      * Which month to put on screen for a range.
      *
-     * The current one whenever the range covers it, and the range's last month
-     * otherwise. Anchoring on the end date alone looked right for "last 30
-     * days", which ends today, and wrong for everything that runs into the
-     * future: "this quarter" would open on an empty September in August.
+     * The month holding the most recent day worth reporting on, whenever the
+     * range reaches it, and the range's last month otherwise. Anchored on
+     * `lastComplete` rather than today so that on the 1st of a month "last 30
+     * days" opens on the month the time is actually in, instead of on a page
+     * with a single greyed cell.
      */
     focusMonth(start, end) {
-        const focus = start <= this.today && this.today <= end ? this.today : end
-        return startOfMonth(localDate(focus))
+        const covered = start <= this.lastComplete && this.lastComplete <= end
+        return startOfMonth(localDate(covered ? this.lastComplete : end))
     }
 
     bindEvents() {
@@ -197,12 +228,24 @@ export class SummaryCalendar {
         const row = this.days.get(key)
         const billable = row?.billable_hours ?? 0
         const selected = this.isSelected(key)
+        const future = key > this.lastComplete
 
         const cell = document.createElement('button')
         cell.type = 'button'
+        // Disabled rather than merely ignored on click, so the cursor, the
+        // hover and the tab order all say the same thing the rule does.
+        cell.disabled = future
         cell.className = 'tk-work-calendar-day tk-summary-day'
+        cell.classList.toggle('is-future', future)
         cell.classList.toggle('is-outside', day.getMonth() !== this.month.getMonth())
-        cell.classList.toggle('is-off', Boolean(row) && !row.is_workday)
+        /* No `is-off`: the summary grid doesn't shade working days differently
+           from non-working ones. Settings' calendar is where that distinction
+           is the subject; here it was a third fill under an amount, three dots
+           and a heat bar, and a day you didn't work already reads as empty.
+           Capacity hasn't gone anywhere — `is-over` below is still measured
+           against it, which is what turns a weekend hour amber. The aria-label
+           still says so, because a fill isn't available to a screen reader and
+           it costs nothing there. */
         cell.classList.toggle('is-selected', selected)
         cell.classList.toggle('is-today', key === this.today)
         // Over capacity gets its own bar colour rather than a clipped bar —
@@ -218,7 +261,22 @@ export class SummaryCalendar {
         const number = document.createElement('span')
         number.className = 'tk-calendar-date-number'
         number.textContent = String(day.getDate())
-        top.append(number, this.renderDots(row))
+        top.appendChild(number)
+
+        /* A day you can't report on is a date and nothing else. A future one
+           has no amount, no clients and a heat bar that could only ever read
+           zero; today has all three, but they are a running total that would
+           be stale a minute later — and printing one beside figures that
+           deliberately exclude it is worse than printing nothing. Drawing an
+           em dash over an empty track on every remaining cell of the month was
+           most of what made the grid noisy either way. Keeping the cell rather
+           than blanking the row is what holds the month's shape. */
+        if (future) {
+            cell.appendChild(top)
+            return cell
+        }
+
+        top.appendChild(this.renderDots(row))
 
         const amountRow = document.createElement('span')
         amountRow.className = 'tk-calendar-capacity-row'
@@ -265,10 +323,13 @@ export class SummaryCalendar {
     }
 
     renderWeekdayHeaders() {
+        // A month that hasn't started has no selectable weekday in it.
+        const unreachable = isoDate(startOfMonth(this.month)) > this.lastComplete
         this.weekdayHeaders.querySelectorAll('[data-calendar-weekday]').forEach((button) => {
             const selected = this.selectionWeekdays?.includes(
                 Number(button.dataset.calendarWeekday),
             ) || false
+            button.disabled = unreachable
             button.classList.toggle('active', selected)
             button.setAttribute('aria-pressed', selected ? 'true' : 'false')
         })
@@ -280,15 +341,37 @@ export class SummaryCalendar {
             return value.getMonth() === this.month.getMonth()
                 && value.getFullYear() === this.month.getFullYear()
         })
-        const billable = inMonth.reduce((total, day) => total + day.billable_hours, 0)
-        const worked = inMonth.filter((day) => day.tracked_hours > 0).length
-        this.monthTotal.textContent = worked
-            ? `${this.formatAmount({ billable_hours: billable })} · ${worked} ${worked === 1 ? 'day' : 'days'} worked`
-            : 'Nothing logged this month'
+        const elapsed = inMonth.filter((day) => day.date <= this.lastComplete)
+        if (!elapsed.length) {
+            this.monthTotal.textContent = 'Not started yet'
+            return
+        }
+
+        const billable = elapsed.reduce((total, day) => total + day.billable_hours, 0)
+        /* Every working day the calendar defines, not just the ones with time
+           on them: the figure beside it is what the month is *worth*, and a
+           denominator that shrank each time you failed to log a day would make
+           a bad month read as a normal one.
+
+           Elapsed ones only, today included — the same cut the dashboard's
+           figures take. A total for the month so far divided by a month's worth
+           of working days would describe a shortfall that hasn't happened yet,
+           and on the 1st it would read as a catastrophe. */
+        const working = elapsed.filter((day) => day.is_workday).length
+        // "so far" only while the month has days left in it — a June read in
+        // August is complete, and saying otherwise invites a second look.
+        const days = `${working} working ${working === 1 ? 'day' : 'days'}`
+            + (elapsed.length < inMonth.length ? ' so far' : '')
+        this.monthTotal.textContent = billable > 0
+            ? `${this.formatAmount({ billable_hours: billable })} · ${days}`
+            : `Nothing logged · ${days}`
     }
 
     describeDay(day, row) {
         const parts = [RANGE_FORMAT.format(day)]
+        const key = isoDate(day)
+        if (key === this.today) return `${parts[0]} — today, still in progress`
+        if (key > this.lastComplete) return `${parts[0]} — upcoming`
         parts.push(
             row && row.billable_hours > 0
                 ? this.formatAmount(row)
@@ -310,6 +393,9 @@ export class SummaryCalendar {
     }
 
     selectDate(key, shiftHeld = false) {
+        // The cells are disabled, so this is a backstop rather than the guard.
+        if (key > this.lastComplete) return
+
         // A weekday filter has no anchor to extend from, so Shift falls back to
         // starting a fresh range rather than doing nothing.
         const extend = shiftHeld
@@ -336,28 +422,46 @@ export class SummaryCalendar {
     /**
      * Every matching weekday in the visible month; clicking it again clears
      * back to the whole month, so the heading is a toggle rather than a trap.
+     *
+     * The current month stops at today like everything else, which is what
+     * makes "Mondays" mean the Mondays that have happened.
      */
     selectWeekday(weekday) {
+        const range = this.monthRange()
+        if (range === null) return
+
         const alreadyOnlyThis = this.selectionWeekdays?.length === 1
             && this.selectionWeekdays[0] === weekday
 
-        this.selectionStart = isoDate(startOfMonth(this.month))
-        this.selectionEnd = isoDate(endOfMonth(this.month))
+        const [start, end] = range
+        this.selectionStart = start
+        this.selectionEnd = end
         this.selectionWeekdays = alreadyOnlyThis ? null : [weekday]
-        this.rangeAnchor = alreadyOnlyThis ? this.selectionStart : null
+        this.rangeAnchor = alreadyOnlyThis ? start : null
 
         this.render()
         this.emit()
     }
 
+    /** The visible month, trimmed to today; null once it's entirely ahead. */
+    monthRange() {
+        return this.clampRange(
+            isoDate(startOfMonth(this.month)),
+            isoDate(endOfMonth(this.month)),
+        )
+    }
+
     /** Point the grid at a range chosen elsewhere — usually a preset chip. */
     setRange(start, end, { weekdays = null, silent = false } = {}) {
-        this.selectionStart = start
-        this.selectionEnd = end
-        this.selectionWeekdays = weekdays
-        this.rangeAnchor = weekdays === null ? start : null
+        const range = this.clampRange(start, end)
+        if (range === null) return Promise.resolve()
 
-        const target = this.focusMonth(start, end)
+        this.selectionStart = range[0]
+        this.selectionEnd = range[1]
+        this.selectionWeekdays = weekdays
+        this.rangeAnchor = weekdays === null ? range[0] : null
+
+        const target = this.focusMonth(range[0], range[1])
         const moved = target.getTime() !== this.month.getTime()
         this.month = target
 
@@ -382,11 +486,19 @@ export class SummaryCalendar {
         return this.load()
     }
 
-    /** A weekday selection means "these days, in the month I'm looking at". */
+    /**
+     * A weekday selection means "these days, in the month I'm looking at".
+     *
+     * Paging into a month that hasn't started leaves the selection where it
+     * was: there is nothing there to re-scope onto, and dropping the filter
+     * would silently answer a different question than the one being asked.
+     */
     rescopeWeekdaySelection() {
         if (this.selectionWeekdays === null) return
-        this.selectionStart = isoDate(startOfMonth(this.month))
-        this.selectionEnd = isoDate(endOfMonth(this.month))
+        const range = this.monthRange()
+        if (range === null) return
+        this.selectionStart = range[0]
+        this.selectionEnd = range[1]
         this.emit()
     }
 

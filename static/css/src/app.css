@@ -2327,6 +2327,20 @@
     outline-offset: -2px;
   }
 
+  /* Summary only: a month that hasn't started has no selectable weekday in
+     it. Dimmed rather than hidden, so the strip stays a legend for the grid. */
+  .tk-work-calendar-weekdays button:disabled {
+    background-color: var(--surface-2);
+    color: var(--faint);
+    cursor: default;
+    opacity: 0.5;
+  }
+
+  .tk-work-calendar-weekdays button:disabled:hover {
+    background-color: var(--surface-2);
+    color: var(--faint);
+  }
+
   .tk-work-calendar-weekdays button.active {
     background-color: var(--accent-soft);
     box-shadow: inset 0 -2px 0 var(--accent);
@@ -2548,8 +2562,79 @@
      accent bar would vanish into it. Same trick `--calendar-today-ink` uses
      two hundred lines up, for the same reason. */
 
+  /* ---- The Summary grid: one channel, not four ----
+
+     Settings' calendar is a form. Every day there is editable, non-working is
+     the property you are setting, and the hatch is what it looks like while
+     you set it. Summary's is a report, and it draws three more things in the
+     same 90px — an amount, up to three client dots and a heat bar. A hatch, an
+     adjacent-month fill and a dimmed future stacked underneath those left four
+     textures competing for one cell, which is a lot of ink to decode before
+     reading a number.
+
+     So this grid shades on **one** axis: how available the day is. Full ink is
+     a day of this month you can select; a past day of a neighbouring month is
+     dimmed but complete and clickable; a day that hasn't happened is dimmer
+     still and carries a date and nothing else. Working versus non-working is
+     not drawn at all — a day you didn't work already reads as empty, and
+     capacity still shows up where it means something, as the amber heat bar an
+     hour on a Sunday produces. Selection and today are unchanged, a block and
+     a ring, neither of which is a texture.
+
+     All of it is scoped to `.tk-summary-day`. The Settings calendar keeps its
+     hatch and its outside-month fill; don't unify them. */
   .tk-summary-day {
     --calendar-heat-ink: var(--accent);
+  }
+
+  /* Two strengths of the same fade, because the two states are not equally
+     unavailable: last month's days are ordinary things to select (a range
+     crossing a month boundary is the common case here) while a future one
+     can't be clicked at all. One channel, two steps, rather than a separate
+     encoding each.
+
+     The two `:not()`s make the three states mutually exclusive rather than
+     layered, so which rule wins never depends on source order:
+     `:not(.is-selected)` keeps a Shift-drag across a month boundary looking
+     selected on both sides (this would otherwise tie with the shared selected
+     fill on specificity), and `:not(.is-future)` hands next month's days
+     straight to the future rule below. **A day that hasn't happened looks the
+     same whichever month it belongs to** — which month is beside the point
+     once the answer is "nothing here yet", and the adjacent-month dimming
+     landing on top of it made next week look more available than next
+     month's. */
+  .tk-summary-day.is-outside:not(.is-future):not(.is-selected) {
+    background-color: var(--surface);
+    color: var(--muted);
+    opacity: 0.75;
+  }
+
+  /* Nothing to click and nothing drawn but the date — see renderDay(). The
+     button is `disabled`, so this is the appearance of a rule the DOM already
+     enforces. */
+  .tk-summary-day.is-future {
+    background-color: var(--surface);
+    color: var(--muted);
+    cursor: default;
+    opacity: 0.4;
+  }
+
+  .tk-summary-day.is-future:hover {
+    --calendar-hover-layer: none;
+  }
+
+  /* Today is one of those days — it hasn't finished, so it can't be reported
+     on — but it is also the one cell you look for to place yourself in the
+     month, and its ring has to survive the fade. So it stops short of a plain
+     future day rather than getting a fourth treatment of its own. */
+  .tk-summary-day.is-future.is-today {
+    opacity: 0.65;
+  }
+
+  /* The shared rule fades the amount a second time, against a fill this grid
+     no longer draws. */
+  .tk-summary-day.is-outside .tk-calendar-capacity {
+    opacity: 1;
   }
 
   /* Past a full day of capacity — which every weekend hour is, since a
@@ -2652,6 +2737,16 @@
     background-color: var(--accent-soft);
     border-color: var(--accent);
     color: var(--accent-text);
+  }
+
+  /* A preset with no completed day in it — "This week" on a Monday. Disabled
+     rather than dropped, so the row doesn't reflow from one day to the next. */
+  .tk-chip:disabled,
+  .tk-chip:disabled:hover {
+    background-color: var(--control-fill);
+    color: var(--faint);
+    cursor: default;
+    opacity: 0.5;
   }
 
   .tk-chip:focus-visible {
