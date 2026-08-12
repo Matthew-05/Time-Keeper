@@ -5,374 +5,257 @@
 {% endblock %}
 
 {% block content %}
-  <div class="tk-page tk-page-narrow">
+  {#
+    Weekday numbers are ISO everywhere they are stored or sent — Monday is 0 —
+    and that is what `data-calendar-weekday` carries. `week_start` only decides
+    the order the seven headings appear in, so a Sunday start puts day 6 first
+    without renumbering anything. Rendered server-side, like the theme, so the
+    strip is already in the right order on first paint. Identical to the work
+    calendar in Settings on purpose: the two grids are meant to be the same
+    object seen from two sides.
+  #}
+  {% set weekday_labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
+  {% set weekday_order = [6, 0, 1, 2, 3, 4, 5] if settings.week_start == 'sunday' else [0, 1, 2, 3, 4, 5, 6] %}
+
+  <div class="tk-page">
     <div class="tk-page-header">
       <div>
-        <h1 class="tk-title">Time summary</h1>
-        <p class="tk-subtitle">Summary of tracked client time.</p>
-      </div>
-
-      <div class="relative">
-        <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="5" width="18" height="16" rx="2" />
-          <path d="M16 3v4M8 3v4M3 11h18" />
-        </svg>
-        <input type="text" id="date-range" class="tk-input tabular w-64 cursor-pointer pl-9 text-sm" placeholder="Select date range…" readonly />
-      </div>
-    </div>
-
-    <div class="mb-4">
-      <div class="tk-segmented" role="tablist" aria-label="Summary view">
-        <button type="button" id="client-tab-button" class="tk-segment active" role="tab" aria-selected="true" aria-controls="client-tab" tabindex="0" data-tab="client">By client</button>
-        <button type="button" id="daily-tab-button" class="tk-segment" role="tab" aria-selected="false" aria-controls="daily-tab" tabindex="-1" data-tab="daily">By day</button>
-      </div>
-    </div>
-
-    <section class="tk-card">
-      <div class="flex items-center gap-2 border-b border-border px-4 py-2.5 text-xs text-muted">
-        <svg class="h-3.5 w-3.5 flex-shrink-0 text-faint" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 16v-4M12 8h.01" />
-        </svg>
-        <span>
-          Logged task time only. Gaps between tasks aren't counted.
+        <h1 class="tk-title">Summary</h1>
+        <p class="tk-subtitle">
           {% if settings.rounding_enabled %}
-            A {{ settings.rounding_interval_minutes }}-minute {{ settings.rounding_direction }} rounding policy is applied per client per day, matching History and budgets.
+            Billable time, rounded to {{ settings.rounding_interval_minutes }} minutes
+            ({{ settings.rounding_direction }}) per client per day — the same policy History and Budgets bill at.
           {% else %}
-            Rounding is disabled, so charts show tracked time directly.
+            Rounding is off, so every figure below is tracked time exactly as logged.
           {% endif %}
-        </span>
+        </p>
       </div>
 
-      <div class="p-4">
-        <div class="tab-content" id="client-tab" role="tabpanel" aria-labelledby="client-tab-button">
-          <div class="h-[60vh] min-h-[320px]">
-            <canvas id="timeChart"></canvas>
+      {# Presets set the calendar's selection rather than living beside it, so
+         there is only ever one answer to "what range is this". #}
+      <div id="summary-presets" class="tk-chip-row" role="group" aria-label="Quick ranges">
+        <button type="button" class="tk-chip" data-preset="this-week">This week</button>
+        <button type="button" class="tk-chip" data-preset="last-week">Last week</button>
+        <button type="button" class="tk-chip" data-preset="this-month">This month</button>
+        <button type="button" class="tk-chip" data-preset="last-month">Last month</button>
+        <button type="button" class="tk-chip" data-preset="last-30">Last 30 days</button>
+        <button type="button" class="tk-chip" data-preset="this-quarter">This quarter</button>
+      </div>
+    </div>
+
+    {# One grid, one gap. Two of these cards hide themselves when they have
+       nothing to say, and a margin would leave its spacing behind. #}
+    <div class="grid grid-cols-1 gap-4">
+      <section class="tk-card">
+        <div class="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border sm:grid-cols-3 lg:grid-cols-5">
+          <div class="bg-surface px-4 py-3">
+            <div class="tk-stat-label">{% if settings.rounding_enabled %}Billable{% else %}Tracked{% endif %}</div>
+            <div class="tabular mt-1 text-xl font-semibold text-text" id="kpi-billable">—</div>
+            <div class="mt-0.5 text-xs text-muted" id="kpi-billable-note">&nbsp;</div>
+          </div>
+
+          <div class="bg-surface px-4 py-3">
+            <div class="tk-stat-label flex items-center gap-1">
+              Utilisation
+              <button
+                type="button"
+                class="tk-insight"
+                data-insight="Billable hours as a share of the working capacity your work calendar defines for the selected days. Over 100% means you billed more than a full schedule."
+                aria-label="Utilisation: billable hours as a share of the capacity your work calendar defines for the selected days."
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 16v-4M12 8h.01" />
+                </svg>
+              </button>
+            </div>
+            <div class="tabular mt-1 text-xl font-semibold text-text" id="kpi-utilisation">—</div>
+            <div class="mt-0.5 text-xs text-muted" id="kpi-utilisation-note">&nbsp;</div>
+          </div>
+
+          <div class="bg-surface px-4 py-3">
+            <div class="tk-stat-label">Days worked</div>
+            <div class="tabular mt-1 text-xl font-semibold text-text" id="kpi-days">—</div>
+            <div class="mt-0.5 text-xs text-muted" id="kpi-days-note">&nbsp;</div>
+          </div>
+
+          <div class="bg-surface px-4 py-3">
+            <div class="tk-stat-label">Average per day worked</div>
+            <div class="tabular mt-1 text-xl font-semibold text-text" id="kpi-average">—</div>
+            <div class="mt-0.5 text-xs text-muted" id="kpi-average-note">&nbsp;</div>
+          </div>
+
+          <div class="bg-surface px-4 py-3">
+            <div class="tk-stat-label">Clients</div>
+            <div class="tabular mt-1 text-xl font-semibold text-text" id="kpi-clients">—</div>
+            <div class="mt-0.5 text-xs text-muted" id="kpi-clients-note">&nbsp;</div>
+          </div>
+        </div>
+      </section>
+
+      <div class="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_23rem]">
+        <section class="tk-card overflow-hidden">
+          <div class="tk-card-header tk-calendar-header">
+            <div class="tk-calendar-nav">
+              <button id="summary-calendar-previous" type="button" class="tk-calendar-nav-arrow" aria-label="Previous month">&larr;</button>
+              <button id="summary-calendar-today" type="button" class="tk-calendar-nav-today">Today</button>
+              <button id="summary-calendar-next" type="button" class="tk-calendar-nav-arrow" aria-label="Next month">&rarr;</button>
+            </div>
+            <h2 id="summary-calendar-month" class="tk-calendar-month" aria-live="polite"></h2>
+            <p id="summary-calendar-month-total" class="tk-calendar-month-capacity"></p>
+          </div>
+
+          <div class="p-3 sm:p-5">
+            <div class="tk-work-calendar">
+              <div id="summary-calendar-weekdays" class="tk-work-calendar-weekdays" role="group" aria-label="Select a weekday in this month">
+                {% for day in weekday_order %}
+                  <button type="button" data-calendar-weekday="{{ day }}" aria-pressed="false" title="Select every {{ weekday_labels[day] }} in this month">{{ weekday_labels[day] }}</button>
+                {% endfor %}
+              </div>
+              <div id="summary-calendar-grid" class="tk-work-calendar-grid" role="grid" aria-label="Billable time by day"></div>
+            </div>
+          </div>
+
+          <div class="tk-card-footer flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted">
+            <span class="inline-flex items-center gap-1.5"><span class="tk-calendar-key tk-calendar-key-selected"></span> Selected</span>
+            <span class="inline-flex items-center gap-1.5"><span class="tk-calendar-key tk-calendar-key-off"></span> Non-working</span>
+            <span class="inline-flex items-center gap-1.5"><span class="tk-calendar-key tk-calendar-key-today"></span> Today</span>
+            <span>The bar under each amount is that day against a full day of capacity.</span>
+            <span>Click a date for one day, Shift-click another for a range, or click a weekday heading for every matching day.</span>
+          </div>
+        </section>
+
+        <aside class="tk-card xl:sticky xl:top-4">
+          <div class="tk-card-header">
+            <h2 class="tk-card-title">Selected range</h2>
+            <span id="summary-selection-count" class="tk-badge tk-badge-neutral"></span>
+          </div>
+
+          <div class="space-y-5 p-5">
+            <div>
+              <p id="summary-selection-label" class="text-sm font-medium text-text">Loading…</p>
+              <p id="summary-selection-meta" class="mt-1 text-xs text-muted">&nbsp;</p>
+            </div>
+
+            <div id="summary-capacity" class="tk-status-scope">
+              <div class="mb-1.5 flex items-baseline justify-between gap-2">
+                <span class="tk-stat-label">Against capacity</span>
+                <span class="tabular text-xs font-semibold" id="summary-capacity-percent" style="color: var(--status-text)">—</span>
+              </div>
+              <div class="tk-meter">
+                <div class="tk-meter-fill" id="summary-capacity-fill" style="width: 0%"></div>
+              </div>
+              <p class="mt-1.5 text-xs text-muted" id="summary-capacity-note">&nbsp;</p>
+            </div>
+
+            <div>
+              {# Doubles as the legend for the dots on the calendar cells — same
+                 hash-derived colour per client, so the grid and this list can be
+                 read against each other. #}
+              <span class="tk-label">Clients in this range</span>
+              <div id="summary-selection-clients" class="mt-2 space-y-2"></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <section class="tk-card">
+        <div class="tk-card-header">
+          <h2 class="tk-card-title">Daily trend</h2>
+
+          {#
+            Off by default, which leaves the plotted bars exactly the set the
+            average line is taken over. A non-working day with billable time on
+            it is never hidden — a Saturday you worked is precisely the thing
+            you'd want to see — so the switch only ever adds or removes empty
+            days, and can't move the average.
+          #}
+          <div class="flex flex-shrink-0 items-center gap-2">
+            <span id="summary-non-working-label" class="text-xs text-muted">Show empty non-working days</span>
+            <button
+              type="button"
+              id="summary-show-non-working"
+              class="tk-switch"
+              role="switch"
+              aria-checked="false"
+              aria-labelledby="summary-non-working-label"
+            ></button>
+          </div>
+        </div>
+        <div class="p-4">
+          <div id="summary-trend-body" class="h-[19rem]">
+            <canvas id="summary-trend-chart"></canvas>
           </div>
         </div>
 
-        <div class="tab-content hidden" id="daily-tab" role="tabpanel" aria-labelledby="daily-tab-button" hidden>
-          <div class="h-[60vh] min-h-[320px]">
-            <canvas id="dailyTimeChart"></canvas>
+        {#
+          Average and capacity used to be lines on the plot. Stacked bars need
+          that space for the clients, and both are range-level constants rather
+          than anything that varies day to day — so they read better as figures
+          under the chart than as two flat rules across it. Each states its own
+          basis, which is also what keeps the average here from being confused
+          with the per-day-worked figure in the strip at the top.
+        #}
+        <div class="tk-card-footer flex flex-wrap items-start gap-x-10 gap-y-3">
+          <div>
+            <div class="tk-stat-label">Average</div>
+            <div class="tabular mt-0.5 text-sm font-semibold text-text" id="trend-average">—</div>
+            <div class="mt-0.5 text-xs text-faint" id="trend-average-note">&nbsp;</div>
+          </div>
+          <div>
+            <div class="tk-stat-label">Capacity</div>
+            <div class="tabular mt-0.5 text-sm font-semibold text-text" id="trend-capacity">—</div>
+            <div class="mt-0.5 text-xs text-faint" id="trend-capacity-note">&nbsp;</div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
+
+      <section class="tk-card">
+        <div class="tk-card-header">
+          <h2 class="tk-card-title">Clients</h2>
+          <span id="summary-client-count" class="tk-badge tk-badge-neutral"></span>
+        </div>
+
+        <div class="grid gap-5 p-5 lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start">
+          <div class="mx-auto h-[15rem] w-full max-w-[15rem]">
+            <canvas id="summary-mix-chart"></canvas>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="tk-table" id="summary-client-table">
+              <thead>
+                <tr>
+                  <th><button type="button" class="tk-sort" data-sort="client_name">Client</button></th>
+                  <th class="text-right"><button type="button" class="tk-sort" data-sort="billable_hours">{% if settings.rounding_enabled %}Billable{% else %}Tracked{% endif %}</button></th>
+                  {% if settings.rounding_enabled %}
+                    <th class="text-right"><button type="button" class="tk-sort" data-sort="tracked_hours">Logged</button></th>
+                  {% endif %}
+                  <th class="text-right"><button type="button" class="tk-sort" data-sort="days_worked">Days</button></th>
+                  <th class="text-right"><button type="button" class="tk-sort" data-sort="avg_billable_per_day">Avg / day</button></th>
+                  <th class="text-right"><button type="button" class="tk-sort" data-sort="share_percent">Share</button></th>
+                </tr>
+              </thead>
+              <tbody id="summary-client-rows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="tk-card" id="summary-budgets" hidden>
+        <div class="tk-card-header">
+          <div>
+            <h2 class="tk-card-title">Budgets in this range</h2>
+            <p class="mt-1 text-xs text-faint">Every budget whose dates overlap the selection. Figures are the budget's own lifetime totals, not the range's.</p>
+          </div>
+          <span id="summary-budget-count" class="tk-badge tk-badge-neutral"></span>
+        </div>
+        <div id="summary-budget-list" class="divide-y divide-border"></div>
+      </section>
+    </div>
   </div>
 {% endblock %}
 
 {% block page_scripts %}
   <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.min.js') }}"></script>
-  <script type="module">
-    import { ready, clientColor, formatDecimalHours, formatDurationMinutes } from "{{ url_for('static', filename='js/base.js') }}"
-    import { flatpickrCalendarOptions } from "{{ url_for('static', filename='js/week_start.js') }}"
-
-    let chart
-    let dailyChart
-    const roundingEnabled = {{ 'true' if settings.rounding_enabled else 'false' }}
-    const roundingIntervalHours = {{ settings.rounding_interval_minutes }} / 60
-    const valueLabel = roundingEnabled ? 'Billable hours' : 'Logged time'
-
-    /** Rounded values always use the app's decimal-hours display. */
-    function formatRoundedTick(hours) {
-      return `${formatDecimalHours(hours)} hrs.`
-    }
-
-    /** Pull live theme tokens so charts repaint correctly on theme switch. */
-    function tokens() {
-      const css = getComputedStyle(document.documentElement)
-      const v = (name) => css.getPropertyValue(name).trim()
-      return {
-        text: v('--text'),
-        muted: v('--muted'),
-        faint: v('--faint'),
-        border: v('--border'),
-        accent: v('--accent'),
-        danger: v('--danger'),
-      }
-    }
-
-    function baseChartOptions(title) {
-      const t = tokens()
-      return {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          tooltip: {
-            callbacks: {
-              label: (ctx) => roundingEnabled
-                ? `${ctx.dataset.label}: ${formatDecimalHours(ctx.parsed.y)} hrs.`
-                : `${ctx.dataset.label}: ${formatDurationMinutes(ctx.parsed.y * 60)}`,
-              afterLabel: (ctx) => {
-                if (!roundingEnabled) return undefined
-                const tracked = ctx.raw?.tracked ?? ctx.dataset.tracked?.[ctx.dataIndex]
-                if (tracked == null) return undefined
-                const diff = ctx.parsed.y - tracked
-                const sign = diff > 0 ? '+' : '−'
-                return `${formatDurationMinutes(tracked * 60)} logged`
-                  + (Math.abs(diff) < 0.005 ? '' : ` (${sign}${Math.abs(diff * 60).toFixed(0)}m rounding)`)
-              },
-            },
-          },
-          title: { display: true, text: title, color: t.text, font: { size: 14, weight: '600' } },
-          legend: { labels: { color: t.muted, boxWidth: 12, boxHeight: 12, usePointStyle: true } },
-        },
-        scales: {
-          x: {
-            ticks: { color: t.faint },
-            grid: { color: t.border, drawBorder: false },
-          },
-          y: {
-            beginAtZero: true,
-            title: { display: true, text: valueLabel, color: t.muted },
-            ticks: {
-              color: t.faint,
-              ...(roundingEnabled ? {
-                stepSize: roundingIntervalHours,
-                // Preserve the rounding interval as the underlying tick unit,
-                // but avoid labeling every interval on taller time ranges.
-                maxTicksLimit: 10,
-                callback: (value) => formatRoundedTick(value),
-              } : {}),
-            },
-            grid: { color: t.border, drawBorder: false },
-          },
-        },
-      }
-    }
-
-    /* Was a local golden-angle walk keyed on insertion order, which gave a
-       client a different colour here than on the History timeline. clientColor()
-       hashes the name instead, so the two agree. */
-    const getClientColor = clientColor
-
-    /** Current selection as [start, end]. A single-day pick counts as both. */
-    function selectedRange() {
-      const [start, end] = document.getElementById('date-range').value.split(' to ')
-      return start ? [start, end || start] : null
-    }
-
-    /**
-     * Fetch JSON, but fail loudly and legibly. A 404 from Flask is an HTML error
-     * page, and calling .json() on that throws an opaque "Unexpected token '<'".
-     *
-     * Retries hard — these are reads against our own local server, so there's
-     * nothing to be gained by giving up early or asking the user to click.
-     */
-    async function fetchJSON(url, retries = 40) {
-      let lastError
-
-      for (let attempt = 0; attempt <= retries; attempt++) {
-        const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 10000)
-
-        try {
-          const response = await fetch(url, { signal: controller.signal })
-          if (!response.ok) {
-            throw new Error(`${response.status} ${response.statusText} — ${url}`)
-          }
-          const body = await response.text()
-          try {
-            return JSON.parse(body)
-          } catch {
-            throw new Error(`Expected JSON from ${url} but got ${body.slice(0, 40)}…`)
-          }
-        } catch (error) {
-          lastError = error
-          if (attempt < retries) {
-            await new Promise((r) => setTimeout(r, Math.min(2000, 150 * 2 ** Math.min(attempt, 4))))
-          }
-        } finally {
-          clearTimeout(timeout)
-        }
-      }
-
-      throw lastError
-    }
-
-    let chartRetryTimer = null
-
-    /** Nothing to click — just keep trying in the background. */
-    function scheduleChartRetry() {
-      clearTimeout(chartRetryTimer)
-      chartRetryTimer = setTimeout(refreshCharts, 3000)
-    }
-
-    /** Swap a tab to a message, discarding its canvas. */
-    function showMessage(tabId, message) {
-      document.getElementById(tabId).innerHTML = `<div class="tk-empty">${message}</div>`
-    }
-
-    /** Put the canvas back if a previous error or empty state replaced it. */
-    function ensureCanvas(tabId, canvasId) {
-      const tab = document.getElementById(tabId)
-      if (!document.getElementById(canvasId)) {
-        tab.innerHTML = `<div class="h-[60vh] min-h-[320px]"><canvas id="${canvasId}"></canvas></div>`
-      }
-      return document.getElementById(canvasId)
-    }
-
-    async function updateChart() {
-      const range = selectedRange()
-      if (!range) return
-      try {
-        const data = await fetchJSON(`/api/summary/custom/${range[0]}/${range[1]}`)
-        if (!data.length) return showMessage('client-tab', 'No tracked time logged in this range.')
-        createBarChart('timeChart', `${roundingEnabled ? 'Billable' : 'Tracked'} time by client`, data)
-      } catch (error) {
-        console.error(error)
-        showMessage('client-tab', 'Can\'t reach the server. Reconnecting…')
-        scheduleChartRetry()
-      }
-    }
-
-    async function updateDailyChart() {
-      const range = selectedRange()
-      if (!range) return
-      try {
-        const data = await fetchJSON(`/api/summary/daily/${range[0]}/${range[1]}`)
-        if (!data.length) return showMessage('daily-tab', 'No tracked time logged in this range.')
-        createDailyChart('dailyTimeChart', `Daily ${roundingEnabled ? 'billable' : 'tracked'} hours`, data)
-      } catch (error) {
-        console.error(error)
-        showMessage('daily-tab', 'Can\'t reach the server. Reconnecting…')
-        scheduleChartRetry()
-      }
-    }
-
-    function createBarChart(canvasId, title, data) {
-      if (chart) chart.destroy()
-      const canvas = ensureCanvas('client-tab', canvasId)
-
-      data.sort((a, b) => b.total_hours - a.total_hours)
-      const totalHours = data.reduce((sum, item) => sum + item.total_hours, 0)
-
-      const displayedTotal = roundingEnabled
-        ? `${formatDecimalHours(totalHours)} hrs.`
-        : formatDurationMinutes(totalHours * 60)
-      const options = baseChartOptions(`${title} — ${displayedTotal} total`)
-      options.plugins.legend.display = false
-
-      chart = new Chart(canvas.getContext('2d'), {
-        type: 'bar',
-        data: {
-          labels: data.map((item) => item.client_name),
-          datasets: [
-            {
-              label: valueLabel,
-              data: data.map((item) => item.total_hours),
-              tracked: data.map((item) => item.tracked_hours),
-              backgroundColor: data.map((item) => getClientColor(item.client_name)),
-              borderRadius: 4,
-              borderSkipped: false,
-            },
-          ],
-        },
-        options,
-      })
-    }
-
-    function createDailyChart(canvasId, title, data) {
-      if (dailyChart) dailyChart.destroy()
-      const canvas = ensureCanvas('daily-tab', canvasId)
-
-      const t = tokens()
-      const hours = data.map((item) => item.total_hours)
-
-      // 5-day centred moving average
-      const movingAverage = hours.map((value, index, array) => {
-        const window = array.slice(Math.max(0, index - 2), Math.min(array.length, index + 3))
-        return window.reduce((a, b) => a + b, 0) / window.length
-      })
-
-      dailyChart = new Chart(canvas.getContext('2d'), {
-        type: 'line',
-        data: {
-          labels: data.map((item) => item.date),
-          datasets: [
-            {
-              label: valueLabel,
-              data: hours,
-              tracked: data.map((item) => item.tracked_hours),
-              borderColor: t.accent,
-              backgroundColor: t.accent,
-              pointRadius: 2,
-              tension: 0.25,
-              fill: false,
-            },
-            {
-              label: `5-day average (${roundingEnabled ? 'billable' : 'tracked'})`,
-              data: movingAverage,
-              borderColor: t.danger,
-              borderDash: [5, 5],
-              pointRadius: 0,
-              tension: 0.25,
-              fill: false,
-            },
-          ],
-        },
-        options: baseChartOptions(title),
-      })
-    }
-
-    function refreshCharts() {
-      clearTimeout(chartRetryTimer)
-      updateChart()
-      updateDailyChart()
-    }
-
-    // ready(), not DOMContentLoaded: this block is a module now, and modules are
-    // deferred — a listener registered after the event has fired never runs.
-    ready(() => {
-      flatpickr('#date-range', flatpickrCalendarOptions({
-        mode: 'range',
-        dateFormat: 'Y-m-d',
-        onChange: (selectedDates) => {
-          if (selectedDates.length === 2) refreshCharts()
-        },
-      }))
-
-      document.querySelectorAll('.tk-segment').forEach((button) => {
-        button.addEventListener('click', () => {
-          document.querySelectorAll('.tk-segment').forEach((b) => {
-            const selected = b === button
-            b.classList.toggle('active', selected)
-            b.setAttribute('aria-selected', selected ? 'true' : 'false')
-            b.tabIndex = selected ? 0 : -1
-          })
-          document.querySelectorAll('.tab-content').forEach((panel) => {
-            const selected = panel.id === `${button.dataset.tab}-tab`
-            panel.classList.toggle('hidden', !selected)
-            panel.hidden = !selected
-          })
-
-          button.focus()
-        })
-      })
-
-      document.querySelector('[role="tablist"]').addEventListener('keydown', (event) => {
-        if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return
-        const tabs = [...document.querySelectorAll('.tk-segment[role="tab"]')]
-        const current = tabs.indexOf(document.activeElement)
-        const next = event.key === 'Home' ? tabs[0]
-          : event.key === 'End' ? tabs.at(-1)
-            : tabs[(current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length]
-        event.preventDefault()
-        next.click()
-      })
-
-      // Default range: Monday–Friday of the current week.
-      const today = new Date()
-      const monday = new Date(today)
-      monday.setDate(today.getDate() - today.getDay() + 1)
-      const friday = new Date(today)
-      friday.setDate(today.getDate() - today.getDay() + 5)
-
-      document.getElementById('date-range')._flatpickr.setDate([monday, friday])
-      refreshCharts()
-    })
-
-    // Charts bake their colours in at construction time, so rebuild on theme change.
-    document.addEventListener('themeChanged', refreshCharts)
-  </script>
+  <script src="{{ url_for('static', filename='js/summary.js') }}" type="module"></script>
 {% endblock %}

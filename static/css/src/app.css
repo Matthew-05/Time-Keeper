@@ -1806,31 +1806,44 @@
      by the fill, the badge and the projection marker, so a card can never show
      an amber bar above a green label. */
 
-  .tk-budget-card {
-    background-color: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    box-shadow: var(--shadow-sm);
-    /* Fallback; every real card sets one of the data-status rules below. */
+  /* ---- Status colour scope ----
+     Four things carry a budget's status colour now — the Budgets cards, the
+     Today strip, the Summary page's budget rows and its capacity meter — and
+     they must never disagree, so the mapping is declared once and each
+     selector joins the rule rather than restating it. `.tk-status-scope` is
+     the bare version: the variables and nothing else, for callers that want
+     the colours without a card's border or a strip's fill.
+
+     Set `--status` on anything that contains a `.tk-meter`; the fill reads it,
+     and an unset variable resolves to an invalid colour, i.e. an empty bar. */
+  .tk-status-scope,
+  .tk-budget-card,
+  .tk-budget-strip {
+    /* Fallback; anything with a real status sets one of the rules below. */
     --status: var(--accent);
     --status-soft: var(--accent-soft);
     --status-text: var(--accent-text);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
   }
 
-  .tk-budget-card[data-status='on_track'] {
+  .tk-status-scope[data-status='on_track'],
+  .tk-budget-card[data-status='on_track'],
+  .tk-budget-strip[data-status='on_track'] {
     --status: var(--success);
     --status-soft: var(--success-soft);
     --status-text: var(--success);
   }
 
-  .tk-budget-card[data-status='at_risk'] {
+  .tk-status-scope[data-status='at_risk'],
+  .tk-budget-card[data-status='at_risk'],
+  .tk-budget-strip[data-status='at_risk'] {
     --status: var(--warn);
     --status-soft: var(--warn-soft);
     --status-text: var(--warn);
   }
 
-  .tk-budget-card[data-status='over'] {
+  .tk-status-scope[data-status='over'],
+  .tk-budget-card[data-status='over'],
+  .tk-budget-strip[data-status='over'] {
     --status: var(--danger);
     --status-soft: var(--danger-soft);
     --status-text: var(--danger);
@@ -1840,12 +1853,26 @@
      about to blow this budget" colour, and a project on hold is not in
      trouble — it's not moving. Making the two look alike would train the eye
      to ignore both. */
+  .tk-status-scope[data-status='upcoming'],
+  .tk-status-scope[data-status='paused'],
+  .tk-status-scope[data-status='closed'],
   .tk-budget-card[data-status='upcoming'],
   .tk-budget-card[data-status='paused'],
-  .tk-budget-card[data-status='closed'] {
+  .tk-budget-card[data-status='closed'],
+  .tk-budget-strip[data-status='upcoming'],
+  .tk-budget-strip[data-status='paused'],
+  .tk-budget-strip[data-status='closed'] {
     --status: var(--faint);
     --status-soft: var(--surface-3);
     --status-text: var(--muted);
+  }
+
+  .tk-budget-card {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-sm);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
   }
 
   /* A dashed border says "deliberately stopped" at a glance across a grid of
@@ -2064,7 +2091,10 @@
     color: var(--status-text);
   }
 
-  /* The Today-page widget: same information, one line, no chrome. */
+  /* The Today-page widget: same information, one line, no chrome. Its status
+     colours come from the shared scope above — a paused budget still appears
+     here, because it's the client you'd be recording against and that is
+     exactly when you want telling the project is supposed to be on hold. */
   .tk-budget-strip {
     @apply rounded-lg border px-3 py-2.5;
     background-color: var(--control-fill);
@@ -2072,9 +2102,6 @@
     transition:
       background-color 0.15s ease,
       border-color 0.15s ease;
-    --status: var(--accent);
-    --status-soft: var(--accent-soft);
-    --status-text: var(--accent-text);
   }
 
   .tk-budget-strip:hover {
@@ -2082,31 +2109,16 @@
     border-color: var(--control-border);
   }
 
-  .tk-budget-strip[data-status='on_track'] {
-    --status: var(--success);
-    --status-soft: var(--success-soft);
-    --status-text: var(--success);
+  /* The Summary page's rollup. A row in a divided list rather than a boxed
+     strip: the card around it already draws the edges, and a second border per
+     row would turn the list into a stack of chips. */
+  .tk-budget-row {
+    @apply px-5 py-4;
+    transition: background-color 0.12s ease;
   }
 
-  .tk-budget-strip[data-status='at_risk'] {
-    --status: var(--warn);
-    --status-soft: var(--warn-soft);
-    --status-text: var(--warn);
-  }
-
-  .tk-budget-strip[data-status='over'] {
-    --status: var(--danger);
-    --status-soft: var(--danger-soft);
-    --status-text: var(--danger);
-  }
-
-  /* A paused budget still appears on the Today strip — it's the client you'd
-     be recording against, and that's exactly when you want to be told the
-     project is supposed to be on hold. */
-  .tk-budget-strip[data-status='paused'] {
-    --status: var(--faint);
-    --status-soft: var(--surface-3);
-    --status-text: var(--muted);
+  .tk-budget-row:hover {
+    background-color: var(--surface-2);
   }
 
   /* `.tk-budget-warning` used to sit here, undoing `.tk-insight`'s fixed
@@ -2520,6 +2532,209 @@
     .tk-calendar-override-label {
       display: none;
     }
+  }
+
+  /* --------------------------------------------------------------------
+     Summary dashboard
+     --------------------------------------------------------------------
+     The month grid is the work calendar's, wholesale: same panel, same
+     hairlines, same four state channels (fill for which month, hatch for
+     non-working, ring for today, solid fill for selected). Everything below
+     is what a *reading* cell needs on top of that — an amount, a bar for
+     scale, and a dot per client.
+
+     Which is why the heat bar gets its own ink variable rather than a fixed
+     colour: on a selected cell the background is already the accent, so an
+     accent bar would vanish into it. Same trick `--calendar-today-ink` uses
+     two hundred lines up, for the same reason. */
+
+  .tk-summary-day {
+    --calendar-heat-ink: var(--accent);
+  }
+
+  /* Past a full day of capacity — which every weekend hour is, since a
+     non-working day has none. Not a warning: the point is that the day is
+     the notable one in its row, and an amber bar is how you find it without
+     reading seven numbers. */
+  .tk-summary-day.is-over {
+    --calendar-heat-ink: var(--warn);
+  }
+
+  .tk-summary-day.is-selected,
+  .tk-summary-day.is-selected.is-over {
+    --calendar-heat-ink: var(--accent-fg);
+  }
+
+  .tk-summary-day-top {
+    align-items: center;
+    display: flex;
+    gap: 0.25rem;
+    justify-content: space-between;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .tk-summary-day-dots {
+    align-items: center;
+    display: flex;
+    flex-shrink: 0;
+    gap: 0.1875rem;
+  }
+
+  /* The ring is drawn in the cell's own ink, so a client whose hue happens to
+     land near the accent still reads as a separate object on a selected cell. */
+  .tk-summary-day-dot {
+    border-radius: 999px;
+    box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent);
+    flex-shrink: 0;
+    height: 0.4375rem;
+    width: 0.4375rem;
+  }
+
+  .tk-summary-day-more {
+    font-size: 0.625rem;
+    font-weight: 600;
+    line-height: 1;
+    opacity: 0.7;
+  }
+
+  /* Track drawn from the cell's ink rather than a token, so it holds its
+     contrast on the four different fills a cell can have. */
+  .tk-summary-day-heat {
+    background-color: color-mix(in srgb, currentColor 14%, transparent);
+    border-radius: 999px;
+    flex-shrink: 0;
+    height: 0.25rem;
+    margin-top: 0.375rem;
+    overflow: hidden;
+    width: 100%;
+  }
+
+  .tk-summary-day-heat > span {
+    background-color: var(--calendar-heat-ink);
+    border-radius: 999px;
+    display: block;
+    height: 100%;
+    transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .tk-summary-day-empty {
+    font-weight: 400;
+    opacity: 0.45;
+  }
+
+  /* Quick ranges. Pills rather than a segmented control: a segmented control
+     promises the options are exhaustive, and any Shift-drag on the calendar
+     produces a range none of these describes. */
+  .tk-chip-row {
+    @apply flex flex-wrap items-center gap-1.5;
+  }
+
+  .tk-chip {
+    @apply rounded-full border px-3 py-1 text-xs font-medium;
+    background-color: var(--control-fill);
+    border-color: var(--control-border);
+    color: var(--muted);
+    cursor: pointer;
+    transition:
+      background-color 0.12s ease,
+      border-color 0.12s ease,
+      color 0.12s ease;
+    white-space: nowrap;
+  }
+
+  .tk-chip:hover {
+    background-color: var(--control-hover);
+    color: var(--text);
+  }
+
+  .tk-chip.active {
+    background-color: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-text);
+  }
+
+  .tk-chip:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Sortable column heading. Inherits everything from the `th` so the button
+     is invisible until you need it; the caret is the only added ink. */
+  .tk-sort {
+    align-items: center;
+    color: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    font: inherit;
+    gap: 0.3rem;
+    letter-spacing: inherit;
+    text-transform: inherit;
+  }
+
+  .tk-sort:hover,
+  .tk-sort.active {
+    color: var(--text);
+  }
+
+  .tk-sort:focus-visible {
+    border-radius: 3px;
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .tk-sort::after {
+    border-left: 3px solid transparent;
+    border-right: 3px solid transparent;
+    content: '';
+    display: inline-block;
+    height: 0;
+    opacity: 0;
+    width: 0;
+  }
+
+  .tk-sort.active::after {
+    opacity: 1;
+  }
+
+  .tk-sort[data-direction='desc']::after {
+    border-top: 4px solid currentColor;
+  }
+
+  .tk-sort[data-direction='asc']::after {
+    border-bottom: 4px solid currentColor;
+  }
+
+  /* One client, one line — used both in the sidebar list and as the swatch in
+     the table, so a colour means the same thing in all three places it and the
+     calendar dots appear. */
+  .tk-mix-row {
+    @apply flex items-center gap-2;
+  }
+
+  .tk-mix-swatch {
+    border-radius: 3px;
+    display: inline-block;
+    flex-shrink: 0;
+    height: 0.625rem;
+    width: 0.625rem;
+  }
+
+  .tk-share-bar {
+    background-color: var(--surface-3);
+    border-radius: 999px;
+    display: inline-block;
+    flex-shrink: 0;
+    height: 0.375rem;
+    overflow: hidden;
+    width: 3.5rem;
+  }
+
+  .tk-share-bar > span {
+    background-color: var(--accent);
+    border-radius: 999px;
+    display: block;
+    height: 100%;
   }
 }
 

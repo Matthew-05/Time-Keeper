@@ -66,9 +66,11 @@ def task_seconds(task, now=None):
 def round_to_quarter_hour(seconds):
     """Compatibility helper for the original nearest-quarter rule.
 
-    Mirrors ``main.round_to_quarter_hour`` and ``totalTimeSpentToFractionalHours``
-    in the frontend. Half-up rather than Python's banker's rounding, so the three
-    of them agree on exact 7.5-minute boundaries.
+    Mirrors ``totalTimeSpentToFractionalHours`` in the frontend. Half-up rather
+    than Python's banker's rounding, so the two agree on exact 7.5-minute
+    boundaries. ``main.py`` had a third copy of this; it went when the Summary
+    page stopped needing it, and everything there now calls the policy-aware
+    ``rounding.round_seconds_to_hours`` directly.
     """
     return round_seconds_to_hours(seconds)
 

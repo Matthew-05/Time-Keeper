@@ -51,6 +51,7 @@ import settings as user_settings
 # the local variables in this file, and shadowing the module was a real bug
 # waiting to happen.
 import budgets as budget_allocation
+import summary as summary_report
 from rounding import round_seconds_to_hours
 import notifications
 import ipc
@@ -1361,17 +1362,7 @@ def get_min_time():
 
 @app.route('/summary')
 def summary_page():
-    clients = Client.query.all()
-    return render_template('time_summary.html', clients=clients, version=APP_VERSION)
-    
-def _parse_range(start_date, end_date):
-    """Parse two YYYY-MM-DD strings, tolerating them being the wrong way round.
-
-    Returns (start, end) or raises ValueError.
-    """
-    start = datetime.strptime(start_date, '%Y-%m-%d').date()
-    end = datetime.strptime(end_date, '%Y-%m-%d').date()
-    return (end, start) if start > end else (start, end)
+    return render_template('time_summary.html', version=APP_VERSION)
 
 
 def task_duration_seconds(task, now=None):
@@ -1408,16 +1399,6 @@ def tasks_between(start, end):
     ).all()
 
 
-def round_to_quarter_hour(seconds):
-    """Compatibility helper for the original nearest-quarter rule.
-
-    Mirrors `totalTimeSpentToFractionalHours` in task_browser.js. Uses explicit
-    half-up rounding rather than Python's round(), which is banker's rounding
-    and would disagree with the JS on exact .125 boundaries (7.5 min).
-    """
-    return round_seconds_to_hours(seconds)
-
-
 def _rounding_policy():
     """Snapshot the global policy for one calculation."""
     settings = user_settings.load_settings()
@@ -1445,92 +1426,98 @@ def bucket_by_client_and_day(start, end, now=None):
     return buckets
 
 
-@app.route('/api/summary/custom/<start_date>/<end_date>', methods=['GET'])
-def get_custom_summary(start_date, end_date):
-    """Billable hours per client across a date range.
+# --------------------------------------------------------------------------
+# Summary dashboard
+#
+# The arithmetic lives in summary.py; this is the query layer and the HTTP
+# surface over it. Two reads back the whole page, split by *what they describe*
+# rather than by which card wants them:
+#
+#   /api/summary/calendar — one row per date in the calendar's visible month
+#       grid. Deliberately independent of what is selected, because the grid
+#       goes on painting amounts for dates outside the selection.
+#   /api/summary/overview — the selected range, aggregated. Totals, the daily
+#       series and the per-client rollup all come out of one call, so a card
+#       can never disagree with the figure in the KPI strip above it.
+#
+# Budget health is not here: `/api/budgets` already returns every budget with
+# its live figures, and the dashboard filters that to the ones the range
+# touches. A second code path to the same numbers is how they start to differ.
+# --------------------------------------------------------------------------
 
-    `total_hours` is the billable figure: the global policy is applied to each
-    client-day, then summed. `tracked_hours` is the raw time so the UI can show
-    what rounding did when it is enabled.
-    """
-    try:
-        start, end = _parse_range(start_date, end_date)
-    except ValueError:
-        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD.'}), 400
-
-    policy = _rounding_policy()
-    rounded = {}
-    tracked = {}
-    for (name, _day), seconds in bucket_by_client_and_day(start, end).items():
-        rounded[name] = rounded.get(name, 0) + round_seconds_to_hours(seconds, policy)
-        tracked[name] = tracked.get(name, 0) + seconds
-
-    return jsonify([
-        {
-            'client_name': name,
-            'total_hours': round(hours, 2),
-            'tracked_hours': round(tracked[name] / 3600, 2),
-        }
-        for name, hours in sorted(rounded.items(), key=lambda kv: -kv[1])
-    ])
+# A year, matching /api/work-calendar. Both are bounded because the window
+# arrives as a URL parameter and the day loop is linear in its length.
+SUMMARY_WINDOW_MAX_DAYS = 370
 
 
-@app.route('/api/summary/daily/<start_date>/<end_date>', methods=['GET'])
-def get_daily_summary(start_date, end_date):
-    """Billable hours per day across a date range.
-
-    Same global policy as the per-client view: each client's time within a day
-    is adjusted separately, then the day is the sum of those client figures.
-
-    Ordered by date, and only days that actually have tasks are included so
-    days off don't drag the moving average down.
-    """
-    try:
-        start, end = _parse_range(start_date, end_date)
-    except ValueError:
-        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD.'}), 400
-
-    policy = _rounding_policy()
-    rounded = {}
-    tracked = {}
-    for (_name, day), seconds in bucket_by_client_and_day(start, end).items():
-        rounded[day] = rounded.get(day, 0) + round_seconds_to_hours(seconds, policy)
-        tracked[day] = tracked.get(day, 0) + seconds
-
-    return jsonify([
-        {
-            'date': day.strftime('%Y-%m-%d'),
-            'total_hours': round(hours, 2),
-            'tracked_hours': round(tracked[day] / 3600, 2),
-        }
-        for day, hours in sorted(rounded.items())
-    ])
-
-
-@app.route('/api/summary/<string:period>/<int:client_id>', methods=['GET'])
-def get_time_summary(period, client_id):
-    if period not in ['weekly', 'monthly']:
-        return jsonify({'error': 'Invalid period. Use "weekly" or "monthly".'}), 400
-
-    today = datetime.now().date()
-    if period == 'weekly':
-        start_date = today - timedelta(days=today.weekday())
-    else:  # monthly
-        start_date = today.replace(day=1)
-
-    now = datetime.now()
-    total_time = sum(
-        task_duration_seconds(task, now)
-        for task in Task_Item.query.filter(
-            Task_Item.client_id == client_id,
-            Task_Item.date >= start_date,
-        ).all()
+def _summary_window():
+    """The `start`/`end` query parameters as dates, or a message to reject."""
+    return summary_report.parse_window(
+        request.args.get('start'),
+        request.args.get('end'),
+        SUMMARY_WINDOW_MAX_DAYS,
     )
 
+
+def _summary_day_rows(start, end, weekdays=None, now=None):
+    """Per-day billable figures for a window, capacity resolved alongside."""
+    hours_per_day, work_days, overrides, schedule_history = _work_calendar_settings()
+
+    def capacity_for(day):
+        details = budget_allocation.workday_details(
+            day, hours_per_day, work_days, overrides, schedule_history
+        )
+        return details['is_workday'], details['hours']
+
+    return summary_report.day_rows(
+        start,
+        end,
+        bucket_by_client_and_day(start, end, now),
+        capacity_for,
+        policy=_rounding_policy(),
+        weekdays=weekdays,
+    )
+
+
+@app.route('/api/summary/calendar', methods=['GET'])
+def api_summary_calendar():
+    """Per-day billable amounts for the whole of the calendar grid's window."""
+    start, end, error = _summary_window()
+    if error:
+        return jsonify({'error': error}), 400
+
     return jsonify({
-        'client_id': client_id,
-        'period': period,
-        'total_time': total_time
+        'currency': None,
+        'rounding': _rounding_policy(),
+        'start_date': start.isoformat(),
+        'end_date': end.isoformat(),
+        'days': _summary_day_rows(start, end),
+    })
+
+
+@app.route('/api/summary/overview', methods=['GET'])
+def api_summary_overview():
+    """Everything the dashboard shows about one selected range."""
+    start, end, error = _summary_window()
+    if error:
+        return jsonify({'error': error}), 400
+
+    weekdays, error = summary_report.parse_weekdays(request.args.get('weekdays'))
+    if error:
+        return jsonify({'error': error}), 400
+
+    rows = _summary_day_rows(start, end, weekdays)
+    clients = summary_report.client_rollup(rows)
+
+    return jsonify({
+        'currency': None,
+        'rounding': _rounding_policy(),
+        'start_date': start.isoformat(),
+        'end_date': end.isoformat(),
+        'weekdays': sorted(weekdays) if weekdays else None,
+        'totals': summary_report.totals(rows, clients),
+        'days': rows,
+        'clients': clients,
     })
 
 # --------------------------------------------------------------------------

@@ -1,41 +1,17 @@
 import { TimeKeeper, confirmAction, disarmConfirm, ready } from './base.js'
-import { daysSinceWeekStart, isoWeekday } from './week_start.js'
-
-const MONTH_FORMAT = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' })
-const RANGE_FORMAT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-const WEEKDAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-
-function localDate(value) {
-    const [year, month, day] = value.split('-').map(Number)
-    return new Date(year, month - 1, day)
-}
-
-function isoDate(value) {
-    const year = value.getFullYear()
-    const month = String(value.getMonth() + 1).padStart(2, '0')
-    const day = String(value.getDate()).padStart(2, '0')
-    return `${year}-${month}-${day}`
-}
-
-function addDays(value, amount) {
-    const next = new Date(value.getFullYear(), value.getMonth(), value.getDate())
-    next.setDate(next.getDate() + amount)
-    return next
-}
-
-/* The grid always renders whole weeks, so it runs from the start of the week
-   containing the 1st to the end of the week containing the last day. Which
-   weekday that is depends on the week-start preference; the weekday *numbers*
-   used everywhere else remain ISO. */
-function startOfCalendar(month) {
-    const first = new Date(month.getFullYear(), month.getMonth(), 1)
-    return addDays(first, -daysSinceWeekStart(first))
-}
-
-function endOfCalendar(month) {
-    const last = new Date(month.getFullYear(), month.getMonth() + 1, 0)
-    return addDays(last, 6 - daysSinceWeekStart(last))
-}
+import { isoWeekday } from './week_start.js'
+import {
+    MONTH_FORMAT,
+    RANGE_FORMAT,
+    WEEKDAY_NAMES,
+    addDays,
+    endOfCalendar,
+    formatRange,
+    formatSpan,
+    isoDate,
+    localDate,
+    startOfCalendar,
+} from './calendar_dates.js'
 
 /**
  * Every edit on this page is written straight through to the settings file.
@@ -748,9 +724,10 @@ class WorkCalendar extends TimeKeeper {
         return this.selectedDateKeys().length
     }
 
+    /* Both delegate to calendar_dates.js. Kept as methods so the call sites
+       below (and the rule list's own formatting) read the same as before. */
     formatRange(start, end) {
-        if (start === end) return RANGE_FORMAT.format(localDate(start))
-        return `${RANGE_FORMAT.format(localDate(start))} – ${RANGE_FORMAT.format(localDate(end))}`
+        return formatRange(start, end)
     }
 
     /* Clicking a weekday heading always selects the whole visible month, and
@@ -758,15 +735,7 @@ class WorkCalendar extends TimeKeeper {
        endpoints. A saved rule can span any dates, so anything that isn't
        exactly one calendar month falls back to the range. */
     formatSpan(start, end) {
-        const from = localDate(start)
-        const to = localDate(end || start)
-        const lastOfMonth = new Date(to.getFullYear(), to.getMonth() + 1, 0).getDate()
-        const wholeMonth =
-            from.getDate() === 1
-            && to.getDate() === lastOfMonth
-            && from.getFullYear() === to.getFullYear()
-            && from.getMonth() === to.getMonth()
-        return wholeMonth ? MONTH_FORMAT.format(from) : this.formatRange(start, end || start)
+        return formatSpan(start, end)
     }
 }
 
