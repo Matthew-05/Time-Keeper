@@ -11,6 +11,19 @@ import {
     visTimelineTimeFormat,
 } from './time_format.js';
 import { flatpickrCalendarOptions } from './week_start.js';
+import { localDate } from './calendar_dates.js';
+
+/** The id of the one editable item on the Add task timeline. */
+const ADD_TASK_DRAFT_ID = 'draft';
+
+/**
+ * Dragging resolution. Five minutes matches how people describe a block of
+ * work; the pickers are still free to the minute for anyone who needs it.
+ */
+const ADD_TASK_SNAP_MS = 5 * 60 * 1000;
+
+/** A draft can't be squashed below this, or it would save as nothing. */
+const ADD_TASK_MIN_MINUTES = 5;
 
 /**
  * Collapse touching task ranges for the same active client into one visual
@@ -43,6 +56,7 @@ export class TaskBrowser extends TimeKeeper {
         this.isLoading = false;
         this.initializeElements();
         this.initializeWorksModal();
+        this.initializeAddTaskModal();
         this.initializeTimePicker();
         this.initializeDayTimePickers();
         // Floating this promise un-caught meant any failure during startup
@@ -83,6 +97,10 @@ export class TaskBrowser extends TimeKeeper {
         // the row behind it is the thing that would move.
         if (this.worksModal && !this.worksModal.classList.contains('hidden')) return true;
 
+        // Add task open: it holds times chosen against the gaps as they were
+        // when it opened, and a refresh would move the table underneath it.
+        if (this.addTaskModal && !this.addTaskModal.classList.contains('hidden')) return true;
+
         // A task row mid-edit, with unsaved times in its pickers.
         if (document.querySelector('#tasks-tbody .tk-row-editing')) return true;
 
@@ -104,6 +122,7 @@ export class TaskBrowser extends TimeKeeper {
     /** Stop the refresh poller. See the note on TimeKeeperIndex.destroy(). */
     destroy() {
         this.tasksPoller?.stop();
+        this.destroyAddTaskTimeline();
         // #loadTasks queues this on failure and it retries indefinitely, so a
         // page torn down mid-outage would otherwise keep one alive.
         clearTimeout(this.reloadTimer);
@@ -187,13 +206,22 @@ export class TaskBrowser extends TimeKeeper {
     handleTimeFormatChanged() {
         this.reconfigureTimePicker(this.dayStartTimePicker)
         this.reconfigureTimePicker(this.dayEndTimePicker)
+        this.reconfigureTimePicker(this.addTaskStartPicker)
+        this.reconfigureTimePicker(this.addTaskEndPicker)
         document.querySelectorAll('.task-time-picker').forEach((input) => {
             this.reconfigureTimePicker(input._flatpickr)
         })
         document.querySelectorAll('[data-clock-time]').forEach((element) => {
             element.textContent = formatClockTime(element.dataset.clockTime)
         })
-        if (this.timeline) this.timeline.setOptions({ format: visTimelineTimeFormat() })
+        const axisFormat = { format: visTimelineTimeFormat() }
+        if (this.timeline) this.timeline.setOptions(axisFormat)
+        // The Add task timeline carries the format in its tooltips as well as
+        // its axis, so the draft is rewritten rather than just reconfigured.
+        if (this.addTaskTimeline) {
+            this.addTaskTimeline.setOptions(axisFormat)
+            this.syncDraftItem()
+        }
     }
 
     showTimeActions(type) {
@@ -382,6 +410,560 @@ export class TaskBrowser extends TimeKeeper {
         }
     }
 
+    // ---- Add task ----------------------------------------------------------
+
+    initializeAddTaskModal() {
+        this.addTaskModal = document.getElementById('add-task-modal');
+        if (!this.addTaskModal) return;
+
+        this.addTaskSubtitle = document.getElementById('add-task-subtitle');
+        this.addTaskClient = document.getElementById('add-task-client');
+        this.addTaskStart = document.getElementById('add-task-start');
+        this.addTaskEnd = document.getElementById('add-task-end');
+        this.addTaskWarning = document.getElementById('add-task-warning');
+        this.addTaskSave = document.getElementById('add-task-save');
+        this.addTaskWorksSection = document.getElementById('add-task-works');
+        this.addTaskTimelineWrap = document.getElementById('add-task-timeline-wrap');
+        this.addTaskTimelineEl = document.getElementById('add-task-timeline');
+
+        // Set when the server has asked to confirm a change to the day's
+        // bounds. The next Save re-sends the same task with permission.
+        this.addTaskStretchConfirmed = false;
+        // The live timeline, its DataSet, and the payload both were built from.
+        this.addTaskTimeline = null;
+        this.addTaskItems = null;
+        this.addTaskDayData = null;
+
+        this.addTaskStartPicker = flatpickr(this.addTaskStart, flatpickrTimeOptions({
+            minuteIncrement: 1,
+            onChange: () => this.handleAddTaskTimeChanged(),
+        }));
+        this.addTaskEndPicker = flatpickr(this.addTaskEnd, flatpickrTimeOptions({
+            minuteIncrement: 1,
+            onChange: () => this.handleAddTaskTimeChanged(),
+        }));
+
+        // The same list the Today page and the Works modal render. Works are
+        // keyed on (client, day) rather than on a task, so it can be filled in
+        // before — or entirely without — the task that prompted opening this.
+        this.addTaskWorks = new WorksList({
+            container: document.getElementById('add-task-works-list'),
+            api: this,
+        });
+        this.addTaskWorksDirty = false;
+
+        document.getElementById('add-task-btn')
+            .addEventListener('click', () => this.openAddTaskModal());
+        document.getElementById('add-task-close')
+            .addEventListener('click', () => this.closeAddTaskModal());
+        document.getElementById('add-task-cancel')
+            .addEventListener('click', () => this.closeAddTaskModal());
+        this.addTaskSave.addEventListener('click', () => this.submitAddTask());
+        this.addTaskClient.addEventListener('change', () => this.syncAddTaskWorks());
+
+        // Any works CRUD inside the modal changes the counts in the table
+        // behind it, so note that a refresh is owed on close. Delegated on the
+        // container because the list rebuilds its own markup constantly.
+        this.addTaskWorksSection.addEventListener('click', (e) => {
+            if (e.target.closest('button')) this.addTaskWorksDirty = true;
+        });
+        this.addTaskWorksSection.addEventListener('submit', () => {
+            this.addTaskWorksDirty = true;
+        });
+
+        this.addTaskModal.addEventListener('click', (e) => {
+            if (e.target === this.addTaskModal) this.closeAddTaskModal();
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !this.addTaskModal.classList.contains('hidden')) {
+                this.closeAddTaskModal();
+            }
+        });
+    }
+
+    async openAddTaskModal() {
+        if (!this.addTaskModal) return;
+
+        const dateStr = this.selectedDate.value;
+        this.addTaskSubtitle.textContent = this.formatDateLong(dateStr);
+        this.resetAddTaskConfirmation();
+        this.addTaskStartPicker.clear();
+        this.addTaskEndPicker.clear();
+        this.addTaskWorksDirty = false;
+        this.addTaskWorksSection.classList.add('hidden');
+        this.destroyAddTaskTimeline();
+
+        // `this.clients` is filled by renderTasks, which is exactly the load
+        // that fails to run when there's nothing to render — and a day with no
+        // tasks is the most likely day to be adding one to.
+        if (!this.clients?.length) {
+            try {
+                this.clients = await this.fetchFromAPI('/clients');
+            } catch (error) {
+                console.error('Could not load clients:', error);
+                this.showToast('Could not load clients', 'error');
+                return;
+            }
+        }
+        setHtml(this.addTaskClient, this.getClientOptions(null, { placeholder: 'Select a client…' }));
+        this.addTaskClient.selectedIndex = 0;
+
+        this.addTaskModal.classList.remove('hidden');
+        lockBodyScroll();
+        this.addTaskClient.focus();
+
+        // After the modal is up, and not before: vis-timeline measures its
+        // container on construction, and one built inside a `hidden` backdrop
+        // comes out zero-width and stays that way.
+        await this.loadAddTaskTimeline(dateStr);
+    }
+
+    // ---- The day timeline --------------------------------------------------
+
+    /**
+     * Draw the day, and let the new task be picked and dragged on it.
+     *
+     * The same vis-timeline the page itself uses, so a range means the same
+     * thing in both places and the two read as one screen. Three kinds of item
+     * share the single lane:
+     *
+     *  - **Recorded tasks**, `editable: false`. Context, not targets — they're
+     *    what makes an untracked stretch mean something.
+     *  - **Untracked stretches**, as `background` items. vis reports a click on
+     *    one as a click on empty canvas rather than on an item, so they're
+     *    matched by the clicked *time* instead of by id, which also means the
+     *    axis and the padding either side behave the same way.
+     *  - **The draft**, the only editable item on the timeline. Dragging its
+     *    body moves it; dragging an edge resizes it; both write straight back
+     *    into the two time fields.
+     */
+    async loadAddTaskTimeline(dateStr) {
+        let response;
+        try {
+            response = await this.fetchFromAPI(`/api/day-timeline/${dateStr}`);
+        } catch (error) {
+            // The timeline is a convenience; the two time fields work perfectly
+            // well without it, so this stays silent and just hides it.
+            console.error('Could not load the day timeline:', error);
+            this.addTaskTimelineWrap.classList.add('hidden');
+            return;
+        }
+
+        // The date can be changed behind an open modal, and a late response
+        // would then describe a day the form is no longer about.
+        if (this.selectedDate.value !== dateStr) return;
+
+        this.addTaskDayData = response;
+        this.buildAddTaskTimeline(dateStr);
+
+        if (response.suggested) {
+            this.applyRange(response.suggested.start_time, response.suggested.end_time);
+        }
+    }
+
+    buildAddTaskTimeline(dateStr) {
+        const data = this.addTaskDayData;
+        if (!data) return;
+
+        this.destroyAddTaskTimeline();
+        this.addTaskTimelineWrap.classList.remove('hidden');
+
+        const at = (clock) => `${dateStr}T${clock}:00`;
+        const items = [];
+
+        for (const gap of data.gaps) {
+            items.push({
+                id: `gap-${gap.start_time}`,
+                type: 'background',
+                className: 'tk-add-task-gap',
+                start: at(gap.start_time),
+                end: at(gap.end_time),
+                editable: false,
+                selectable: false,
+            });
+        }
+
+        for (const task of data.tasks) {
+            const label = this.escapeHtml(task.client);
+            items.push({
+                id: `task-${task.id}`,
+                type: 'range',
+                className: `tk-timeline-range tk-add-task-recorded${task.ongoing ? ' is-ongoing' : ''}`,
+                content: `<span class="tk-timeline-item"><span class="tk-timeline-item-client">${label}</span></span>`,
+                title: `<div class="tk-timeline-tooltip"><strong>${label}</strong>`
+                    + `<span>${this.rangeLabel(task)}</span>`
+                    + `<span>${task.ongoing ? 'Ongoing' : 'Recorded'}</span></div>`,
+                start: at(task.start_time),
+                end: at(task.end_time),
+                // Recorded time is context here. It's edited in the table below,
+                // where the change is explicit and has a Save button.
+                editable: false,
+                selectable: false,
+                style: `background-color: ${clientColor(task.client)}; color: ${clientForeground(task.client)};`,
+            });
+        }
+
+        this.addTaskItems = new vis.DataSet(items);
+
+        const timeline = new vis.Timeline(this.addTaskTimelineEl, this.addTaskItems, {
+            start: at(data.window.start_time),
+            end: at(data.window.end_time),
+            min: `${dateStr}T00:00:00`,
+            max: `${dateStr}T23:59:59`,
+            orientation: 'top',
+            stack: false,
+            verticalScroll: false,
+            zoomKey: 'ctrlKey',
+            zoomMin: 30 * 60 * 1000,
+            zoomMax: 24 * 60 * 60 * 1000,
+            height: '132px',
+            margin: { axis: 10, item: { horizontal: 0, vertical: 12 } },
+            showCurrentTime: dateStr === this.getLocalDateString(),
+            format: visTimelineTimeFormat(),
+            tooltip: { followMouse: true, overflowMethod: 'cap' },
+            // Global editing is on so the draft can be dragged; every other item
+            // opts out individually. `overrideItems` stays false — true would
+            // make this win over those opt-outs and turn recorded time into
+            // something you can drag by accident.
+            editable: {
+                add: false,
+                remove: false,
+                updateGroup: false,
+                updateTime: true,
+                overrideItems: false,
+            },
+            snap: (date) => new Date(Math.round(date.valueOf() / ADD_TASK_SNAP_MS) * ADD_TASK_SNAP_MS),
+            onMoving: (item, callback) => this.handleDraftMoving(item, callback),
+            onMove: (item, callback) => this.handleDraftMoved(item, callback),
+        });
+
+        timeline.on('click', (props) => {
+            // Anything with an id is an item — the draft, or recorded time.
+            // Both are handled by dragging, not by clicking.
+            if (props.item != null || !props.time) return;
+            const gap = this.gapAt(this.dateToMinutes(props.time));
+            if (gap) this.applyRange(gap.start_time, gap.end_time);
+        });
+
+        // Where the day itself begins and ends, which the drawn window doesn't
+        // say — a task dragged past the close marker is visibly outside the day
+        // before the confirmation explains that saving it will move the close.
+        const marker = (clock, id, label) => {
+            if (!clock) return;
+            timeline.addCustomTime(at(clock), id);
+            timeline.setCustomTimeTitle(`${label}: ${formatClockTime(clock)}`, id);
+        };
+        marker(data.day?.start_time, 'tk-day-start', 'Start');
+        marker(data.day?.end_time, 'tk-day-close', 'Close');
+
+        this.addTaskTimeline = timeline;
+        this.syncDraftItem();
+    }
+
+    destroyAddTaskTimeline() {
+        this.addTaskTimeline?.destroy();
+        this.addTaskTimeline = null;
+        this.addTaskItems = null;
+        this.addTaskDayData = null;
+    }
+
+    /** The untracked stretch containing `minute`, or null. */
+    gapAt(minute) {
+        return (this.addTaskDayData?.gaps ?? []).find((gap) => (
+            minute >= this.clockToMinutes(gap.start_time)
+            && minute < this.clockToMinutes(gap.end_time)
+        )) ?? null;
+    }
+
+    /**
+     * The bounds a draft proposed at `[start, end)` may be held within, or null
+     * if it isn't over untracked time at all.
+     *
+     * The gaps are the free regions by construction, so the walls are whichever
+     * gap the draft is most inside — **by overlap**, not by where its midpoint
+     * falls. Midpoints fail at exactly the moment this matters: drag a
+     * two-hour draft thirty minutes past the wall at 14:00 and its midpoint
+     * lands on 14:00, which is in no gap (they're half-open), so the frame
+     * would be refused at the one point it most needs clamping. Overlap has no
+     * such boundary, and picking the largest is also what makes a draft dragged
+     * clean across a task land in the gap on the far side.
+     */
+    draftBounds(start, end) {
+        let bounds = null;
+        let best = 0;
+
+        for (const gap of this.addTaskDayData?.gaps ?? []) {
+            const low = this.clockToMinutes(gap.start_time);
+            const high = this.clockToMinutes(gap.end_time);
+            const overlap = Math.min(end, high) - Math.max(start, low);
+            if (overlap > best) {
+                best = overlap;
+                bounds = [low, high];
+            }
+        }
+
+        return bounds;
+    }
+
+    /**
+     * Live during a drag: hold the draft inside its stretch and write it back.
+     *
+     * Clamping rather than rejecting the frame. Rejecting leaves the item
+     * wherever the last accepted frame put it, so dragging quickly at a wall
+     * stops short of it by however far the pointer moved between frames;
+     * clamping lands exactly on the wall every time.
+     */
+    handleDraftMoving(item, callback) {
+        if (item.id !== ADD_TASK_DRAFT_ID) return callback(null);
+
+        let start = this.dateToMinutes(item.start);
+        let end = this.dateToMinutes(item.end);
+
+        // The floor is applied *before* the walls are chosen. Dragging one edge
+        // past the other proposes a zero-length range, which overlaps nothing,
+        // which would leave it with no walls and get the frame refused — the
+        // draft would stick the moment it was squashed flat.
+        if (end - start < ADD_TASK_MIN_MINUTES) end = start + ADD_TASK_MIN_MINUTES;
+
+        const bounds = this.draftBounds(start, end);
+
+        if (!bounds) {
+            // Not over untracked time at all. Refuse the frame: vis leaves the
+            // item where it was and keeps proposing positions from the pointer,
+            // so a drag across a task simply resumes on the far side rather
+            // than dropping the draft on top of it.
+            return callback(null);
+        }
+
+        const [low, high] = bounds;
+        // Move the whole span back inside the wall it hit, rather than
+        // squashing it — a body drag must keep its length. Capping the span at
+        // the region's own width is what handles a stretch shorter than the
+        // floor: a three-minute gap yields a three-minute draft rather than a
+        // five-minute one hanging over the task next to it.
+        const span = Math.min(end - start, high - low);
+        if (start < low) { start = low; end = low + span; }
+        if (end > high) { end = high; start = high - span; }
+
+        item.start = this.minutesToDate(start);
+        item.end = this.minutesToDate(end);
+        this.setAddTaskTimes(this.minutesToClock(start), this.minutesToClock(end));
+        callback(item);
+    }
+
+    handleDraftMoved(item, callback) {
+        if (item.id !== ADD_TASK_DRAFT_ID) return callback(null);
+        this.setAddTaskTimes(
+            this.minutesToClock(this.dateToMinutes(item.start)),
+            this.minutesToClock(this.dateToMinutes(item.end)),
+        );
+        callback(item);
+    }
+
+    /** Put the draft on the timeline where the two time fields say it is. */
+    syncDraftItem() {
+        if (!this.addTaskItems) return;
+
+        const start = this.fieldMinutes(this.addTaskStart);
+        const end = this.fieldMinutes(this.addTaskEnd);
+        if (start == null || end == null || end <= start) {
+            if (this.addTaskItems.get(ADD_TASK_DRAFT_ID)) {
+                this.addTaskItems.remove(ADD_TASK_DRAFT_ID);
+            }
+            return;
+        }
+
+        this.addTaskItems.update({
+            id: ADD_TASK_DRAFT_ID,
+            type: 'range',
+            className: 'tk-timeline-range tk-add-task-draft',
+            content: '<span class="tk-timeline-item"><span class="tk-timeline-item-client">New task</span></span>',
+            title: `<div class="tk-timeline-tooltip"><strong>New task</strong>`
+                + `<span>${formatClockTime(this.minutesToClock(start))} – ${formatClockTime(this.minutesToClock(end))}</span>`
+                + `<span>Drag to move, drag an edge to resize</span></div>`,
+            start: this.minutesToDate(start),
+            end: this.minutesToDate(end),
+            editable: { updateTime: true, updateGroup: false, remove: false },
+            selectable: true,
+        });
+    }
+
+    clockToMinutes(clock) {
+        return Math.round(clockTimeToSeconds(clock) / 60);
+    }
+
+    minutesToClock(minutes) {
+        const whole = Math.max(0, Math.min(23 * 60 + 59, Math.round(minutes)));
+        return serializeClockTime({ hours: Math.floor(whole / 60), minutes: whole % 60 });
+    }
+
+    /** A vis item boundary (Date or parseable value) as minutes past midnight. */
+    dateToMinutes(value) {
+        const date = value instanceof Date ? value : new Date(value);
+        return date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60;
+    }
+
+    /** Minutes past midnight, on the browsed date, as a Date for vis. */
+    minutesToDate(minutes) {
+        return clockTimeToDate(this.minutesToClock(minutes), localDate(this.selectedDate.value));
+    }
+
+    /**
+     * One time field as minutes, or null if it doesn't hold a time.
+     *
+     * The pickers are read-only so the value is always well-formed in practice,
+     * but this runs on every drag frame and a throw here would take the whole
+     * dialog's interaction with it.
+     */
+    fieldMinutes(input) {
+        if (!input?.value) return null;
+        try {
+            return this.clockToMinutes(serializeClockTime(input.value));
+        } catch {
+            return null;
+        }
+    }
+
+    rangeLabel({ start_time: from, end_time: to }) {
+        return `${formatClockTime(from)} – ${formatClockTime(to)}`;
+    }
+
+    /**
+     * Write both time fields without letting flatpickr call back.
+     *
+     * `setDate(..., false)` suppresses onChange, which is what stops a drag
+     * frame turning into a picker change that redraws the item being dragged.
+     * The bookkeeping onChange would have done is therefore done here instead.
+     */
+    setAddTaskTimes(startClock, endClock) {
+        this.addTaskStartPicker.setDate(clockTimeToDate(startClock), false);
+        this.addTaskEndPicker.setDate(clockTimeToDate(endClock), false);
+        this.resetAddTaskConfirmation();
+    }
+
+    /** Load a start/end pair into the form and onto the timeline. */
+    applyRange(start, end) {
+        this.setAddTaskTimes(start, end);
+        this.syncDraftItem();
+    }
+
+    /** A time field was edited by hand; the draft follows it. */
+    handleAddTaskTimeChanged() {
+        this.resetAddTaskConfirmation();
+        this.syncDraftItem();
+    }
+
+    // ---- Works, client, lifecycle ------------------------------------------
+
+    /** Point the works list at whichever client is selected, or hide it. */
+    async syncAddTaskWorks() {
+        const clientId = parseInt(this.addTaskClient.value, 10);
+        if (Number.isNaN(clientId)) {
+            this.addTaskWorksSection.classList.add('hidden');
+            return;
+        }
+        this.addTaskWorksSection.classList.remove('hidden');
+        try {
+            await this.addTaskWorks.setTarget(this.selectedDate.value, clientId, { force: true });
+        } catch (error) {
+            console.error('Could not load works:', error);
+        }
+    }
+
+    /**
+     * Drop back to the ordinary Save state.
+     *
+     * Any edit to the times invalidates an agreement to move the day's bounds —
+     * the confirmation was about a specific stretch, and a second click after
+     * changing the values would otherwise apply it to a different one.
+     */
+    resetAddTaskConfirmation() {
+        this.addTaskStretchConfirmed = false;
+        this.addTaskWarning?.classList.add('hidden');
+        if (this.addTaskSave) this.addTaskSave.textContent = 'Add task';
+    }
+
+    closeAddTaskModal() {
+        if (!this.addTaskModal || this.addTaskModal.classList.contains('hidden')) return;
+        this.addTaskModal.classList.add('hidden');
+        // vis-timeline keeps window listeners and a hammer.js instance per
+        // instance, so the one built for this session goes with the dialog
+        // rather than being left behind for the next open to stack on.
+        this.destroyAddTaskTimeline();
+        unlockBodyScroll();
+
+        // Works save as they're typed, so closing without adding the task can
+        // still have changed the Works column behind this. resumeRefresh only
+        // collects a tick the poller actually skipped, which on a past date it
+        // never schedules at all.
+        if (this.addTaskWorksDirty) {
+            this.addTaskWorksDirty = false;
+            this.fetchTasks({ background: true }).catch((error) => console.error(error));
+            return;
+        }
+        this.resumeRefresh();
+    }
+
+    async submitAddTask() {
+        const clientId = parseInt(this.addTaskClient.value, 10);
+        if (Number.isNaN(clientId)) {
+            this.showToast('Please select a client', 'error');
+            return;
+        }
+        if (!this.addTaskStart.value || !this.addTaskEnd.value) {
+            this.showToast('Please choose a start and end time', 'error');
+            return;
+        }
+
+        this.addTaskSave.disabled = true;
+        try {
+            // Raw fetch rather than fetchFromAPI: the 409 carries a body that
+            // has to be read to know it's a confirmation rather than a refusal,
+            // and fetchFromAPI surfaces only the message. Same reason
+            // handleTaskUpdate reads `conflict` directly.
+            const response = await fetch('/api/tasks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    date: this.selectedDate.value,
+                    client_id: clientId,
+                    start_time: serializeClockTime(this.addTaskStart.value),
+                    end_time: serializeClockTime(this.addTaskEnd.value),
+                    stretch_day: this.addTaskStretchConfirmed,
+                }),
+            });
+            const data = await response.json();
+
+            if (response.status === 409 && data.needs_confirmation) {
+                this.addTaskStretchConfirmed = true;
+                setText(this.addTaskWarning, data.error);
+                this.addTaskWarning.classList.remove('hidden');
+                this.addTaskSave.textContent = 'Add and extend day';
+                return;
+            }
+
+            if (!response.ok) {
+                if (data.conflict?.start_time && data.conflict?.end_time) {
+                    throw new Error(
+                        `That overlaps an existing task (${formatClockTime(data.conflict.start_time)}–${formatClockTime(data.conflict.end_time)}).`
+                    );
+                }
+                throw new Error(data.error || 'Could not add the task');
+            }
+
+            this.closeAddTaskModal();
+            this.showToast('Task added');
+            await this.fetchTasks();
+        } catch (error) {
+            // The dialog stays open with the values intact so the times can be
+            // corrected against the conflict the message just named.
+            this.showToast(error.message, 'error');
+        } finally {
+            this.addTaskSave.disabled = false;
+        }
+    }
+
     formatDateLong(dateStr) {
         if (!dateStr) return '';
         // Parsed as local parts rather than via Date(dateStr), which reads a
@@ -500,10 +1082,19 @@ export class TaskBrowser extends TimeKeeper {
         }
     }
 
-    getClientOptions(selectedClientId) {
+    /**
+     * @param {number|null} selectedClientId
+     * @param {object} [options]
+     * @param {string} [options.placeholder='REMOVED'] Label for the disabled
+     *   leading option, used when nothing is selected. A task row with no
+     *   client had its client deleted, which is what "REMOVED" says; the Add
+     *   task form has simply not been filled in yet, which is a different
+     *   thing and must not read as an error.
+     */
+    getClientOptions(selectedClientId, { placeholder = 'REMOVED' } = {}) {
         const parts = [];
         if (selectedClientId == null) {
-            parts.push('<option value="" selected disabled>REMOVED</option>');
+            parts.push(`<option value="" selected disabled>${this.escapeHtml(placeholder)}</option>`);
         }
         parts.push(
             ...this.clients.map(client => `

@@ -53,6 +53,7 @@ import settings as user_settings
 import budgets as budget_allocation
 import summary as summary_report
 import day_close
+import day_bounds
 from rounding import round_seconds_to_hours
 import notifications
 import ipc
@@ -61,7 +62,10 @@ import atexit
 import threading
 import time
 import math
-from datetime import datetime, date, timedelta
+# `time` is already taken by the stdlib module imported above for time.sleep,
+# hence the alias rather than a bare `time` — the clash is why parse_clock_time
+# builds its result through datetime(...).time().
+from datetime import datetime, date, timedelta, time as clock_time
 from sqlalchemy import text, inspect, desc, and_, or_
 from flask_migrate import Migrate
 from flask_admin import Admin
@@ -2487,74 +2491,326 @@ def api_unbudgeted_hours(client_id):
     return jsonify({'client_id': client_id, 'unbudgeted_hours': round(unbudgeted, 2)})
 
 
+def _conflicting_task(date_obj, start, end, ignore_id=None):
+    """The first task on ``date_obj`` that overlaps ``[start, end)``, or None.
+
+    Returns ``(task, effective_end)`` — the second value because a running task
+    has no end of its own but still occupies time, and the caller needs
+    something to put in the error message.
+
+    Intervals are half-open, so back-to-back tasks don't collide: one ending at
+    11:00 and one starting at 11:00 share an instant and nothing else, and that
+    is the single most common arrangement in the whole database.
+
+    **A running task counts as occupying its start up to now.** It used to be
+    skipped entirely for having no end time, which meant a task could be
+    inserted straight through the middle of the one currently being tracked —
+    the overlap only became visible later, when the running task was completed
+    and suddenly collided with something already saved.
+    """
+    now = datetime.now()
+
+    query = Task_Item.query.filter(Task_Item.date == date_obj)
+    if ignore_id is not None:
+        query = query.filter(Task_Item.id != ignore_id)
+
+    for task in query.order_by(Task_Item.start_time).all():
+        other_end = task.end_time
+        if other_end is None:
+            # Only today's task can still be running. An open row on an earlier
+            # date is one the startup sweep hasn't reached yet (day_close.py);
+            # it has no defensible extent, so it blocks nothing.
+            if date_obj != now.date():
+                continue
+            other_end = now.time()
+            if other_end <= task.start_time:
+                continue
+
+        if task.start_time < end and other_end > start:
+            return task, other_end
+
+    return None, None
+
+
+def _conflict_response(task, effective_end):
+    conflict_start = task.start_time.strftime('%H:%M')
+    conflict_end = effective_end.strftime('%H:%M')
+    return jsonify({
+        # Keep the established `error` field for old clients while exposing
+        # machine-readable canonical clock values to new ones.
+        'error': f'Task times overlap with existing task ({conflict_start} - {conflict_end}). Please choose a different time.',
+        'conflict': {
+            'task_id': task.id,
+            'start_time': conflict_start,
+            'end_time': conflict_end,
+        },
+    }), 400
+
+
 @app.route('/update_task/<int:task_id>', methods=['PUT'])
 def update_task(task_id):
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({'error': 'JSON object required'}), 400
     task = Task_Item.query.get_or_404(task_id)
-    
+
     try:
         new_start = parse_clock_time(data['start_time'])
         new_end = parse_clock_time(data['end_time'])
     except (KeyError, ValueError):
         return jsonify({'error': 'Invalid start or end time format'}), 400
-    
-    print(f"Looking for tasks around - Start: {new_start}, End: {new_end}")
-    
-    # Get all tasks for the day sorted by start time
-    all_tasks = Task_Item.query.filter(
-        Task_Item.date == task.date,
-        Task_Item.id != task_id,
-        Task_Item.end_time.isnot(None)
-    ).order_by(Task_Item.start_time).all()
-    
-    print("All tasks for the day:", [(t.id, t.start_time, t.end_time) for t in all_tasks])
-    
-    # Find surrounding tasks
-    prev_task = None
-    next_task = None
-    
-    for t in all_tasks:
-        if t.end_time <= new_start:
-            prev_task = t
-        if t.start_time >= new_end and next_task is None:
-            next_task = t
-            break
-    
-    # Check for overlaps
-    overlapping = any(
-        t.start_time < new_end and t.end_time > new_start 
-        for t in all_tasks
-    )
 
-    if overlapping:
-        overlapping_task = next(t for t in all_tasks if t.start_time < new_end and t.end_time > new_start)
-        conflict_start = overlapping_task.start_time.strftime('%H:%M')
-        conflict_end = overlapping_task.end_time.strftime('%H:%M')
-        return jsonify({
-            # Keep the established `error` field for old clients while exposing
-            # machine-readable canonical clock values to new ones.
-            'error': f'Task times overlap with existing task ({conflict_start} - {conflict_end}). Please choose a different time.',
-            'conflict': {
-                'task_id': overlapping_task.id,
-                'start_time': conflict_start,
-                'end_time': conflict_end,
-            },
-        }), 400
+    clash, clash_end = _conflicting_task(task.date, new_start, new_end, ignore_id=task_id)
+    if clash is not None:
+        return _conflict_response(clash, clash_end)
 
-    task.start_time = new_start
-    task.end_time = new_end
     try:
         new_client_id = int(data['client_id'])
     except (TypeError, ValueError, KeyError):
         return jsonify({'error': 'A valid client is required'}), 400
     if Client.query.get(new_client_id) is None:
         return jsonify({'error': 'Client not found'}), 404
+
+    # Validated before anything is assigned: a bad client id used to be rejected
+    # *after* the times had already been written onto the task, so a failed
+    # request still moved it as far as the next commit.
+    task.start_time = new_start
+    task.end_time = new_end
     task.client_id = new_client_id
 
     db.session.commit()
     return jsonify({'success': True})
+
+
+# --------------------------------------------------------------------------
+# Adding a task after the fact
+#
+# The Today page records time as it happens. This is the other way in: a block
+# of work that was never tracked, entered against the day it belongs to from
+# the History page. See day_bounds.py for the two rules that aren't obvious —
+# which stretch of the day to suggest, and what happens when the task falls
+# outside the day's recorded bounds.
+# --------------------------------------------------------------------------
+
+
+def _day_window(date_obj, day):
+    """The span a day's gaps are measured inside, as ``(start, end)``.
+
+    A finished day is bounded by its own recorded times. Today is bounded by
+    now — the rest of the afternoon hasn't happened, and offering it as
+    untracked time would suggest filling in work nobody has done yet. Anything
+    else (no tracking row, no start) has no window, and therefore no
+    suggestions.
+    """
+    if day is None or day.start_time is None:
+        return None, None
+    if day.end_time is not None:
+        return day.start_time, day.end_time
+    if date_obj == date.today():
+        return day.start_time, datetime.now().time()
+    return None, None
+
+
+#: What the day strip spans when the day has no recorded bounds at all. 23:59
+#: rather than midnight because every value on the strip has to be a legal
+#: clock time — it is clicked to fill two time fields, and 24:00 is not a time.
+#: The missing minute is a pixel wide and cannot be selected anyway.
+_FALLBACK_WINDOW = (clock_time(0, 0), clock_time(23, 59))
+
+
+def _day_busy_intervals(date_obj):
+    """``(start, end)`` for every task on the day that occupies real time."""
+    busy = []
+    for task in Task_Item.query.filter_by(date=date_obj).all():
+        end = task.end_time
+        if end is None:
+            # The running task occupies up to now; an unswept open row from an
+            # earlier day occupies nothing (see _conflicting_task).
+            if date_obj != date.today():
+                continue
+            end = datetime.now().time()
+        if end > task.start_time:
+            busy.append((task.start_time, end, task))
+    return busy
+
+
+@app.route('/api/day-timeline/<date_string>', methods=['GET'])
+def api_day_timeline(date_string):
+    """The shape of a day: what it spans, what's on it, and what isn't.
+
+    Drives the Add task strip. Deliberately a separate read rather than
+    something bolted onto `/tasks/<date>`: it's wanted when the form opens, not
+    on every 60-second refresh of the page behind it.
+
+    **The drawing window and the suggestion window are not the same.** The strip
+    has to be drawn even for a day nobody pressed Start on, so it falls back to
+    a whole day and stretches to contain any task that escapes the recorded
+    bounds — nothing may be positioned off the end of the track. The *default*
+    for the two time fields is only ever taken from gaps inside the day as
+    actually recorded, because on a day with no bounds the fallback is one
+    twenty-four-hour gap, and opening the form on 00:00–23:59 would be worse
+    than opening it empty.
+    """
+    try:
+        date_obj = datetime.strptime(date_string, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD.'}), 400
+
+    day = TimeTracking.query.filter_by(date=date_obj).first()
+    recorded_start, recorded_end = _day_window(date_obj, day)
+    busy = _day_busy_intervals(date_obj)
+
+    if recorded_start is not None and recorded_end is not None:
+        window_start, window_end = recorded_start, recorded_end
+        suggested = day_bounds.suggest_gap(day_bounds.find_gaps(
+            recorded_start, recorded_end, [(s, e) for s, e, _ in busy]
+        ))
+    else:
+        window_start, window_end = _FALLBACK_WINDOW
+        suggested = None
+
+    for start, end, _task in busy:
+        window_start = min(window_start, start)
+        window_end = max(window_end, end)
+
+    gaps = day_bounds.find_gaps(window_start, window_end, [(s, e) for s, e, _ in busy])
+
+    return jsonify({
+        'window': {
+            'start_time': window_start.strftime('%H:%M'),
+            'end_time': window_end.strftime('%H:%M'),
+        },
+        # The day as recorded, which is *not* the drawn window — it's what the
+        # markers on the timeline point at, so a task dragged past the day's
+        # close can be seen going past it before the confirmation says so.
+        'day': None if day is None else {
+            'start_time': None if day.start_time is None else day.start_time.strftime('%H:%M'),
+            'end_time': None if day.end_time is None else day.end_time.strftime('%H:%M'),
+        },
+        'tasks': [
+            {
+                'id': task.id,
+                'start_time': start.strftime('%H:%M'),
+                'end_time': end.strftime('%H:%M'),
+                'client': task_client_display_name(task),
+                'client_id': task.client_id,
+                'ongoing': task.end_time is None,
+            }
+            for start, end, task in sorted(busy, key=lambda row: row[0])
+        ],
+        'gaps': [
+            {'start_time': start.strftime('%H:%M'), 'end_time': end.strftime('%H:%M')}
+            for start, end in gaps
+        ],
+        'suggested': None if suggested is None else {
+            'start_time': suggested[0].strftime('%H:%M'),
+            'end_time': suggested[1].strftime('%H:%M'),
+        },
+    })
+
+
+@app.route('/api/tasks', methods=['POST'])
+def api_create_task():
+    """Record a block of work that was never tracked live.
+
+    Two-step when the task falls outside the day's recorded bounds: the first
+    request comes back 409 describing what would move, and the client re-sends
+    with ``stretch_day`` once the user has agreed. The alternative — refusing
+    the task — has it backwards. The task is the record of what happened; the
+    day's bounds are a note about when someone pressed two buttons.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON object required'}), 400
+
+    try:
+        date_obj = datetime.strptime(data.get('date', ''), '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD.'}), 400
+    if date_obj > date.today():
+        return jsonify({'error': "That date hasn't happened yet"}), 400
+
+    try:
+        start = parse_clock_time(data.get('start_time'))
+        end = parse_clock_time(data.get('end_time'))
+    except ValueError:
+        return jsonify({'error': 'Invalid start or end time format'}), 400
+    if end <= start:
+        # Not merely invalid — a zero-length task records nothing and would sit
+        # in the timeline as an unclickable sliver.
+        return jsonify({'error': 'End time must be after the start time'}), 400
+
+    try:
+        client_id = int(data.get('client_id'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'A valid client is required'}), 400
+    client = Client.query.get(client_id)
+    if client is None:
+        return jsonify({'error': 'Client not found'}), 404
+
+    clash, clash_end = _conflicting_task(date_obj, start, end)
+    if clash is not None:
+        return _conflict_response(clash, clash_end)
+
+    day = TimeTracking.query.filter_by(date=date_obj).first()
+    stretch = None
+
+    if day is None:
+        # A day nobody pressed Start on. The task is proof it was worked, so the
+        # day is created around it rather than left absent — otherwise the entry
+        # would show billable time on a day the Summary dashboard treats as
+        # untouched. Today is created *open*: closing it here would leave the
+        # Today page insisting the day had ended.
+        day = TimeTracking(
+            date=date_obj,
+            start_time=start,
+            end_time=None if date_obj == date.today() else end,
+        )
+        db.session.add(day)
+    else:
+        stretch = day_bounds.plan_stretch(day.start_time, day.end_time, start, end)
+        if day_bounds.needs_stretch(stretch) and not data.get('stretch_day'):
+            return jsonify({
+                'error': _stretch_message(day, stretch),
+                'needs_confirmation': True,
+                'stretch': {
+                    'start_time': None if stretch.start is None else stretch.start.strftime('%H:%M'),
+                    'end_time': None if stretch.end is None else stretch.end.strftime('%H:%M'),
+                },
+            }), 409
+
+    task = Task_Item(
+        date=date_obj,
+        start_time=start,
+        end_time=end,
+        client_id=client_id,
+        type=None,
+        description=None,
+        time_spent=0,
+    )
+    db.session.add(task)
+
+    if stretch is not None:
+        if stretch.start is not None:
+            day.start_time = stretch.start
+        if stretch.end is not None:
+            day.end_time = stretch.end
+
+    db.session.commit()
+    return jsonify({'success': True, 'task_id': task.id}), 201
+
+
+def _stretch_message(day, stretch):
+    """What the user is being asked to agree to, in the order they'd say it."""
+    changes = []
+    if stretch.start is not None:
+        was = 'not set' if day.start_time is None else day.start_time.strftime('%H:%M')
+        changes.append(f'start back to {stretch.start.strftime("%H:%M")} (was {was})')
+    if stretch.end is not None:
+        changes.append(
+            f'end on to {stretch.end.strftime("%H:%M")} (was {day.end_time.strftime("%H:%M")})'
+        )
+    return 'This task falls outside the recorded day. Saving it will move the day ' + ' and '.join(changes) + '.'
 
 def _work_json(work):
     return {

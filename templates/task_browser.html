@@ -71,6 +71,15 @@
         <section class="tk-card overflow-hidden">
           <div class="tk-card-header">
             <span class="tk-card-title">By client</span>
+            <!-- The way in for time that was never tracked live. Sits on the
+                 card it adds a row to, not in the page header, which scopes the
+                 date rather than the contents. -->
+            <button type="button" id="add-task-btn" class="tk-btn tk-btn-secondary tk-btn-sm">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Add task
+            </button>
           </div>
           <div class="overflow-x-auto">
             <table class="tk-table tk-table-hover">
@@ -162,6 +171,75 @@
       <div class="tk-modal-footer flex justify-end gap-2">
         <button type="button" id="works-modal-copy" class="tk-btn tk-btn-secondary">Copy</button>
         <button type="button" id="works-modal-done" class="tk-btn tk-btn-primary">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add task.
+
+       The timeline is the point of the whole dialog: the reason anyone opens it
+       is a stretch of the day with nothing against it, so the day is drawn to
+       scale — the same vis-timeline the page itself uses — and the new task is
+       a draggable range on it. Recorded blocks are drawn as context and are not
+       editable; untracked time is a background band you click to claim.
+
+       Wide rather than the default 28rem: a day drawn to scale in a narrow
+       column puts a half-hour task under two pixels. -->
+  <div id="add-task-modal" class="tk-modal-backdrop hidden">
+    <div class="tk-modal tk-modal-wide" role="dialog" aria-modal="true" aria-labelledby="add-task-title">
+      <div class="tk-modal-header">
+        <div>
+          <span class="tk-card-title" id="add-task-title">Add task</span>
+          <p class="text-xs text-faint" id="add-task-subtitle"></p>
+        </div>
+        <button type="button" id="add-task-close" class="tk-btn-icon tk-btn-icon-sm" title="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="tk-modal-body space-y-4">
+        <div id="add-task-timeline-wrap">
+          <div
+            id="add-task-timeline"
+            class="tk-timeline tk-add-task-timeline"
+            aria-label="The day's tracked time, with the new task shown as a draggable range"
+          ></div>
+          <p class="mt-1.5 text-xs text-faint">
+            Click untracked time to take all of it, then drag the draft or its edges to adjust.
+          </p>
+        </div>
+
+        <div class="flex flex-wrap items-end gap-3">
+          <div class="min-w-[12rem] flex-1">
+            <label class="mb-1 block text-xs font-medium text-muted" for="add-task-client">Client</label>
+            <select id="add-task-client" class="tk-select w-full"></select>
+          </div>
+          <div class="w-32">
+            <label class="mb-1 block text-xs font-medium text-muted" for="add-task-start">Start</label>
+            <input type="text" id="add-task-start" class="tk-input tk-time tabular w-full text-center" placeholder="Time" />
+          </div>
+          <div class="w-32">
+            <label class="mb-1 block text-xs font-medium text-muted" for="add-task-end">End</label>
+            <input type="text" id="add-task-end" class="tk-input tk-time tabular w-full text-center" placeholder="Time" />
+          </div>
+        </div>
+
+        <!-- Works belong to (client, day), not to a task, so this is the same
+             list the Today page and the Works modal show, and edits to it save
+             immediately and independently of whether the task is added. -->
+        <div id="add-task-works" class="hidden">
+          <span class="mb-1 block text-xs font-medium text-muted">Works</span>
+          <div id="add-task-works-list" class="tk-add-task-works"></div>
+        </div>
+
+        <p id="add-task-warning" class="tk-add-task-warning hidden text-sm"></p>
+      </div>
+
+      <div class="tk-modal-footer flex justify-end gap-2">
+        <button type="button" id="add-task-cancel" class="tk-btn tk-btn-secondary">Cancel</button>
+        <button type="button" id="add-task-save" class="tk-btn tk-btn-primary">Add task</button>
       </div>
     </div>
   </div>
