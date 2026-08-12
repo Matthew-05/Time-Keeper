@@ -52,6 +52,7 @@ import settings as user_settings
 # waiting to happen.
 import budgets as budget_allocation
 import summary as summary_report
+import day_close
 from rounding import round_seconds_to_hours
 import notifications
 import ipc
@@ -725,11 +726,12 @@ def _task_end_sort_string():
     A task with no end time gets the sentinel, which sorts above every real
     timestamp — but **only if it is today's**. `end_day` doesn't close tasks
     that were left open, so forgetting to complete one and ending the day
-    leaves an open row behind permanently. Treating that as "in progress" gave
-    its client the sentinel forever and pinned it to the top of the client
-    dropdown above genuinely recent work, months later. An abandoned open task
-    is evidence of activity on the day it started and nothing more, so it falls
-    back to its own start time.
+    leaves an open row behind until the next launch sweeps it (`day_close.py`).
+    Treating that as "in progress" gave its client the sentinel forever and
+    pinned it to the top of the client dropdown above genuinely recent work,
+    months later. An abandoned open task is evidence of activity on the day it
+    started and nothing more, so it falls back to its own start time — and the
+    date check keeps that true inside the window before the sweep runs.
     """
     ended = Task_Item.date.cast(String) + literal(" ") + Task_Item.end_time.cast(String)
     started = Task_Item.date.cast(String) + literal(" ") + Task_Item.start_time.cast(String)
@@ -938,17 +940,27 @@ def get_day_data():
 def task_browser():
     return render_template('task_browser.html', version=APP_VERSION)
 
-@app.route('/tasks/<date>')
-def get_tasks(date):
-    date_obj = datetime.strptime(date, '%Y-%m-%d').date()
+# The parameter is `date_string`, not `date`: naming it `date` shadowed the
+# `datetime.date` import for the length of the function, so anything in here
+# that wanted today's date got a string instead.
+@app.route('/tasks/<date_string>')
+def get_tasks(date_string):
+    date_obj = datetime.strptime(date_string, '%Y-%m-%d').date()
     tasks = Task_Item.query.filter_by(date=date_obj).all()
-    current_time = datetime.now().time()
-    
+    # A task with no end is still running, and only today's can be. Substituting
+    # the current clock into an *older* open row measured it from its start to
+    # this afternoon — a Tuesday task reading as nineteen hours long. The
+    # startup sweep closes those properly (see day_close.py); until it has, an
+    # open past row reports its start time and therefore no duration, matching
+    # task_duration_seconds().
+    running_end = datetime.now().time() if date_obj == date.today() else None
+
     tasks_data = [{
         'id': task.id,
         'date': task.date.strftime('%Y-%m-%d'),
         'start_time': task.start_time.strftime('%H:%M:%S'),
-        'end_time': current_time.strftime('%H:%M:%S') if task.end_time is None else task.end_time.strftime('%H:%M:%S'),
+        'end_time': (running_end or task.start_time).strftime('%H:%M:%S')
+        if task.end_time is None else task.end_time.strftime('%H:%M:%S'),
         'client_id': task.client_id,
         'client_name': task_client_display_name(task),
         'type': task.type,
@@ -1213,7 +1225,248 @@ def reopen_day():
         return jsonify({'message': 'Day reopened successfully'}), 200
     else:
         return jsonify({'error': 'Day has not been started yet'}), 400
-    
+
+
+# --------------------------------------------------------------------------
+# Day close-out
+#
+# See day_close.py for the rules and why they are what they are. This half is
+# the queries and the writes; every decision below is made there.
+#
+# The whole thing is scoped to dates strictly before today. Today's task is
+# meant to be running and today's day is meant to be open — sweeping either
+# would close the work the user is in the middle of.
+# --------------------------------------------------------------------------
+
+
+def _open_past_tasks(today):
+    """Every task before today with no end time, oldest first."""
+    return (
+        Task_Item.query
+        .filter(Task_Item.date < today, Task_Item.end_time.is_(None))
+        .order_by(Task_Item.date, Task_Item.start_time, Task_Item.id)
+        .all()
+    )
+
+
+def _day_end_times(dates):
+    """``{date: end_time}`` for the days among ``dates`` that were ended.
+
+    Days with no tracking row, or a row that was never ended, are simply absent
+    — both mean "no recorded end", which is the only distinction the caller
+    makes. A date with more than one tracking row (nothing in the schema forbids
+    it) contributes its latest end.
+    """
+    if not dates:
+        return {}
+
+    rows = (
+        db.session.query(TimeTracking.date, func.max(TimeTracking.end_time))
+        .filter(TimeTracking.date.in_(list(dates)), TimeTracking.end_time.isnot(None))
+        .group_by(TimeTracking.date)
+        .all()
+    )
+    return {row[0]: row[1] for row in rows}
+
+
+def _next_task_start(task):
+    """Start of the earliest later task on the same day, or None.
+
+    Ties are excluded rather than treated as "later": two tasks recorded with
+    the same start time can't bound each other, and picking one arbitrarily
+    would close this task at its own start.
+    """
+    return (
+        db.session.query(func.min(Task_Item.start_time))
+        .filter(
+            Task_Item.date == task.date,
+            Task_Item.id != task.id,
+            Task_Item.start_time > task.start_time,
+        )
+        .scalar()
+    )
+
+
+def _auto_close_open_tasks(today):
+    """Close the open past tasks whose end time can be derived. Returns the rest.
+
+    The returned tasks are the ones only the user can answer for, in the order
+    they'll be asked about.
+    """
+    tasks = _open_past_tasks(today)
+    if not tasks:
+        return []
+
+    day_ends = _day_end_times({task.date for task in tasks})
+    by_id = {task.id: task for task in tasks}
+
+    auto, prompt = day_close.plan_open_tasks([
+        day_close.OpenTask(
+            id=task.id,
+            date=task.date,
+            start_time=task.start_time,
+            next_start=_next_task_start(task),
+            day_end=day_ends.get(task.date),
+        )
+        for task in tasks
+    ])
+
+    for closure in auto:
+        by_id[closure.id].end_time = closure.end_time
+    if auto:
+        db.session.commit()
+        logger.info(
+            'Auto-closed %d open task(s): %s',
+            len(auto),
+            ', '.join(f'#{c.id} at {c.end_time} ({c.reason})' for c in auto),
+        )
+
+    return [by_id[task.id] for task in prompt]
+
+
+def _open_task_json(task):
+    return {
+        'id': task.id,
+        'date': task.date.strftime('%Y-%m-%d'),
+        'client': task_client_display_name(task),
+        'client_id': task.client_id,
+        # The floor for the answer: a task cannot end before it began.
+        'start_time': task.start_time.strftime('%H:%M'),
+    }
+
+
+def _cap_open_days(today):
+    """End every past day that was never ended, at its last task's end time.
+
+    Runs only once no open past task is left, so "the last task's end" is a real
+    figure rather than whatever happened to have been completed. Days with
+    nothing recorded against them are removed instead — along with any breaks
+    filed under them, which have no meaning without a day and would otherwise be
+    counted by `/get_breaks` against a day that no longer exists.
+    """
+    rows = (
+        TimeTracking.query
+        .filter(TimeTracking.date < today, TimeTracking.end_time.is_(None))
+        .all()
+    )
+    if not rows:
+        return {'closed': 0, 'deleted': 0}
+
+    dates = {row.date for row in rows}
+    task_rows = (
+        db.session.query(
+            Task_Item.date,
+            func.count(Task_Item.id),
+            func.max(Task_Item.end_time),
+        )
+        .filter(Task_Item.date.in_(list(dates)))
+        .group_by(Task_Item.date)
+        .all()
+    )
+    tasks_by_date = {row[0]: (row[1], row[2]) for row in task_rows}
+
+    # Keyed by date, not by row: the plan is about days, and a duplicate
+    # tracking row for one date has to receive the same treatment as its twin.
+    rows_by_date = {}
+    for row in rows:
+        rows_by_date.setdefault(row.date, []).append(row)
+
+    plan = day_close.plan_day_closures([
+        day_close.OpenDay(
+            date=day,
+            # The earliest start among duplicate rows — the floor the derived
+            # end is held above.
+            start_time=min(
+                (r.start_time for r in rows_by_date[day] if r.start_time is not None),
+                default=None,
+            ),
+            has_tasks=tasks_by_date.get(day, (0, None))[0] > 0,
+            last_task_end=tasks_by_date.get(day, (0, None))[1],
+        )
+        for day in sorted(dates)
+    ])
+
+    for day, end_time in plan.close:
+        for row in rows_by_date[day]:
+            row.end_time = end_time
+
+    for day in plan.delete:
+        BreakTracking.query.filter_by(date=day).delete(synchronize_session=False)
+        for row in rows_by_date[day]:
+            db.session.delete(row)
+
+    db.session.commit()
+    if plan.close or plan.delete:
+        logger.info(
+            'Capped %d open day(s), removed %d empty day(s)',
+            len(plan.close), len(plan.delete),
+        )
+    return {'closed': len(plan.close), 'deleted': len(plan.delete)}
+
+
+@app.route('/api/day-close/sweep', methods=['POST'])
+def api_day_close_sweep():
+    """Startup pass: derive what can be derived, then say what's left to ask.
+
+    ``tasks`` empty means nothing needs a human, and the day capping has already
+    run by the time this responds — the two halves are deliberately not
+    separately callable, because a day capped before its tasks were closed would
+    be capped at the wrong time and would look settled afterwards.
+
+    POST rather than GET because it writes, but it is idempotent: a second call
+    finds nothing left to derive and nothing left to cap, so a retried request
+    is harmless.
+    """
+    today = date.today()
+    pending = _auto_close_open_tasks(today)
+    return jsonify({
+        'tasks': [_open_task_json(task) for task in pending],
+        'capped': None if pending else _cap_open_days(today),
+    })
+
+
+@app.route('/api/day-close/resolve', methods=['POST'])
+def api_day_close_resolve():
+    """Record the end time the user supplied for one open past task.
+
+    Caps the days as soon as the last one is answered, so the sweep always
+    finishes in the same request that completes it rather than waiting for the
+    next launch.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON object required'}), 400
+
+    task_id = data.get('task_id')
+    if not isinstance(task_id, int):
+        return jsonify({'error': 'task_id is required'}), 400
+
+    try:
+        end_time = parse_clock_time(data.get('end_time'))
+    except ValueError:
+        return jsonify({'error': 'Invalid end time format'}), 400
+
+    today = date.today()
+    task = Task_Item.query.get(task_id)
+    if task is None:
+        return jsonify({'error': 'That task no longer exists'}), 404
+    if task.date >= today:
+        return jsonify({'error': 'Only tasks before today are closed here'}), 400
+    if task.end_time is not None:
+        return jsonify({'error': 'That task has already been closed'}), 409
+    if end_time < task.start_time:
+        return jsonify({'error': 'End time is before the task started'}), 400
+
+    task.end_time = end_time
+    db.session.commit()
+
+    remaining = _auto_close_open_tasks(today)
+    return jsonify({
+        'tasks': [_open_task_json(item) for item in remaining],
+        'capped': None if remaining else _cap_open_days(today),
+    })
+
+
 @app.route('/start_break', methods=['POST'])
 def start_break():
     today = datetime.now().date()
@@ -1374,6 +1627,12 @@ def task_duration_seconds(task, now=None):
     An unfinished task on today's date is measured up to the current time; on
     any earlier date there's no sensible end, so it counts as zero rather than
     silently inventing time.
+
+    That zero is now a backstop rather than the normal path — the startup sweep
+    closes open past tasks against a real answer from the user (see
+    `day_close.py`) — but it stays, because aggregation runs on the timer thread
+    and from the admin views too, either of which can see the database in the
+    window before a launch has swept it.
     """
     now = now or datetime.now()
 

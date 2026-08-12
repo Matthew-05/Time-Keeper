@@ -1265,6 +1265,14 @@
     z-index: 75;
   }
 
+  /* The startup close-out prompt stays at the ordinary modal level (60) on
+     purpose, so flatpickr's clock at 70 still opens above it — the dialog's
+     entire job is collecting a time. It can't collide with the unsaved-changes
+     backdrop above: it runs before anything on the page can be made dirty. */
+  .tk-modal-backdrop.tk-day-close-backdrop {
+    cursor: default;
+  }
+
   .tk-toast-container {
     z-index: 80;
   }

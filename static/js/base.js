@@ -922,7 +922,9 @@ export class TimeKeeper {
 
     /**
      * Minutes a task ran. `/tasks/<date>` substitutes the current time for a
-     * task that hasn't ended, so an in-flight task measures up to now.
+     * task that hasn't ended *today*, so an in-flight task measures up to now.
+     * An open row on an earlier date reports its own start time and therefore
+     * zero, until the startup sweep closes it properly — see day_close.js.
      */
     getMinuteDifference(endTime, startTime) {
         if (!endTime) return 0;

@@ -547,18 +547,19 @@ export class TaskBrowser extends TimeKeeper {
                 return 0;
             }
 
-            // If end time is missing, use current time for today, or end of day for past dates
+            // A day in progress is measured up to now. A past day without an
+            // end time has no measurable length at all: it used to be assumed
+            // to run to 23:59:59, which turned one forgotten click into a
+            // fifteen-hour day and dropped that day's utilisation to near zero.
+            // The startup sweep (day_close.js) now closes past days at their
+            // last task's end, so this branch is only reached if that hasn't
+            // run yet — and reporting nothing is better than reporting a
+            // figure that is wrong by hours.
             let effectiveEndTime;
             if (!end_time) {
-                const today = this.getLocalDateString();
-                if (this.selectedDate.value === today) {
-                    // For today, use current time
-                    const now = new Date();
-                    effectiveEndTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-                } else {
-                    // For past dates without end time, assume end of day
-                    effectiveEndTime = "23:59:59";
-                }
+                if (this.selectedDate.value !== this.getLocalDateString()) return 0;
+                const now = new Date();
+                effectiveEndTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
             } else {
                 effectiveEndTime = end_time;
             }

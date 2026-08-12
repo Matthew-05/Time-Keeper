@@ -67,6 +67,11 @@
     <script src="{{ url_for('static', filename='js/base.js') }}" type="module"></script>
     <script src="{{ url_for('static', filename='js/window_chrome.js') }}" type="module"></script>
     <script src="{{ url_for('static', filename='js/theme.js') }}" type="module"></script>
+    <!--
+      Tasks and days left open are swept here rather than on the Today page, so
+      a launch that lands anywhere still gets asked. See day_close.js.
+    -->
+    <script src="{{ url_for('static', filename='js/day_close.js') }}" type="module"></script>
 
     {% block page_scripts %}
 
