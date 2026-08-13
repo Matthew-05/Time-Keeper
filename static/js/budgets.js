@@ -1,4 +1,4 @@
-import { TimeKeeper, ready, confirmAction, disarmConfirm, lockBodyScroll, unlockBodyScroll } from './base.js'
+import { TimeKeeper, ready, confirmAction, disarmConfirm, dismissOnBackdropClick, lockBodyScroll, unlockBodyScroll } from './base.js'
 import {
     MATURITY_RULE,
     STATUS_LABEL,
@@ -1713,9 +1713,7 @@ class Budgets extends TimeKeeper {
         // Backdrop click and Escape, both of which people reach for without
         // thinking about it.
         ;[this.formModal, this.detailModal].forEach((modal) => {
-            modal.addEventListener('mousedown', (event) => {
-                if (event.target === modal) this.hideModal(modal)
-            })
+            dismissOnBackdropClick(modal, () => this.hideModal(modal))
         })
 
         document.addEventListener('keydown', (event) => {

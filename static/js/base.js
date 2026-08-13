@@ -34,6 +34,28 @@ function mountModalBackdrops() {
 ready(mountModalBackdrops);
 
 /**
+ * Close a dialog only after one complete click on its backdrop.  A `click`
+ * alone is not enough: browsers can retarget one produced by a press inside a
+ * dialog and a release on its backdrop.  Tracking where the gesture began
+ * also prevents a lone mouse-up from dismissing the dialog.
+ */
+export function dismissOnBackdropClick(backdrop, dismiss) {
+    let beganOnBackdrop = false;
+
+    backdrop.addEventListener('pointerdown', (event) => {
+        beganOnBackdrop = event.target === backdrop;
+    });
+    backdrop.addEventListener('pointercancel', () => {
+        beganOnBackdrop = false;
+    });
+    backdrop.addEventListener('click', (event) => {
+        const shouldDismiss = beganOnBackdrop && event.target === backdrop;
+        beganOnBackdrop = false;
+        if (shouldDismiss) dismiss();
+    });
+}
+
+/**
  * One delegated popover for every insight control and budget meter in the app.
  * Delegation also covers elements rendered after page load.
  */

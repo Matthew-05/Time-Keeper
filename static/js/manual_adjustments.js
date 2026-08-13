@@ -1,6 +1,7 @@
 import {
     confirmAction,
     disarmConfirm,
+    dismissOnBackdropClick,
     lockBodyScroll,
     setHtml,
     setText,
@@ -88,9 +89,7 @@ export class ManualAdjustmentManager {
             }
             this.edit(row);
         });
-        this.modal.addEventListener('click', (event) => {
-            if (event.target === this.modal) this.close();
-        });
+        dismissOnBackdropClick(this.modal, () => this.close());
         document.addEventListener('keydown', (event) => {
             if (event.key === 'Escape' && this.isOpen()) this.close();
         });

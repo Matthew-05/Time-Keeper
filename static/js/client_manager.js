@@ -1,6 +1,7 @@
 import {
     TimeKeeper,
     confirmAction,
+    dismissOnBackdropClick,
     lockBodyScroll,
     ready,
     unlockBodyScroll,
@@ -77,9 +78,7 @@ export class ClientManager extends TimeKeeper {
         document.querySelectorAll('[data-close-client-modal]').forEach((button) => {
             button.addEventListener('click', () => this.closeModal());
         });
-        this.modal.addEventListener('mousedown', (event) => {
-            if (event.target === this.modal) this.closeModal();
-        });
+        dismissOnBackdropClick(this.modal, () => this.closeModal());
         document.addEventListener('keydown', (event) => {
             if (event.key === 'Escape' && !this.modal.classList.contains('hidden')) {
                 this.closeModal();

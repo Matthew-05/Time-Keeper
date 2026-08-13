@@ -1,4 +1,4 @@
-import { lockBodyScroll, unlockBodyScroll } from './base.js'
+import { dismissOnBackdropClick, lockBodyScroll, unlockBodyScroll } from './base.js'
 
 /**
  * Page-level save/cancel control for editors that keep changes in memory until
@@ -74,9 +74,7 @@ export class SaveChangesBar {
         this.saveButton.addEventListener('click', () => this.save())
         this.stayButton.addEventListener('click', () => this.hideNavigationModal())
         this.saveAndLeaveButton.addEventListener('click', () => this.saveAndExit())
-        this.navigationModal.addEventListener('mousedown', (event) => {
-            if (event.target === this.navigationModal) this.hideNavigationModal()
-        })
+        dismissOnBackdropClick(this.navigationModal, () => this.hideNavigationModal())
         document.addEventListener('keydown', (event) => {
             if (event.key === 'Escape' && !this.navigationModal.classList.contains('hidden')) {
                 this.hideNavigationModal()
