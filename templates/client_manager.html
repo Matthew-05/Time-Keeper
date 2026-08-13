@@ -11,65 +11,131 @@
         <h1 class="tk-title">Clients</h1>
         <p class="tk-subtitle">{{ clients|length }} client{{ '' if clients|length == 1 else 's' }}</p>
       </div>
+      <button type="button" id="add-client-button" class="tk-btn tk-btn-primary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        Add client
+      </button>
     </div>
 
-    <section class="tk-card mb-5 p-4">
-      <form id="create-form" class="flex flex-col gap-3 sm:flex-row sm:items-end">
-        <div class="flex-grow">
-          <label for="new-client-name" class="tk-label">New client</label>
+    <section class="tk-card overflow-hidden">
+      <div class="tk-client-toolbar" role="search">
+        <label for="client-filter" class="sr-only">Filter clients by name</label>
+        <div class="tk-client-search">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-4-4" />
+          </svg>
           <input
             type="text"
-            id="new-client-name"
-            name="name"
-            required
-            placeholder="Client name"
+            id="client-filter"
             class="tk-input"
+            placeholder="Filter clients…"
             autocomplete="off"
+            autocapitalize="none"
+            spellcheck="false"
+            role="searchbox"
+            aria-controls="client-table-body"
           />
         </div>
-        <button type="submit" class="tk-btn tk-btn-primary">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          Add client
-        </button>
-      </form>
-    </section>
+      </div>
 
-    <section class="tk-card overflow-hidden">
-      <table class="tk-table tk-table-hover">
-        <thead>
-          <tr>
-            <th class="hidden">ID</th>
-            <th>Name</th>
-            <th class="w-px text-right">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for client in clients %}
-            <tr id="row_{{ client.id }}">
-              <td class="hidden">{{ client.id }}</td>
-              <td class="font-medium">
-                <span id="name_{{ client.id }}" class="tk-editable" contenteditable="false" spellcheck="false">{{ client.name }}</span>
-              </td>
-              <td class="text-right">
-                <div class="flex min-h-8 items-center justify-end gap-1.5">
-                  <button name="edit" class="tk-btn tk-btn-secondary tk-btn-sm">Edit</button>
-                  <button name="delete" class="tk-btn tk-btn-danger tk-btn-sm">Delete</button>
-                  <button name="save" style="display: none" class="tk-btn tk-btn-primary tk-btn-sm">Save</button>
-                  <button name="cancel" style="display: none" class="tk-btn tk-btn-secondary tk-btn-sm">Cancel</button>
-                </div>
-              </td>
-            </tr>
-          {% endfor %}
-          {% if not clients %}
+      <div class="tk-client-table-scroll">
+        <table class="tk-table tk-table-hover tk-client-table">
+          <thead>
             <tr>
-              <td colspan="2" class="tk-empty">No clients yet. Add your first one above.</td>
+              <th class="hidden">ID</th>
+              <th class="w-px"><span class="sr-only">Color</span></th>
+              <th>Name</th>
+              <th class="w-px text-right"><span class="sr-only">Actions</span></th>
             </tr>
-          {% endif %}
-        </tbody>
-      </table>
+          </thead>
+          <tbody id="client-table-body">
+            {% for client in clients %}
+              <tr
+                id="row_{{ client.id }}"
+                data-client-id="{{ client.id }}"
+                data-client-name="{{ client.name }}"
+                data-client-color="{{ client.color }}"
+              >
+                <td class="hidden">{{ client.id }}</td>
+                <td><span class="tk-client-swatch" style="background-color: {{ client.color }}"></span></td>
+                <td class="font-medium" data-client-name-cell>{{ client.name }}</td>
+                <td class="text-right">
+                  <div class="tk-client-actions">
+                    <button name="edit" class="tk-btn tk-btn-secondary tk-btn-sm">Edit</button>
+                    <button name="delete" class="tk-btn tk-btn-danger tk-btn-sm">Delete</button>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+            <tr id="client-empty-state" class="{{ 'hidden' if clients else '' }}">
+              <td colspan="3" class="tk-empty">No clients yet. Add your first one.</td>
+            </tr>
+            <tr id="client-filter-empty" class="hidden">
+              <td colspan="3" class="tk-empty">No clients match this filter.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
+  </div>
+
+  <div
+    id="client-form-modal"
+    class="tk-modal-backdrop hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="client-form-title"
+  >
+    <div class="tk-modal">
+      <div class="tk-modal-header">
+        <h2 class="tk-card-title" id="client-form-title">Add client</h2>
+        <button
+          type="button"
+          class="tk-btn-icon tk-btn-icon-sm"
+          data-close-client-modal
+          aria-label="Close"
+          title="Close"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <form id="client-form">
+        <div class="tk-modal-body space-y-4">
+          <div>
+            <label for="client-name" class="tk-label">Name</label>
+            <input
+              type="text"
+              id="client-name"
+              class="tk-input"
+              required
+              maxlength="80"
+              placeholder="Client name"
+              autocomplete="off"
+            />
+          </div>
+
+          <div>
+            <label for="client-color" class="tk-label">Color</label>
+            <div class="tk-client-color-field">
+              <input type="color" id="client-color" class="tk-client-color-input" required />
+              <output id="client-color-value" for="client-color" class="tabular text-sm text-muted"></output>
+            </div>
+            <p class="mt-1.5 text-xs text-faint">Used for this client in History and Summary.</p>
+          </div>
+        </div>
+
+        <div class="tk-modal-footer flex justify-end gap-2">
+          <button type="button" class="tk-btn tk-btn-secondary" data-close-client-modal>Cancel</button>
+          <button type="submit" id="client-save" class="tk-btn tk-btn-primary">Add client</button>
+        </div>
+      </form>
+    </div>
   </div>
 {% endblock %}
 

@@ -3,11 +3,16 @@ from datetime import datetime
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 
+from client_colors import random_client_color
+
 db = SQLAlchemy()
 
 class Client(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), unique=True, nullable=False)
+    color = db.Column(
+        db.String(7), nullable=False, default=random_client_color
+    )
 
     def __repr__(self):
         return f'<Client {self.name}>'

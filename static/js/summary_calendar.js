@@ -306,9 +306,9 @@ export class SummaryCalendar {
         clients.slice(0, MAX_DOTS).forEach((client) => {
             const dot = document.createElement('span')
             dot.className = 'tk-summary-day-dot'
-            // Same hash-derived colour the charts and History use, so a client
-            // is one colour everywhere in the app.
-            dot.style.backgroundColor = clientColor(client.client_name)
+            // Same stored colour the charts and History use, so a client is
+            // one colour everywhere in the app.
+            dot.style.backgroundColor = clientColor(client.client_name, client.client_color)
             dot.title = client.client_name
             dots.appendChild(dot)
         })

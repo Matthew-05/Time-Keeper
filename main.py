@@ -58,6 +58,7 @@ from rounding import round_seconds_to_hours
 import notifications
 import ipc
 from reminders import ReminderService
+from client_colors import normalize_client_color, random_client_color
 import atexit
 import threading
 import time
@@ -542,6 +543,11 @@ def task_client_display_name(task):
     return task.client.name
 
 
+def task_client_color(task):
+    """Stored colour for API/UI, or ``None`` when the client was removed."""
+    return task.client.color if task.client_id is not None and task.client else None
+
+
 def _ensure_task_client_id_nullable():
     """SQLite cannot drop NOT NULL in-place; rebuild task__item if needed."""
     eng = db.engine
@@ -675,6 +681,41 @@ def _ensure_budget_risk_threshold_column():
     print('Added budget.risk_threshold_percent')
 
 
+def _ensure_client_color_column():
+    """Add and randomly backfill ``client.color`` for in-place app upgrades."""
+    eng = db.engine
+    table = Client.__table__.name
+    insp = inspect(eng)
+    if table not in insp.get_table_names():
+        return
+
+    columns = {column['name'] for column in insp.get_columns(table)}
+    added = 'color' not in columns
+    with eng.begin() as conn:
+        if added:
+            # SQLite can add a NOT NULL column in place only with a default.
+            # The per-row updates below immediately replace this safety value
+            # for existing clients with independently generated colours.
+            fallback = random_client_color()
+            conn.execute(text(
+                f"ALTER TABLE {table} ADD COLUMN color VARCHAR(7) "
+                f"NOT NULL DEFAULT '{fallback}'"
+            ))
+
+        missing = conn.execute(text(
+            f"SELECT id FROM {table} WHERE color IS NULL OR color = ''"
+            if not added else f"SELECT id FROM {table}"
+        )).fetchall()
+        for row in missing:
+            conn.execute(
+                text(f'UPDATE {table} SET color = :color WHERE id = :id'),
+                {'color': random_client_color(), 'id': row[0]},
+            )
+
+    if added:
+        print(f'Added client.color and assigned {len(missing)} client colour(s)')
+
+
 def _backfill_works_from_descriptions():
     """Seed `work` from the superseded `task__item.description` column.
 
@@ -743,6 +784,7 @@ with app.app_context():
     _ensure_task_budget_excluded_column()
     _ensure_budget_closed_at_column()
     _ensure_budget_risk_threshold_column()
+    _ensure_client_color_column()
     if _work_table_is_new:
         _backfill_works_from_descriptions()
 
@@ -800,6 +842,22 @@ def clients_query_most_recent_first():
     )
 
 
+def client_payload(client):
+    """Canonical client shape shared by list, create, read and update."""
+    return {'id': client.id, 'name': client.name, 'color': client.color}
+
+
+def client_name_from_payload(data):
+    """Trim and validate a client name without mutating the request object."""
+    raw = data.get('name')
+    if not isinstance(raw, str) or not raw.strip():
+        return None, 'Client name is required'
+    name = raw.strip()
+    if len(name) > 80:
+        return None, 'Client name must be 80 characters or fewer'
+    return name, None
+
+
 @app.route('/')
 def index():
     return render_template('index.html', version=APP_VERSION)
@@ -811,7 +869,7 @@ def get_clients():
     if query:
         q = q.filter(Client.name.like(f'%{query}%'))
     clients = q.all()
-    return jsonify([{'id': client.id, 'name': client.name} for client in clients])
+    return jsonify([client_payload(client) for client in clients])
 
 @app.route('/autocomplete', methods=['GET'])
 def autocomplete():
@@ -846,28 +904,54 @@ def update_task_client():
 
 @app.route('/clients', methods=['POST'])
 def create_client():
-    data = request.get_json()
-    name = data.get('name')
-    if name:
-        if not Client.query.filter_by(name=name).first():
-            new_client = Client(name=name)
-            db.session.add(new_client)
-            db.session.commit()
-            return jsonify({'id': new_client.id, 'name': new_client.name}), 201
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON object required'}), 400
+    name, error = client_name_from_payload(data)
+    if error:
+        return jsonify({'error': error}), 400
+    if Client.query.filter_by(name=name).first():
         return jsonify({'error': 'Client already exists'}), 400
-    return jsonify({'error': 'Name field is required'}), 400
+    try:
+        color = normalize_client_color(data.get('color') or random_client_color())
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 400
+
+    new_client = Client(name=name, color=color)
+    db.session.add(new_client)
+    db.session.commit()
+    return jsonify(client_payload(new_client)), 201
 
 @app.route('/clients/<int:id>', methods=['GET'])
 def get_client(id):
-    client = Client.query.get(id)
-    return jsonify({'id': client.id, 'name': client.name})
+    client = db.session.get(Client, id)
+    if client is None:
+        return jsonify({'error': 'Client not found'}), 404
+    return jsonify(client_payload(client))
 
 @app.route('/clients/<int:id>', methods=['PUT'])
 def update_client(id):
-    client = Client.query.get(id)
-    client.name = request.json['name']
+    client = db.session.get(Client, id)
+    if client is None:
+        return jsonify({'error': 'Client not found'}), 404
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON object required'}), 400
+    name, error = client_name_from_payload(data)
+    if error:
+        return jsonify({'error': error}), 400
+    duplicate = Client.query.filter(Client.name == name, Client.id != id).first()
+    if duplicate:
+        return jsonify({'error': 'Client already exists'}), 400
+    try:
+        color = normalize_client_color(data.get('color', client.color))
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 400
+
+    client.name = name
+    client.color = color
     db.session.commit()
-    return jsonify({'success': True})
+    return jsonify(client_payload(client))
 
 @app.route('/clients/<int:id>', methods=['DELETE'])
 def delete_client(id):
@@ -997,6 +1081,7 @@ def get_tasks(date_string):
         if task.end_time is None else task.end_time.strftime('%H:%M:%S'),
         'client_id': task.client_id,
         'client_name': task_client_display_name(task),
+        'client_color': task_client_color(task),
         'type': task.type,
         'description': task.description,
         'time_spent': task.time_spent,
@@ -1055,6 +1140,7 @@ def get_unfinished_tasks():
         # keyed on it, and the name round-trip can't distinguish a real client
         # called "Removed client" from a deleted one.
         'client_id': task.client_id,
+        'client_color': task_client_color(task),
         'start_time': task.start_time.strftime('%H:%M:%S')
     } for task in unfinished_tasks]
     return jsonify(tasks_data)
@@ -1762,7 +1848,7 @@ def _summary_day_rows(start, end, weekdays=None, now=None):
         )
         return details['is_workday'], details['hours']
 
-    return summary_report.day_rows(
+    rows = summary_report.day_rows(
         start,
         end,
         bucket_by_client_and_day(start, end, now),
@@ -1770,6 +1856,11 @@ def _summary_day_rows(start, end, weekdays=None, now=None):
         policy=_rounding_policy(),
         weekdays=weekdays,
     )
+    colors = dict(db.session.query(Client.name, Client.color).all())
+    for row in rows:
+        for client in row['clients']:
+            client['client_color'] = colors.get(client['client_name'])
+    return rows
 
 
 @app.route('/api/summary/calendar', methods=['GET'])
@@ -2724,6 +2815,7 @@ def api_day_timeline(date_string):
                 'end_time': end.strftime('%H:%M'),
                 'client': task_client_display_name(task),
                 'client_id': task.client_id,
+                'client_color': task_client_color(task),
                 'ongoing': task.end_time is None,
             }
             for start, end, task in sorted(busy, key=lambda row: row[0])

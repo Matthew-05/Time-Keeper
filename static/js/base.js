@@ -328,8 +328,9 @@ document.addEventListener('keydown', (event) => {
 });
 
 /**
- * Stable per-client colour, shared by the History timeline and the Summary
- * charts.
+ * Stable per-client colour, shared by the History timeline and Summary charts.
+ * A stored value wins; the name-derived hue is the compatibility fallback for
+ * removed clients and payloads produced by an older app process.
  *
  * The hue is derived from the client's name rather than from its position in a
  * list. Those two pages see different sets of clients — History sees one day,
@@ -341,7 +342,10 @@ document.addEventListener('keydown', (event) => {
  * chips use clientForeground() to stay legible in both themes without
  * re-rendering on `themeChanged`.
  */
-export function clientColor(name) {
+export function clientColor(name, storedColor = null) {
+    if (typeof storedColor === 'string' && /^#[0-9a-f]{6}$/i.test(storedColor)) {
+        return storedColor;
+    }
     const key = String(name ?? '');
     let hash = 0;
     for (let i = 0; i < key.length; i++) {
@@ -351,28 +355,35 @@ export function clientColor(name) {
 }
 
 /**
- * Readable foreground paired with clientColor(). The generated background has
- * fixed saturation/lightness, so deriving its RGB luminance from the same
- * stable hue lets History choose the stronger of a light or dark label without
- * depending on the current theme.
+ * Readable foreground paired with clientColor(), chosen from relative
+ * luminance so both stored hex colours and generated HSL colours remain clear.
  */
-export function clientForeground(name) {
-    const match = clientColor(name).match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
-    const hue = Number(match[1]) / 360;
-    const saturation = Number(match[2]) / 100;
-    const lightness = Number(match[3]) / 100;
-    const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
-    const section = hue * 6;
-    const x = chroma * (1 - Math.abs(section % 2 - 1));
-    const channels = section < 1 ? [chroma, x, 0]
-        : section < 2 ? [x, chroma, 0]
-            : section < 3 ? [0, chroma, x]
-                : section < 4 ? [0, x, chroma]
-                    : section < 5 ? [x, 0, chroma]
-                        : [chroma, 0, x];
-    const offset = lightness - chroma / 2;
+export function clientForeground(name, storedColor = null) {
+    const background = clientColor(name, storedColor);
+    const hex = background.match(/^#([0-9a-f]{6})$/i);
+    let channels;
+    if (hex) {
+        channels = [0, 2, 4].map((offset) => (
+            parseInt(hex[1].slice(offset, offset + 2), 16) / 255
+        ));
+    } else {
+        const match = background.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+        const hue = Number(match[1]) / 360;
+        const saturation = Number(match[2]) / 100;
+        const lightness = Number(match[3]) / 100;
+        const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+        const section = hue * 6;
+        const x = chroma * (1 - Math.abs(section % 2 - 1));
+        channels = section < 1 ? [chroma, x, 0]
+            : section < 2 ? [x, chroma, 0]
+                : section < 3 ? [0, chroma, x]
+                    : section < 4 ? [0, x, chroma]
+                        : section < 5 ? [x, 0, chroma]
+                            : [chroma, 0, x];
+        const offset = lightness - chroma / 2;
+        channels = channels.map((channel) => channel + offset);
+    }
     const luminance = channels
-        .map((channel) => channel + offset)
         .map((channel) => channel <= 0.04045
             ? channel / 12.92
             : ((channel + 0.055) / 1.055) ** 2.4)

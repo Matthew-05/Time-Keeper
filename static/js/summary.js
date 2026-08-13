@@ -564,7 +564,7 @@ class SummaryDashboard extends TimeKeeper {
 
         setHtml(container, clients.map((client) => `
             <div class="tk-mix-row">
-              <span class="tk-mix-swatch" style="background-color: ${clientColor(client.client_name)}"></span>
+              <span class="tk-mix-swatch" style="background-color: ${clientColor(client.client_name, client.client_color)}"></span>
               <span class="min-w-0 flex-1 truncate text-xs text-text">${this.escape(client.client_name)}</span>
               <span class="tabular flex-shrink-0 text-xs font-semibold text-text">${this.amount(client, { compact: true })}</span>
               <span class="tabular w-9 flex-shrink-0 text-right text-xs text-faint">${percent(client.share_percent)}</span>
@@ -615,7 +615,7 @@ class SummaryDashboard extends TimeKeeper {
         const clients = this.overview.clients.filter((client) => client.billable_seconds > 0)
         const groups = clients.slice(0, MIX_SLICES).map((client) => ({
             label: client.client_name,
-            colour: clientColor(client.client_name),
+            colour: clientColor(client.client_name, client.client_color),
             names: new Set([client.client_name]),
             billable_hours: client.billable_hours,
         }))
@@ -1140,7 +1140,7 @@ class SummaryDashboard extends TimeKeeper {
             <tr>
               <td>
                 <span class="flex min-w-0 items-center gap-2">
-                  <span class="tk-mix-swatch" style="background-color: ${clientColor(client.client_name)}"></span>
+                  <span class="tk-mix-swatch" style="background-color: ${clientColor(client.client_name, client.client_color)}"></span>
                   <span class="truncate">${this.escape(client.client_name)}</span>
                 </span>
               </td>

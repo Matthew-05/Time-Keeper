@@ -1062,7 +1062,7 @@ export class TaskBrowser extends TimeKeeper {
             // element, so an absent value would leave the previous colour on a
             // block that has just stopped matching.
             style: highlighted
-                ? `background-color: ${clientColor(task.client)}; color: ${clientForeground(task.client)};`
+                ? `background-color: ${clientColor(task.client, task.client_color)}; color: ${clientForeground(task.client, task.client_color)};`
                 : '',
         };
     }
@@ -2325,11 +2325,9 @@ export class TaskBrowser extends TimeKeeper {
     renderTimeline(tasks, selectedDate, { background = false } = {}) {
         const container = document.getElementById('timeline');
 
-        // Colour comes from clientColor() in base.js, keyed on the client's
-        // name, so a client is the same colour here and on the Summary charts.
-        // This used to be a hardcoded stock-palette array indexed by position,
-        // which meant the colours disagreed between the two pages and ignored
-        // the theme entirely.
+        // Colour comes from the client's stored setting, with clientColor()'s
+        // name-derived fallback covering removed clients and older payloads.
+        // The same setting drives the Summary charts.
         //
         // Generated background and foreground colours stay paired inline.
         // Touching tasks for one client become a single visual range; all other
@@ -2361,7 +2359,7 @@ export class TaskBrowser extends TimeKeeper {
                 ], task.is_ongoing ? 'Ongoing' : null),
                 start: `${selectedDate}T${task.start_time}`,
                 end: `${selectedDate}T${task.end_time}`,
-                style: `background-color: ${clientColor(task.client_name)}; color: ${clientForeground(task.client_name)};`
+                style: `background-color: ${clientColor(task.client_name, task.client_color)}; color: ${clientForeground(task.client_name, task.client_color)};`
             };
         });
 
