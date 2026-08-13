@@ -1491,6 +1491,11 @@
     max-width: 52rem;
   }
 
+  .tk-works-modal {
+    max-height: min(42rem, 100%);
+    max-width: 44rem;
+  }
+
   .tk-modal-header {
     @apply flex items-center justify-between gap-3 border-b border-border px-5 py-3.5;
   }
@@ -1641,9 +1646,18 @@
     @apply flex items-center gap-2 rounded-lg border border-transparent px-2 py-1.5;
   }
 
-  /* The inline Today list reads like a short work log. Give each entry a
-     visible bullet without changing the shared Works modal in History. */
-  #works-list .tk-work-row::before {
+  .works-add-input,
+  .works-edit-input {
+    @apply min-h-20 resize-y;
+  }
+
+  .tk-work-row-edit {
+    @apply items-end;
+  }
+
+  /* Both works views read like a short work log. */
+  #works-list .tk-work-row::before,
+  #works-modal-list .tk-work-row::before {
     content: "\2022";
     @apply flex-shrink-0 text-muted;
   }

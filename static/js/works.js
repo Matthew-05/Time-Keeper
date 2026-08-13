@@ -51,6 +51,9 @@ export class WorksList {
 
         this.container.addEventListener('click', (e) => this.handleClick(e));
         this.container.addEventListener('keydown', (e) => this.handleKeydown(e));
+        this.container.addEventListener('input', (e) => {
+            if (e.target.classList.contains('works-add-input')) this.updateAddButton();
+        });
         this.container.addEventListener('submit', (e) => {
             e.preventDefault();
             this.handleAdd();
@@ -154,15 +157,15 @@ export class WorksList {
 
         this.container.innerHTML = `
             <div class="works-rows space-y-0.5">${rows}</div>
-            <form class="works-add mt-2 flex gap-2">
-                <input
-                    type="text"
+            <form class="works-add mt-2 flex items-end gap-2">
+                <textarea
                     class="works-add-input tk-input"
                     placeholder="Add a work…"
                     autocomplete="off"
+                    rows="3"
                     ${this.clientId == null ? 'disabled' : ''}
-                />
-                <button type="submit" class="tk-btn tk-btn-primary flex-shrink-0" ${this.clientId == null ? 'disabled' : ''}>
+                ></textarea>
+                <button type="submit" class="works-add-button tk-btn tk-btn-primary flex-shrink-0" disabled>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M12 5v14M5 12h14" />
                     </svg>
@@ -174,8 +177,8 @@ export class WorksList {
     renderRow(work, esc) {
         if (work.id === this.editingId) {
             return `
-                <div class="tk-work-row" data-work-id="${work.id}">
-                    <input type="text" class="works-edit-input tk-input text-sm" value="${esc(work.text)}" autocomplete="off" />
+                <div class="tk-work-row tk-work-row-edit" data-work-id="${work.id}">
+                    <textarea class="works-edit-input tk-input text-sm" autocomplete="off" rows="3">${esc(work.text)}</textarea>
                     <div class="flex flex-shrink-0 gap-1">
                         <button type="button" class="works-save tk-btn tk-btn-primary tk-btn-sm">Save</button>
                         <button type="button" class="works-cancel tk-btn tk-btn-secondary tk-btn-sm">Cancel</button>
@@ -206,6 +209,7 @@ export class WorksList {
             if (input) {
                 input.value = value;
                 input.focus();
+                this.updateAddButton();
             }
         } else if (this.editingId != null) {
             const input = this.container.querySelector('.works-edit-input');
@@ -259,7 +263,7 @@ export class WorksList {
 
     handleKeydown(e) {
         if (e.target.classList.contains('works-edit-input')) {
-            if (e.key === 'Enter') {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
                 this.handleSave(Number(e.target.closest('[data-work-id]').dataset.workId));
             } else if (e.key === 'Escape') {
@@ -268,6 +272,13 @@ export class WorksList {
                 this.render();
             }
         }
+    }
+
+    /** Enable Add only when the shared textarea contains meaningful text. */
+    updateAddButton() {
+        const input = this.container.querySelector('.works-add-input');
+        const button = this.container.querySelector('.works-add-button');
+        if (input && button) button.disabled = !input.value.trim() || this.clientId == null;
     }
 
     async handleAdd() {
@@ -304,6 +315,7 @@ export class WorksList {
             if (fresh) {
                 fresh.value = text;
                 fresh.focus();
+                this.updateAddButton();
             }
         }
     }
