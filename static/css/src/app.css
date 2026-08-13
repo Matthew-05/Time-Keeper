@@ -121,6 +121,11 @@
   --timeline-grid-major: #aeb9c8;
   --timeline-minor-line-style: dashed;
   --timeline-inset-shadow: inset 0 1px 0 rgb(15 23 42 / 0.03);
+  /* The edge drawn inside every block. Translucent rather than a fixed colour
+     because it sits on whatever the client's colour happens to be: a wash of
+     the canvas's own ink darkens each block's edge by the same amount instead
+     of reading as a foreign line on some colours and vanishing on others. */
+  --timeline-item-edge: rgb(15 23 42 / 0.22);
   --history-detail-shell: #edf1f6;
   --history-detail-bg: #ffffff;
   --history-detail-header: #e8edf4;
@@ -184,6 +189,9 @@
   --timeline-grid-major: var(--border-strong);
   --timeline-minor-line-style: solid;
   --timeline-inset-shadow: none;
+  /* Light, not dark: the blocks are the brightest thing on a dark canvas, so
+     the edge has to be a highlight to register at all. */
+  --timeline-item-edge: rgb(255 255 255 / 0.22);
   --history-detail-shell: var(--surface-2);
   --history-detail-bg: var(--surface-2);
   --history-detail-header: var(--surface-3);
@@ -1386,79 +1394,112 @@
     padding: 0.625rem 0.75rem;
   }
 
-  /* The Add task dialog's copy of the day. It is the same vis-timeline the
-     History page uses, so it inherits every `.tk-timeline` rule and only the
-     differences live here. Item colours and the axis are not repeated. */
-  .tk-add-task-timeline {
-    /* Shorter than the page's: this one carries a single lane of context and
-       one draft, not a whole day's worth of reading. */
-    height: 112px;
+  /* The Add task dialog's copy of the day lives at the bottom of this file,
+     outside every `@layer`, next to the `.tk-timeline` rules it overrides.
+     See the note there — it is a cascade-layer problem, not a preference. */
+
+  /* The recommended free stretches, and the way in. Nothing is selected when
+     the dialog opens, so these carry the whole "when" question until one is
+     pressed. */
+  .tk-add-task-chips {
+    @apply mt-2 flex flex-wrap gap-1.5;
   }
 
-  /* Untracked time, as a background band. The click target for claiming a
-     stretch, so it reads as available rather than as another block. */
-  .tk-add-task-timeline .vis-item.vis-background.tk-add-task-gap {
+  /* `tabular` is a component class rather than a utility, so it goes on the
+     element in the markup — @apply can't reach it. */
+  .tk-gap-chip {
+    @apply flex cursor-pointer items-baseline gap-2 rounded-lg border border-border
+      bg-surface-2 px-2.5 py-1.5 text-xs font-medium text-text transition-colors;
+  }
+
+  .tk-gap-chip:hover {
+    border-color: var(--accent);
+    color: var(--accent-text);
+  }
+
+  .tk-gap-chip.is-active {
     background-color: var(--accent-soft);
-    border-radius: 6px;
+    border-color: var(--accent);
+    color: var(--accent-text);
   }
 
-  .tk-add-task-timeline .vis-panel.vis-center {
-    cursor: pointer;
+  .tk-gap-chip-duration {
+    color: var(--faint);
+    font-weight: 400;
   }
 
-  /* Recorded time is context. Dimmed so the draft is unmistakably the thing
-     being edited, and defaulted to the ordinary cursor because nothing here
-     responds to a click. */
-  .tk-add-task-timeline .vis-item.tk-add-task-recorded {
-    cursor: default;
-    opacity: 0.72;
+  .tk-gap-chip:hover .tk-gap-chip-duration,
+  .tk-gap-chip.is-active .tk-gap-chip-duration {
+    color: inherit;
+    opacity: 0.75;
   }
 
-  /* The one editable item. Outlined rather than filled: it has no client
-     colour to carry until the dropdown is set, and an outline reads as a
-     placeholder for something rather than as a recorded fact. */
-  .tk-add-task-timeline .vis-item.tk-add-task-draft {
-    background-color: var(--accent-soft) !important;
-    box-shadow: inset 0 0 0 2px var(--accent);
-    color: var(--accent-text) !important;
-    cursor: grab;
+  /* The chosen range, stated in words directly under the timeline that sets
+     it. This is the dialog's answer to "when" — the two pickers are folded
+     away behind the button on the right. */
+  .tk-add-task-summary {
+    @apply mt-2 flex items-center justify-between gap-3;
+    min-height: 2rem;
   }
 
-  .tk-add-task-timeline .vis-item.tk-add-task-draft.vis-selected {
-    background-color: var(--accent-soft) !important;
+  .tk-add-task-range {
+    color: var(--text);
+    font-size: 1.0625rem;
+    font-weight: 600;
   }
 
-  /* vis draws the resize handles as children of the item. They're invisible by
-     default, which makes "you can drag this edge" undiscoverable — so they get
-     a visible grip and the whole cursor treatment. */
-  .tk-add-task-timeline .vis-item.tk-add-task-draft .vis-drag-left,
-  .tk-add-task-timeline .vis-item.tk-add-task-draft .vis-drag-right {
-    background-color: var(--accent);
-    border-radius: 2px;
-    cursor: ew-resize;
-    opacity: 0.85;
-    top: 25%;
-    height: 50%;
-    width: 4px;
+  .tk-add-task-duration {
+    color: var(--muted);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    margin-left: 0.5rem;
   }
 
-  .tk-add-task-timeline .vis-item.tk-add-task-draft .vis-drag-left {
-    left: 3px;
+  .tk-add-task-times {
+    @apply mt-2 flex items-end gap-3 border-t border-border pt-3;
   }
 
-  .tk-add-task-timeline .vis-item.tk-add-task-draft .vis-drag-right {
-    right: 3px;
-  }
-
-  /* The shared works list, boxed so it reads as one field among the others
-     rather than running loose in the modal body. */
+  /* The works box holds its height whether or not a client has been chosen.
+     Revealing it on selection moved the footer out from under the pointer at
+     the moment someone was reaching for Add task. */
   .tk-add-task-works {
     background-color: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: 8px;
     max-height: 12rem;
+    min-height: 6.5rem;
     overflow-y: auto;
     padding: 0.5rem;
+  }
+
+  /* `.tk-empty`'s padding is sized for a whole page. Inside a 12rem box it
+     pushes the add field out of sight — the same trim `#works-list` needs. */
+  #add-task-works-list .tk-empty {
+    @apply px-3 py-5;
+  }
+
+  .tk-add-task-works-empty {
+    align-items: center;
+    color: var(--faint);
+    display: flex;
+    font-size: 0.8125rem;
+    justify-content: center;
+    min-height: 5.5rem;
+    text-align: center;
+  }
+
+  /* The dropdown stays exactly where Choices puts it — absolutely positioned
+     inside `.choices`, flipped by the library when it needs to be. The clipping
+     that made this look broken is solved in the markup instead: the client
+     field is the first thing in the modal body, so its list opens downward into
+     the timeline rather than into the panel edge.
+
+     All that's left is a height it can't outgrow. The library caps its inner
+     list at 300px, which plus the search field is taller than the room below
+     the field here; 13rem keeps the whole list inside the dialog and lets it
+     scroll itself. */
+  #add-task-modal .choices__list--dropdown .choices__list {
+    max-height: 13rem;
   }
 
   /* ---- Works ---- */
@@ -1876,22 +1917,6 @@
      outright — they stay readable, so you can see what you're turning on. */
   .tk-subsettings[data-active='false'] {
     @apply pointer-events-none opacity-45;
-  }
-
-  /* ---- Tooltip (timeline hover) ---- */
-
-  .tk-tooltip {
-    background-color: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: var(--shadow-pop);
-    color: var(--text);
-    display: none;
-    font-size: 0.8125rem;
-    padding: 0.625rem 0.75rem;
-    pointer-events: none;
-    position: absolute;
-    z-index: 60;
   }
 
   /* ---- Budgets ----
@@ -2950,8 +2975,47 @@
 
 /* ---- Choices.js (client dropdown) ---- */
 
+/* Choices v11 is themed through `--choices-*` custom properties — every colour,
+   radius, padding and z-index in its stylesheet reads one, with a hardcoded
+   light-mode fallback. So the theme is applied by *setting those*, not by
+   out-specifying the library's selectors.
+
+   This block used to do the latter, and the `!important` it needed to win was
+   not free: `.choices__list--dropdown { z-index: 50 !important }` silently beat
+   a later, more specific rule that tried to lift the dropdown inside a modal.
+   An override that can't be overridden is a trap for the next person. Only the
+   handful of rules with no variable behind them are still written out below. */
 .choices {
-  margin-bottom: 0;
+  --choices-bg-color: var(--control-fill);
+  --choices-bg-color-disabled: var(--surface-3);
+  --choices-bg-color-dropdown: var(--surface);
+  --choices-border-radius: 8px;
+  --choices-border-radius-item: 6px;
+  --choices-disabled-color: var(--faint);
+  /* Symmetric on purpose: the library reuses this for the dropdown's search
+     field as well as its rows, and the extra right-hand room the rows need for
+     the tick is added to the rows alone, below. */
+  --choices-dropdown-item-padding: 0.5rem 0.625rem;
+  --choices-font-size-lg: 0.9375rem;
+  --choices-font-size-md: 0.9375rem;
+  --choices-font-size-sm: 0.8125rem;
+  /* The field is laid out by its container's gap, not by a margin of its own. */
+  --choices-guttering: 0;
+  --choices-highlighted-color: var(--accent-soft);
+  --choices-inner-one-padding: 0.375rem;
+  --choices-inner-padding: 0.375rem 0.75rem;
+  --choices-input-height: 2.625rem;
+  --choices-input-margin-bottom: 0;
+  --choices-input-padding: 0.375rem 0.5rem;
+  --choices-invalid-color: var(--danger);
+  --choices-item-color: var(--text);
+  --choices-keyline-color: var(--control-border);
+  --choices-list-single-padding: 0.1875rem 1rem 0.1875rem 0;
+  /* Its own stylesheet halves this; the placeholder colour is set below. */
+  --choices-placeholder-opacity: 1;
+  --choices-text-color: var(--text);
+  /* Dropdowns tier, per the stacking scale by `.tk-toast-container`. */
+  --choices-z-index: 50;
 }
 
 .choices:focus {
@@ -2959,31 +3023,32 @@
 }
 
 .choices__inner {
-  background-color: var(--control-fill) !important;
-  border: 1px solid var(--control-border) !important;
-  border-radius: 8px !important;
   color: var(--text);
-  font-size: 0.9375rem !important;
-  min-height: 2.625rem !important;
-  padding: 0.375rem 0.75rem !important;
   transition:
     border-color 0.15s ease,
     box-shadow 0.15s ease;
 }
 
+/* No variable: the library has one background for the control and no hover
+   state of its own. */
 .choices:hover .choices__inner {
-  background-color: var(--control-hover) !important;
-  border-color: var(--control-border) !important;
+  background-color: var(--control-hover);
 }
 
+/* The library darkens its keyline with color-mix on focus. The app's fields
+   take an accent border and a ring instead, so this stays hand-written — and
+   the radius is restated because Choices squares off the bottom corners while
+   open to join the dropdown, which doesn't suit one that floats clear. */
 .choices.is-focused .choices__inner,
 .choices.is-open .choices__inner {
-  background-color: var(--surface) !important;
-  border-color: var(--accent) !important;
-  border-radius: 8px !important;
+  background-color: var(--surface);
+  border-color: var(--accent);
+  border-radius: 8px;
   box-shadow: 0 0 0 3px var(--ring);
 }
 
+/* The arrow reads `--choices-text-color`, which is also the item colour — and
+   a full-strength arrow is louder than it should be. */
 .choices[data-type*='select-one']::after {
   border-color: var(--faint) transparent transparent;
 }
@@ -2992,48 +3057,45 @@
   border-color: transparent transparent var(--faint);
 }
 
-.choices__list--single {
-  padding: 0.1875rem 1rem 0.1875rem 0;
-}
-
-.choices__list--single .choices__item {
-  color: var(--text);
-}
-
 .choices__placeholder {
   color: var(--faint);
-  opacity: 1;
 }
 
 .choices__input {
-  background-color: transparent !important;
-  color: var(--text) !important;
-  font-size: 0.9375rem;
-  margin-bottom: 0;
+  background-color: transparent;
+  color: var(--text);
 }
 
 .choices__input::placeholder {
   color: var(--faint);
 }
 
+/* The dropdown floats clear of the field rather than joining it, so it needs
+   all four corners, a shadow and a gap — none of which the library models. */
 .choices__list--dropdown,
 .choices__list[aria-expanded] {
-  background-color: var(--surface) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 10px !important;
-  box-shadow: var(--shadow-pop) !important;
-  margin-top: 0.375rem !important;
-  overflow: hidden;
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+  margin-top: 0.375rem;
   padding: 0.25rem;
-  z-index: 50 !important;
+}
+
+/* Flipped above the field, the library squares the bottom corners to join it.
+   This one floats clear either way, so it keeps all four and moves its gap to
+   the other side. */
+.choices.is-flipped .choices__list--dropdown,
+.choices.is-flipped .choices__list[aria-expanded] {
+  border-radius: 10px;
+  margin-bottom: 0.375rem;
+  margin-top: 0;
 }
 
 .choices__list--dropdown .choices__item,
 .choices__list[aria-expanded] .choices__item {
-  border-radius: 6px;
+  border-radius: var(--choices-border-radius-item);
   color: var(--text);
-  font-size: 0.875rem;
-  padding: 0.5rem 1.75rem 0.5rem 0.625rem;
+  /* Room for the tick on the selected row (drawn as ::before, below). */
+  padding-right: 1.75rem;
   position: relative;
 }
 
@@ -3086,10 +3148,6 @@
 .choices__heading {
   border-bottom-color: var(--border);
   color: var(--faint);
-}
-
-.choices.is-disabled .choices__inner {
-  background-color: var(--surface-3) !important;
 }
 
 /* ---- flatpickr (time + date pickers) ---- */
@@ -3245,137 +3303,194 @@ span.flatpickr-weekday {
   fill: var(--muted);
 }
 
-/* ---- vis-timeline (daily timeline) ---- */
+/* ---- vis-timeline --------------------------------------------------------
+ *
+ * Two strips, one implementation. The History page's `#timeline` and the Add
+ * task dialog's `#add-task-timeline` both carry `.tk-timeline`; everything down
+ * to "The Add task dialog's copy" applies to both, and what's under that
+ * heading is only colour and size.
+ *
+ * **Vertical layout, in one sentence:** the lane is pinned to the height of the
+ * panel vis draws it in, and a block is 90% of the lane sitting 5% from its
+ * top. Sizing and centring are the same declaration, so they cannot disagree,
+ * and no JavaScript measures anything to make it true.
+ *
+ * **On `!important`.** vis's stylesheet loads *above* app.css now (the
+ * `vendor_styles` block in base.html), so an ordinary scoped selector wins on
+ * specificity and ties break our way. What's left is the only thing a
+ * stylesheet cannot outrank any other way: geometry vis writes as an **inline
+ * style** on every redraw — the lane's height chain, an item's `top` and
+ * `height`, and the three vertical markers. Every `!important` below is one of
+ * those. If a new one seems necessary anywhere else, the rule is in the wrong
+ * place or the selector is too weak.
+ *
+ * This section is unlayered, and stays that way. Layered CSS always loses to
+ * unlayered CSS regardless of specificity, so a `.tk-add-task-timeline` rule in
+ * `@layer components` silently loses to a `.tk-timeline` rule out here — which
+ * is how the dialog was once drawn 132px tall around a 112px timeline.
+ * ------------------------------------------------------------------------ */
+
+/* --- The strip ---------------------------------------------------------- */
 
 .tk-timeline {
   height: 132px;
-  overflow: hidden;
   position: relative;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 10px;
   background-color: var(--timeline-canvas);
   box-shadow: var(--timeline-inset-shadow);
+
+  /* How tall the time axis came out, published by syncTimelineLane once vis has
+     drawn one. CSS has no way to ask, and the vertical markers need it. Zero is
+     the value to fall back to: a marker spanning the whole strip, which is what
+     vis does unaided. */
+  --tk-timeline-axis-height: 0px;
 }
 
+/* An overlay, so vis can build underneath it. Taken down by clearTimelineLoading
+   after the first full redraw. */
 .tk-timeline-loading {
-  background-color: var(--timeline-canvas);
-  inset: 0;
-  padding: 0;
   position: absolute;
+  inset: 0;
   z-index: 20;
+  padding: 0;
+  background-color: var(--timeline-canvas);
 }
 
-.vis-timeline {
+/* --- Chrome: vis's root, and the panels it splits the strip into --------- */
+
+.tk-timeline .vis-timeline {
+  border: none;
   background: transparent;
-  border: none !important;
-  font-family: var(--font-sans) !important;
+  font-family: var(--font-sans);
   font-size: 0.75rem;
 }
 
-.vis-panel,
-.vis-panel .vis-content {
-  border-color: var(--border) !important;
+.tk-timeline .vis-panel {
+  border-color: var(--border);
 }
 
+/* The clock labels along the top. */
 .tk-timeline .vis-panel.vis-top {
   background-color: var(--timeline-axis);
 }
 
+/* The lane itself: everything below the labels. */
 .tk-timeline .vis-panel.vis-center {
   background-color: var(--timeline-canvas);
 }
 
-.vis-time-axis .vis-text {
-  color: var(--faint) !important;
+.tk-timeline .vis-time-axis .vis-text {
+  color: var(--faint);
   font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
 }
 
-.vis-time-axis .vis-text.vis-major {
-  color: var(--muted) !important;
+.tk-timeline .vis-time-axis .vis-text.vis-major {
+  color: var(--muted);
   font-weight: 600;
 }
 
 .tk-timeline .vis-time-axis .vis-grid.vis-minor {
-  border-color: var(--timeline-grid-minor) !important;
+  border-color: var(--timeline-grid-minor);
   border-left-style: var(--timeline-minor-line-style);
 }
 
 .tk-timeline .vis-time-axis .vis-grid.vis-major {
-  border-color: var(--timeline-grid-major) !important;
+  border-color: var(--timeline-grid-major);
   border-left-style: solid;
 }
 
-.vis-current-time {
-  background-color: var(--danger) !important;
-  width: 1px !important;
+/* --- The lane, pinned to its panel --------------------------------------
+ *
+ * vis sizes this chain from the wrong end. It measures the items, adds
+ * `margin.item.vertical`, and writes the sum onto `.vis-content`, the itemset
+ * and the group as inline heights — so the content box is a total of what's in
+ * it and has no idea how tall the panel is, which is why it reads as far larger
+ * than anything drawn inside it.
+ *
+ * Inverting that is what makes a block a percentage of the lane. The centre
+ * panel is the one box in here with an honest height (vis derives it from
+ * `options.height`, less the axis), so everything between it and an item is
+ * held to it and `%` resolves against a real number. */
+
+.tk-timeline .vis-panel.vis-center > .vis-content,
+.tk-timeline .vis-itemset,
+.tk-timeline .vis-itemset .vis-group {
+  height: 100% !important;
 }
 
-/* Day boundaries are read-only custom times. Pointer-events prevents the
-   draggable behaviour vis-timeline assigns to custom times by default. */
-.tk-timeline .vis-custom-time.tk-day-start,
-.tk-timeline .vis-custom-time.tk-day-close {
-  pointer-events: none;
-  width: 2px;
-  z-index: 4;
-}
+/* --- Blocks -------------------------------------------------------------- */
 
-.tk-timeline .vis-custom-time.tk-day-start {
-  background-color: var(--success);
-}
-
-.tk-timeline .vis-custom-time.tk-day-close {
-  background-color: var(--warn);
-}
-
-.vis-item {
-  border: none !important;
-  border-radius: 6px !important;
+.tk-timeline .vis-item {
+  border: none;
+  border-radius: 6px;
   color: var(--text);
   font-size: 0.75rem;
   font-weight: 500;
 }
 
-.vis-item.vis-selected {
-  box-shadow: 0 0 0 2px var(--accent);
+/* The one rule the whole vertical layout rests on. 5% down from the top of a
+   box it covers 90% of leaves 5% at the bottom: taller blocks, centred, and a
+   percentage that follows the lane when the axis grows a second row of labels.
+   Both strips get it — it is what makes them the same strip at two sizes.
+
+   Ranges only. Background bands (the dialog's untracked-time chips point at
+   them) keep vis's full-lane height and sit behind these.
+
+   The border is stated again here, on top of `.tk-timeline .vis-item` above,
+   because vis gives `.vis-item.vis-range` a `border-style: solid` of its own at
+   the same specificity as that rule. Ours only wins such a tie by being later
+   in the cascade, which is a fact about two `<link>` tags rather than about
+   this stylesheet — so the block that most needs no border says so at a
+   specificity vis can't match. */
+.tk-timeline .vis-item.vis-range {
+  top: 5% !important;
+  height: 90% !important;
+  border: none;
+  /* Where this block stops and the next one starts. Blocks butt up against
+     each other now — `margin.item.horizontal` is 0 on both strips — so two
+     adjacent clients meet on a colour change alone, which is legible at a
+     glance and ambiguous at a boundary. A hairline *inside* each block gives
+     the pair a visible seam without either of them growing: an outer ring
+     would push into its neighbour, and the strip's `overflow: hidden` would
+     clip it off the first and last blocks of the day. */
+  box-shadow: inset 0 0 0 1px var(--timeline-item-edge);
 }
 
-.vis-item .vis-item-content {
-  padding: 0.25rem 0.5rem;
-}
-
-/* History is a single chronological track: the backend prevents task
-   overlap, so every range can use one roomy, information-dense lane. */
-.tk-timeline .vis-item.tk-timeline-range {
-  height: 48px;
-  border-radius: 8px !important;
-  box-shadow:
-    0 1px 2px rgb(0 0 0 / 0.14),
-    inset 0 0 0 1px rgb(255 255 255 / 0.22);
-}
-
-.tk-timeline .vis-item.tk-timeline-range.is-ongoing {
-  box-shadow:
-    0 0 0 2px var(--surface-2),
-    0 0 0 4px var(--accent);
-}
-
-.tk-timeline .vis-item.tk-timeline-range .vis-item-overflow,
-.tk-timeline .vis-item.tk-timeline-range .vis-item-content {
-  width: 100%;
-  height: 100%;
-}
-
-.tk-timeline .vis-item.tk-timeline-range .vis-item-content {
+/* Fill the block so the label centres in it. vis gives `.vis-item-overflow`
+   `height: 100%` already but leaves the content box an `inline-block` that
+   shrinks to its text, which would strand the label at the top. */
+.tk-timeline .vis-item.vis-range .vis-item-content {
   display: flex;
   align-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 0 0.6rem;
   overflow: hidden;
-  padding: 0.35rem 0.6rem;
+}
+
+/* **One outline exists on these strips, and this is it.** Work in progress is
+   the only thing a block can say that its position and colour can't, so it gets
+   the only ring; everything else is a flat fill and reads as a row of blocks
+   rather than a row of framed things. There is no selected state to draw —
+   `selectable: false` on both timelines — and no hover ring either, since the
+   tooltip already answers what hovering asks.
+
+   Inside the block, not around it, for the same reasons the hairline above is:
+   an outer ring grows the footprint and gets clipped at the strip's edges.
+
+   This selector has to out-specify the hairline rule, not just follow it —
+   `.vis-range` is three classes and would otherwise win and paint the seam
+   over the ring. */
+.tk-timeline .vis-item.vis-range.is-ongoing {
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 .tk-timeline-item {
-  min-width: 0;
   width: 100%;
+  min-width: 0;
   line-height: 1.15;
 }
 
@@ -3387,25 +3502,144 @@ span.flatpickr-weekday {
   white-space: nowrap;
 }
 
-.tk-timeline .vis-tooltip > div {
-  display: grid;
-  gap: 0.2rem;
-  min-width: 9rem;
+/* --- The three verticals: now, day start, day close ----------------------
+ *
+ * vis parents all three to the full-height background panel and writes
+ * `top: 0; height: 100%` onto each as an inline style, so unaided they draw
+ * straight up through the clock labels. Holding them to the lane is what the
+ * published axis height is for, and it keeps all three stopping on the same
+ * line. */
+
+.tk-timeline .vis-current-time,
+.tk-timeline .vis-custom-time.tk-day-start,
+.tk-timeline .vis-custom-time.tk-day-close {
+  top: var(--tk-timeline-axis-height) !important;
+  height: calc(100% - var(--tk-timeline-axis-height)) !important;
 }
 
-.tk-timeline .vis-tooltip > div span {
+.tk-timeline .vis-current-time {
+  width: 1px;
+  background-color: var(--danger);
+}
+
+/* Day boundaries are read-only custom times; vis makes custom times draggable
+   by default, and pointer-events is what declines that. */
+.tk-timeline .vis-custom-time.tk-day-start,
+.tk-timeline .vis-custom-time.tk-day-close {
+  z-index: 4;
+  width: 2px;
+  pointer-events: none;
+}
+
+.tk-timeline .vis-custom-time.tk-day-start {
+  background-color: var(--success);
+}
+
+.tk-timeline .vis-custom-time.tk-day-close {
+  background-color: var(--warn);
+}
+
+/* --- Tooltip -------------------------------------------------------------
+ *
+ * There isn't one here, and that is the point.
+ *
+ * Hovering a block opens `.tk-insight-popover` — the same element every other
+ * tooltip in the app opens, owned by `showInsight` in base.js and parented to
+ * `document.body`. vis's own tooltip is switched off (blocks carry `tkInsight`
+ * rather than `title`, which is the field that triggers it), so there is no
+ * `div.vis-tooltip` to restyle.
+ *
+ * What used to be here was a copy of the popover's twelve declarations, kept in
+ * step by hand and re-losing the cascade to vis every time vis specified a
+ * property more tightly than we did. Owning the element instead of overriding
+ * someone else's ends that: light and dark, radius, shadow and type are decided
+ * once, next to the popover, and the timeline inherits them by using it. */
+
+/* --- The Add task dialog's copy of the day -------------------------------
+ *
+ * Everything above already applies — the container carries `.tk-timeline` too.
+ * Only the differences are here, and they are all colour or size. */
+
+.tk-add-task-timeline {
+  /* Shorter than the page's: one lane of context and one draft, not a whole
+     day's reading. Kept in step with ADD_TASK_TIMELINE_HEIGHT in
+     task_browser.js — vis sizes its own root from that option and knows nothing
+     about this rule, so a disagreement is dead space or a clipped lane. */
+  height: 112px;
+}
+
+/* Untracked time, as a band behind the blocks — what the chips point at. */
+.tk-add-task-timeline .vis-item.vis-background.tk-add-task-gap {
+  border-radius: 6px;
+  background-color: var(--accent-soft);
+}
+
+/* Recorded time is context, and context is grey. Colour on this strip is spent
+   on one question only — "have I already logged time against this client
+   today?" — and everything being its client's colour would answer nothing. */
+.tk-add-task-timeline .vis-item.tk-add-task-recorded {
+  background-color: var(--border-strong);
   color: var(--muted);
-  font-variant-numeric: tabular-nums;
 }
 
-.vis-tooltip {
-  background: var(--surface) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 8px !important;
-  box-shadow: var(--shadow-pop) !important;
-  color: var(--text) !important;
-  font-family: var(--font-sans) !important;
-  font-size: 0.8125rem !important;
+/* The one editable item, and the only solid accent on the strip.
+ *
+ * It used to be `--accent-soft` with an accent ring — a placeholder outline,
+ * which was the right idea when outlines were a thing these strips did. They
+ * aren't any more, and it can't keep the soft fill without the ring: the
+ * untracked-time bands it sits on top of are `--accent-soft` too, so the draft
+ * would be the same colour as its own background. Filled instead, which the
+ * recorded blocks around it (grey) and the bands under it (pale) both give way
+ * to. `--accent-fg` is the paired ink for that fill. */
+.tk-add-task-timeline .vis-item.tk-add-task-draft {
+  background-color: var(--accent);
+  color: var(--accent-fg);
+  cursor: grab;
+}
+
+
+/* vis makes the resize handles 24px wide and invisible: a generous hit area
+   with nothing to say it's there. Keep the hit area — a 4px target is a fight
+   to grab — and draw the grip as a pseudo-element inside it. */
+.tk-add-task-timeline .vis-item.tk-add-task-draft .vis-drag-left,
+.tk-add-task-timeline .vis-item.tk-add-task-draft .vis-drag-right {
+  display: flex;
+  align-items: center;
+}
+
+/* The handles straddle the edge (vis offsets them by -4px), so each grip is
+   pushed to the inner side rather than centred in its hit area. */
+.tk-add-task-timeline .vis-item.tk-add-task-draft .vis-drag-left {
+  justify-content: flex-start;
+  padding-left: 5px;
+}
+
+.tk-add-task-timeline .vis-item.tk-add-task-draft .vis-drag-right {
+  justify-content: flex-end;
+  padding-right: 5px;
+}
+
+/* What pressing the hovered chip would give you, drawn where it would land.
+   Faded rather than outlined: the same accent as the draft, at an opacity that
+   says "not yet". If a draft already exists the two are on screen together,
+   which is the comparison the hover is asking about. */
+.tk-add-task-timeline .vis-item.tk-add-task-preview {
+  background-color: var(--accent);
+  color: var(--accent-fg);
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+/* Cut out of the fill rather than drawn on it, now that the draft is solid
+   accent — an accent grip on an accent block would be invisible. */
+.tk-add-task-timeline .vis-item.tk-add-task-draft .vis-drag-left::after,
+.tk-add-task-timeline .vis-item.tk-add-task-draft .vis-drag-right::after {
+  content: '';
+  width: 3px;
+  height: 45%;
+  border-radius: 2px;
+  background-color: var(--accent-fg);
+  opacity: 0.9;
 }
 
 /* Preserve ordinary state transitions while removing the five audited

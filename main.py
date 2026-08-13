@@ -253,6 +253,36 @@ def timer_status():
     global timer_running, timer_value
     return jsonify({'running': timer_running, 'value': timer_value})
 
+@app.url_defaults
+def add_static_cache_key(endpoint, values):
+    """Stamp every static URL with the file's mtime.
+
+    Without this the browser is free to keep serving whatever copy of
+    `task_browser.js` it already has, and a webview will. That produces the
+    worst kind of bug report: a stack trace whose line numbers don't match the
+    file on disk, and errors like `this.someNewMethod is not a function` for a
+    method that is plainly right there — because the cached module predates it.
+
+    `SEND_FILE_MAX_AGE_DEFAULT = 0` above only covers DEV_MODE, and even then
+    it asks politely. A changed URL isn't a request not to cache; it's a
+    different file as far as the cache is concerned, so there is nothing to
+    revalidate and nothing to get wrong. The mtime means the URL only changes
+    when the asset does, so unchanged files still cache normally.
+    """
+    if endpoint != 'static' or 'filename' not in values:
+        return
+
+    if not app.static_folder:
+        return
+
+    path = os.path.join(app.static_folder, values['filename'])
+    try:
+        values['v'] = int(os.stat(path).st_mtime)
+    except OSError:
+        # A missing or unreadable file is the 404's problem, not ours.
+        pass
+
+
 @app.context_processor
 def inject_version():
     # `dev_mode` gates the developer-only bits of the settings page. It's a
@@ -2662,12 +2692,12 @@ def api_day_timeline(date_string):
 
     if recorded_start is not None and recorded_end is not None:
         window_start, window_end = recorded_start, recorded_end
-        suggested = day_bounds.suggest_gap(day_bounds.find_gaps(
+        recommended = day_bounds.suggest_gaps(day_bounds.find_gaps(
             recorded_start, recorded_end, [(s, e) for s, e, _ in busy]
         ))
     else:
         window_start, window_end = _FALLBACK_WINDOW
-        suggested = None
+        recommended = []
 
     for start, end, _task in busy:
         window_start = min(window_start, start)
@@ -2702,10 +2732,13 @@ def api_day_timeline(date_string):
             {'start_time': start.strftime('%H:%M'), 'end_time': end.strftime('%H:%M')}
             for start, end in gaps
         ],
-        'suggested': None if suggested is None else {
-            'start_time': suggested[0].strftime('%H:%M'),
-            'end_time': suggested[1].strftime('%H:%M'),
-        },
+        # The handful worth offering as buttons, longest first. Every gap is in
+        # `gaps` above — this is the subset a person would actually pick from,
+        # and nothing is filled in on the user's behalf from it.
+        'recommended': [
+            {'start_time': start.strftime('%H:%M'), 'end_time': end.strftime('%H:%M')}
+            for start, end in recommended
+        ],
     })
 
 

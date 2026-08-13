@@ -3,9 +3,13 @@
 Both questions come from the same place: adding a task to a day after the fact,
 on the History page. Nobody adds one at random — they add one because they can
 see a stretch of the day with nothing against it and they remember what they
-were doing. So the app finds those stretches and offers the biggest as the
-default, which turns "what time did I start, what time did I stop" into one
+were doing. So the app finds those stretches and offers the longest few as
+buttons, which turns "what time did I start, what time did I stop" into one
 click for the common case.
+
+Offered, not applied. Nothing is filled in on the user's behalf: a form that
+opens with times already in it invites agreement rather than a decision, and
+the times are the part nobody else can vouch for.
 
 The second question is what happens when the task lands outside the day. A day
 whose recorded bounds don't contain its own tasks is incoherent — the History
@@ -44,7 +48,7 @@ def find_gaps(window_start, window_end, busy):
     """Stretches of ``[window_start, window_end)`` that no interval in ``busy`` covers.
 
     Pure geometry: **every** gap, however short. Judging which are worth
-    offering belongs to `suggest_gap`, because the two callers want different
+    offering belongs to `suggest_gaps`, because the two callers want different
     answers from the same data — the day strip draws all of them so that what's
     on screen adds up to the day, and the form's default ignores the slivers.
 
@@ -82,27 +86,27 @@ def find_gaps(window_start, window_end, busy):
     return gaps
 
 
-def largest_gap(gaps):
-    """The longest gap, earliest first on a tie, or None if there are none.
-
-    Earliest-wins matters more than it looks: two equal gaps usually means a
-    lunch break was never recorded on either side of it, and the morning one is
-    the one being reconstructed.
-    """
-    if not gaps:
-        return None
-    return max(gaps, key=lambda gap: _minutes_between(*gap))
+#: How many stretches are worth putting in front of someone as buttons. Past
+#: three the row stops being a shortcut and becomes a list to read, and the
+#: fourth-longest gap of a fragmented day is not what anyone came to record.
+SUGGESTION_LIMIT = 3
 
 
-def suggest_gap(gaps, minimum_minutes=MINIMUM_GAP_MINUTES):
-    """The gap a form should open on, or None if none is worth offering.
+def suggest_gaps(gaps, limit=SUGGESTION_LIMIT, minimum_minutes=MINIMUM_GAP_MINUTES):
+    """The stretches worth offering as one-click choices, longest first.
 
     The threshold lives here rather than in `find_gaps` because a sliver is
-    still a real part of the day — it belongs on the strip, where leaving it
-    out would make the drawing stop adding up. It just isn't a sensible
-    default for two time fields.
+    still a real part of the day — it belongs on the timeline, where leaving it
+    out would make the drawing stop adding up. It just isn't something anyone
+    means to record.
+
+    Ties are broken by starting earliest. That matters more than it looks: two
+    equal stretches usually means a lunch break was never recorded on either
+    side of it, and the morning one is the one being reconstructed.
     """
-    return largest_gap([gap for gap in gaps if _minutes_between(*gap) >= minimum_minutes])
+    worth_offering = [gap for gap in gaps if _minutes_between(*gap) >= minimum_minutes]
+    worth_offering.sort(key=lambda gap: (-_minutes_between(*gap), gap[0]))
+    return worth_offering[:limit]
 
 
 def plan_stretch(day_start, day_end, task_start, task_end):

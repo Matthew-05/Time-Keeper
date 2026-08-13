@@ -51,36 +51,71 @@ export function isInsightOpen() {
     return Boolean(insightPopover) && !insightPopover.classList.contains('hidden');
 }
 
+/**
+ * The popover element, made on first use.
+ *
+ * Lazily, because callers are no longer only the delegated listeners below:
+ * `showInsight` is exported, and a page module can reach for it before `ready`
+ * has run.
+ */
+function popoverElement() {
+    if (!insightPopover) {
+        insightPopover = document.createElement('div');
+        insightPopover.className = 'tk-insight-popover hidden';
+        insightPopover.setAttribute('role', 'tooltip');
+        document.body.appendChild(insightPopover);
+    }
+    return insightPopover;
+}
+
+/**
+ * Put an insight on screen, anchored to `target`.
+ *
+ * **This is the app's only tooltip.** Anything that wants one calls this rather
+ * than styling a box of its own — which is what the timeline used to do, by way
+ * of vis-timeline's built-in tooltip, and it cost a running argument with a
+ * vendor stylesheet to keep it looking like the rest of the app. Owning the
+ * element ends that argument: there is nothing to out-specify, because nothing
+ * else has an opinion about it.
+ *
+ * `text` defaults to the trigger's own `data-insight`, which is how every
+ * delegated caller uses it. Pass it explicitly when the trigger is an element
+ * you don't control the attributes of.
+ */
+export function showInsight(target, text = target?.dataset?.insight) {
+    if (!target || !text) return;
+    const popover = popoverElement();
+
+    // Measured *after* the content is in, because a structured insight is
+    // several lines tall and the old single-line height would place it
+    // overlapping the control it describes.
+    renderInsight(popover, text);
+    popover.classList.remove('hidden');
+
+    const anchor = target.getBoundingClientRect();
+    const tip = popover.getBoundingClientRect();
+    let left = anchor.left + anchor.width / 2 - tip.width / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - tip.width - 8));
+
+    // Above by preference, below if it doesn't fit, and clamped either way.
+    // A figure table is several times taller than the one-liners this used
+    // to show, so "flip below" alone can now run off the bottom instead.
+    let top = anchor.top - tip.height - 8;
+    if (top < 8) top = anchor.bottom + 8;
+    top = Math.max(8, Math.min(top, window.innerHeight - tip.height - 8));
+
+    popover.style.left = `${left}px`;
+    popover.style.top = `${top}px`;
+}
+
+/** Take it off screen. Safe to call when nothing is showing. */
+export function hideInsight() {
+    insightPopover?.classList.add('hidden');
+}
+
 function bindInsightPopovers() {
-    const popover = document.createElement('div');
-    popover.className = 'tk-insight-popover hidden';
-    popover.setAttribute('role', 'tooltip');
-    document.body.appendChild(popover);
-    insightPopover = popover;
-
-    const show = (target) => {
-        // Measured *after* the content is in, because a structured insight is
-        // several lines tall and the old single-line height would place it
-        // overlapping the control it describes.
-        renderInsight(popover, target.dataset.insight);
-        popover.classList.remove('hidden');
-
-        const anchor = target.getBoundingClientRect();
-        const tip = popover.getBoundingClientRect();
-        let left = anchor.left + anchor.width / 2 - tip.width / 2;
-        left = Math.max(8, Math.min(left, window.innerWidth - tip.width - 8));
-
-        // Above by preference, below if it doesn't fit, and clamped either way.
-        // A figure table is several times taller than the one-liners this used
-        // to show, so "flip below" alone can now run off the bottom instead.
-        let top = anchor.top - tip.height - 8;
-        if (top < 8) top = anchor.bottom + 8;
-        top = Math.max(8, Math.min(top, window.innerHeight - tip.height - 8));
-
-        popover.style.left = `${left}px`;
-        popover.style.top = `${top}px`;
-    };
-    const hide = () => popover.classList.add('hidden');
+    const show = (target) => showInsight(target);
+    const hide = hideInsight;
 
     document.addEventListener('mouseover', (event) => {
         const target = event.target.closest?.('.tk-insight, .tk-meter-tooltip');

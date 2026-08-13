@@ -45,8 +45,18 @@
     <!-- All assets are vendored under static/vendor so the packaged app works offline. -->
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/flatpickr/flatpickr.min.css') }}" />
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/choices/choices.min.css') }}" />
+
+    {# Third-party CSS a single page needs, and it goes *here* — above app.css,
+       with the rest of the vendor sheets. Below it, a vendor rule beats ours on
+       every tie, and the only way to style anything it also styles is
+       `!important` on each declaration. That is what the vis-timeline section of
+       app.css used to look like. #}
+    {% block vendor_styles %}{% endblock %}
+
     <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
 
+    {# For a page that genuinely needs the last word — inline overrides, a
+       print sheet. Nothing should need it to beat a vendor sheet. #}
     {% block additional_styles %}
 
     {% endblock %}

@@ -1,4 +1,5 @@
-import { TimeKeeper, createPoller, reconcileChildren, setText, setHtml, ready, clientColor, clientForeground, confirmAction, lockBodyScroll, unlockBodyScroll } from './base.js';
+import { TimeKeeper, createPoller, reconcileChildren, setText, setHtml, ready, clientColor, clientForeground, confirmAction, lockBodyScroll, unlockBodyScroll, showInsight, hideInsight } from './base.js';
+import { insight, heading, note, row } from './insight.js';
 import { WorksList, fetchWorks, joinWorks } from './works.js';
 import {
     clockTimeToDate,
@@ -16,6 +17,9 @@ import { localDate } from './calendar_dates.js';
 /** The id of the one editable item on the Add task timeline. */
 const ADD_TASK_DRAFT_ID = 'draft';
 
+/** The hovered chip's stretch, shown but not committed. See previewRange. */
+const ADD_TASK_PREVIEW_ID = 'preview';
+
 /**
  * Dragging resolution. Five minutes matches how people describe a block of
  * work; the pickers are still free to the minute for anyone who needs it.
@@ -24,6 +28,18 @@ const ADD_TASK_SNAP_MS = 5 * 60 * 1000;
 
 /** A draft can't be squashed below this, or it would save as nothing. */
 const ADD_TASK_MIN_MINUTES = 5;
+
+/**
+ * Strip heights, in px. Fallbacks only: vis needs a height before it will draw,
+ * and the real answer is the container's own content box — `timelineHeight`
+ * reads that, so the stylesheet stays the single source of truth and the two
+ * cannot drift apart. These are what to use when there is nothing to measure.
+ *
+ * Blocks have no matching constant, and shouldn't: they are sized by their own
+ * content on both strips, so vis measures the only number that matters.
+ */
+const HISTORY_TIMELINE_HEIGHT = 132;      // .tk-timeline
+const ADD_TASK_TIMELINE_HEIGHT = 112;     // .tk-add-task-timeline
 
 /**
  * Collapse touching task ranges for the same active client into one visual
@@ -117,6 +133,94 @@ export class TaskBrowser extends TimeKeeper {
     /** Collect a refresh that isBusy() deferred. No-op if none was skipped. */
     resumeRefresh() {
         this.tasksPoller?.resume().catch((error) => console.error(error));
+    }
+
+    /**
+     * Publish the one measurement the stylesheet can't take for itself.
+     *
+     * `--tk-timeline-axis-height` is how tall the time axis came out. CSS has
+     * no way to ask, and the day-start, day-close and now-line markers need the
+     * answer: vis gives all three `top: 0; height: 100%` inline, so without it
+     * they draw straight up through the clock labels.
+     *
+     * **Nothing here positions a block**, and nothing should. Block geometry is
+     * `top: 5%; height: 90%` on `.vis-item.vis-range` in app.css, against a lane
+     * app.css pins to its panel — a box the browser can resolve a percentage
+     * against without being told how tall anything is.
+     *
+     * Safe on every redraw: one read, and a write only when the axis moved.
+     */
+    syncTimelineLane(timeline, container) {
+        if (!timeline?.dom || !container) return;
+
+        // The container's own content box tells us whether there is a layout to
+        // read at all. Zero means there isn't — a hidden dialog, or the unit
+        // tests — so leave the stylesheet's default rather than write a
+        // measurement taken from nothing over it.
+        if (!container.clientHeight) return;
+
+        const axis = `${timeline.dom.top?.clientHeight ?? 0}px`;
+        const style = container.style;
+        if (style.getPropertyValue?.('--tk-timeline-axis-height') === axis) return;
+
+        style.setProperty('--tk-timeline-axis-height', axis);
+    }
+
+    /**
+     * Unstick vis's first draw. Call once, straight after the constructor.
+     *
+     * vis keeps `dom.root` at `visibility: hidden` from construction until it
+     * decides the first draw is complete, and that decision is a deadlock when
+     * `start` and `end` are passed as options — which is every timeline here:
+     *
+     *  1. `setOptions` applies the window, so the range changes. `Range.setRange`
+     *     emits `rangechange` at once but schedules `rangechanged` **200ms**
+     *     later, on a timer.
+     *  2. The throttled first `_redraw()` runs on the next frame and emits
+     *     `changed`. vis reveals the root from that handler — but only if
+     *     `initialRangeChangeDone` is set, and at frame one it isn't. The
+     *     handler's own attempt to help, `setWindow(options.start, end)`, is a
+     *     no-op because the window is already there, so it emits nothing.
+     *  3. 200ms later `rangechanged` lands and sets `initialRangeChangeDone`.
+     *     Nothing emits `changed` again: vis re-draws on `rangechange` only
+     *     once `initialDrawDone` is true, and it isn't, because that's the flag
+     *     step 2 was supposed to set.
+     *
+     * So the strip stays invisible until something unrelated forces a redraw —
+     * the sixty-second poller, a resize, a zoom. On the Add task dialog that
+     * meant the day appeared when a client was picked, because choosing one
+     * rewrites the DataSet. `onInitialDrawComplete` never arriving is the same
+     * deadlock seen from the other side.
+     *
+     * One redraw when `rangechanged` finally lands breaks it: that emits
+     * `changed` with the flag set, so vis reveals the root, drops its own
+     * loading screen and fires the callback. `once`, because after the first
+     * one vis handles its own redraws and a second listener would just add a
+     * redundant pass to the end of every pan.
+     */
+    finishInitialDraw(timeline) {
+        timeline.once('rangechanged', () => timeline.redraw());
+    }
+
+    /**
+     * What to tell vis the strip is, in pixels.
+     *
+     * The container's content box, because that is the space there is. Passing
+     * the CSS height instead — which is what the two constants used to be for —
+     * overstates it by the border: `.tk-timeline` is `border-box`, so a 132px
+     * rule leaves 130px inside it, and a vis root built to 132 hangs two pixels
+     * past the bottom edge and gets clipped. Small, but it is measured space
+     * that isn't there, and everything downstream inherits the error.
+     */
+    timelineHeight(container, fallback) {
+        return `${container?.clientHeight || fallback}px`;
+    }
+
+    /** Take the timeline's loading overlay down. Safe to call more than once. */
+    clearTimelineLoading(container) {
+        clearTimeout(this.timelineLoadingTimer);
+        container?.querySelector('.tk-timeline-loading')?.remove();
+        container?.removeAttribute('aria-busy');
     }
 
     /** Stop the refresh poller. See the note on TimeKeeperIndex.destroy(). */
@@ -416,6 +520,7 @@ export class TaskBrowser extends TimeKeeper {
         this.addTaskModal = document.getElementById('add-task-modal');
         if (!this.addTaskModal) return;
 
+        this.addTaskPanel = document.getElementById('add-task-panel');
         this.addTaskSubtitle = document.getElementById('add-task-subtitle');
         this.addTaskClient = document.getElementById('add-task-client');
         this.addTaskStart = document.getElementById('add-task-start');
@@ -423,8 +528,15 @@ export class TaskBrowser extends TimeKeeper {
         this.addTaskWarning = document.getElementById('add-task-warning');
         this.addTaskSave = document.getElementById('add-task-save');
         this.addTaskWorksSection = document.getElementById('add-task-works');
+        this.addTaskWorksEmpty = document.getElementById('add-task-works-empty');
+        this.addTaskWorksList = document.getElementById('add-task-works-list');
         this.addTaskTimelineWrap = document.getElementById('add-task-timeline-wrap');
         this.addTaskTimelineEl = document.getElementById('add-task-timeline');
+        this.addTaskRange = document.getElementById('add-task-range');
+        this.addTaskRangeEmpty = document.getElementById('add-task-range-empty');
+        this.addTaskChips = document.getElementById('add-task-chips');
+        this.addTaskTimes = document.getElementById('add-task-times');
+        this.addTaskEditTimes = document.getElementById('add-task-edit-times');
 
         // Set when the server has asked to confirm a change to the day's
         // bounds. The next Save re-sends the same task with permission.
@@ -447,7 +559,7 @@ export class TaskBrowser extends TimeKeeper {
         // keyed on (client, day) rather than on a task, so it can be filled in
         // before — or entirely without — the task that prompted opening this.
         this.addTaskWorks = new WorksList({
-            container: document.getElementById('add-task-works-list'),
+            container: this.addTaskWorksList,
             api: this,
         });
         this.addTaskWorksDirty = false;
@@ -459,7 +571,39 @@ export class TaskBrowser extends TimeKeeper {
         document.getElementById('add-task-cancel')
             .addEventListener('click', () => this.closeAddTaskModal());
         this.addTaskSave.addEventListener('click', () => this.submitAddTask());
-        this.addTaskClient.addEventListener('change', () => this.syncAddTaskWorks());
+        this.addTaskEditTimes.addEventListener('click', () => this.toggleAddTaskTimes());
+        // Choices republishes the native `change` on the underlying select, so
+        // one listener covers both the dropdown and a programmatic reset.
+        this.addTaskClient.addEventListener('change', () => {
+            this.syncAddTaskWorks();
+            this.recolourAddTaskTasks();
+        });
+
+        // Delegated: the chips are rebuilt from each day's response.
+        this.addTaskChips.addEventListener('click', (e) => {
+            const chip = e.target.closest('.tk-gap-chip');
+            if (chip) this.applyRange(chip.dataset.start, chip.dataset.end);
+        });
+
+        // Hovering a chip shows what pressing it would do, on the strip above.
+        // `mouseover`/`mouseout` rather than the enter/leave pair: those don't
+        // bubble, and delegation is the point — the chips are rebuilt on every
+        // day change. `focusin`/`focusout` give the keyboard the same preview.
+        for (const type of ['mouseover', 'focusin']) {
+            this.addTaskChips.addEventListener(type, (e) => {
+                const chip = e.target.closest?.('.tk-gap-chip');
+                if (chip) this.previewRange(chip.dataset.start, chip.dataset.end);
+            });
+        }
+        for (const type of ['mouseout', 'focusout']) {
+            this.addTaskChips.addEventListener(type, (e) => {
+                // Moving between a chip's own children fires mouseout without
+                // ever leaving the chip. `relatedTarget` is where the pointer
+                // went; if that is still inside the same chip, nothing left.
+                const chip = e.target.closest?.('.tk-gap-chip');
+                if (chip && !chip.contains(e.relatedTarget)) this.clearPreviewRange();
+            });
+        }
 
         // Any works CRUD inside the modal changes the counts in the table
         // behind it, so note that a refresh is owed on close. Delegated on the
@@ -491,32 +635,111 @@ export class TaskBrowser extends TimeKeeper {
         this.addTaskStartPicker.clear();
         this.addTaskEndPicker.clear();
         this.addTaskWorksDirty = false;
-        this.addTaskWorksSection.classList.add('hidden');
+        this.setAddTaskTimesVisible(false);
+        this.renderAddTaskRange();
+        setHtml(this.addTaskChips, '');
         this.destroyAddTaskTimeline();
+        // The payload is the dialog's, not the timeline's — cleared here, on
+        // the way in, so a failed load can't leave yesterday's day on screen.
+        this.addTaskDayData = null;
 
-        // `this.clients` is filled by renderTasks, which is exactly the load
-        // that fails to run when there's nothing to render — and a day with no
-        // tasks is the most likely day to be adding one to.
-        if (!this.clients?.length) {
-            try {
-                this.clients = await this.fetchFromAPI('/clients');
-            } catch (error) {
-                console.error('Could not load clients:', error);
+        // Refetched on every open rather than reused. `this.clients` is filled
+        // by renderTasks — which is exactly the load that doesn't run when
+        // there's nothing to render, and a day with no tasks is the likeliest
+        // day to be adding one to. Its *ordering* also goes stale: `/clients`
+        // is most-recently-used first, and that changes as the day is worked.
+        try {
+            this.clients = await this.fetchFromAPI('/clients');
+        } catch (error) {
+            console.error('Could not load clients:', error);
+            if (!this.clients?.length) {
                 this.showToast('Could not load clients', 'error');
                 return;
             }
+            // A list from earlier this session beats no dialog at all.
         }
-        setHtml(this.addTaskClient, this.getClientOptions(null, { placeholder: 'Select a client…' }));
-        this.addTaskClient.selectedIndex = 0;
+        this.initializeAddTaskClientPicker();
+        this.syncAddTaskWorks();
 
         this.addTaskModal.classList.remove('hidden');
         lockBodyScroll();
-        this.addTaskClient.focus();
+        // Move focus off the button that opened this, into the dialog, so
+        // Escape and Tab land where the user expects.
+        this.addTaskPanel?.focus();
 
         // After the modal is up, and not before: vis-timeline measures its
         // container on construction, and one built inside a `hidden` backdrop
         // comes out zero-width and stays that way.
         await this.loadAddTaskTimeline(dateStr);
+    }
+
+    /**
+     * The client box, as a searchable Choices list.
+     *
+     * `/clients` is already ordered most-recently-used first — the same query
+     * behind the Today page's picker — so `shouldSort: false` is what makes
+     * this dialog agree with that one about which client is likely wanted. A
+     * plain alphabetical `<select>` put "Acme" first every time regardless of
+     * whether it had been touched in months.
+     *
+     * Rebuilt on each open rather than kept: clients can be added or renamed on
+     * another page between opens, and a stale list is worse than the cost of
+     * constructing one.
+     */
+    initializeAddTaskClientPicker() {
+        this.addTaskClientPicker?.destroy();
+        setHtml(this.addTaskClient, this.getClientOptions(null, { placeholder: 'Choose a client…' }));
+
+        this.addTaskClientPicker = new Choices(this.addTaskClient, {
+            searchPlaceholderValue: 'Start typing client name...',
+            placeholder: true,
+            placeholderValue: 'Choose a client…',
+            searchResultLimit: 10,
+            shouldSort: false,
+            itemSelectText: '',
+        });
+    }
+
+    /** The chosen client's id, or null when the placeholder is still selected. */
+    addTaskClientId() {
+        const value = parseInt(this.addTaskClient.value, 10);
+        return Number.isNaN(value) ? null : value;
+    }
+
+    /**
+     * State the chosen range in words, or say how to choose one.
+     *
+     * This is the dialog's answer to "when", and the timeline is how it's set —
+     * so the two pickers are folded away behind Edit rather than sitting here
+     * as a third place the same range is written down.
+     */
+    renderAddTaskRange() {
+        const start = this.fieldMinutes(this.addTaskStart);
+        const end = this.fieldMinutes(this.addTaskEnd);
+        const chosen = start != null && end != null && end > start;
+
+        this.addTaskRange.classList.toggle('hidden', !chosen);
+        this.addTaskRangeEmpty.classList.toggle('hidden', chosen);
+        this.markActiveAddTaskChip();
+        if (!chosen) return;
+
+        setHtml(
+            this.addTaskRange,
+            `${this.escapeHtml(formatClockTime(this.minutesToClock(start)))}`
+            + ` – ${this.escapeHtml(formatClockTime(this.minutesToClock(end)))}`
+            + `<span class="tk-add-task-duration">${this.escapeHtml(this.formatDurationMinutes(end - start))}</span>`
+        );
+    }
+
+    toggleAddTaskTimes() {
+        this.setAddTaskTimesVisible(this.addTaskTimes.classList.contains('hidden'));
+    }
+
+    setAddTaskTimesVisible(visible) {
+        this.addTaskTimes.classList.toggle('hidden', !visible);
+        this.addTaskEditTimes.setAttribute('aria-expanded', String(visible));
+        setText(this.addTaskEditTimes, visible ? 'Done' : 'Edit times');
+        if (visible) this.addTaskStart.focus();
     }
 
     // ---- The day timeline --------------------------------------------------
@@ -528,23 +751,22 @@ export class TaskBrowser extends TimeKeeper {
      * thing in both places and the two read as one screen. Three kinds of item
      * share the single lane:
      *
-     *  - **Recorded tasks**, `editable: false`. Context, not targets — they're
-     *    what makes an untracked stretch mean something.
-     *  - **Untracked stretches**, as `background` items. vis reports a click on
-     *    one as a click on empty canvas rather than on an item, so they're
-     *    matched by the clicked *time* instead of by id, which also means the
-     *    axis and the padding either side behave the same way.
-     *  - **The draft**, the only editable item on the timeline. Dragging its
-     *    body moves it; dragging an edge resizes it; both write straight back
-     *    into the two time fields.
+     *  - **Recorded tasks**, `editable: false`. Context, not targets. Drawn in
+     *    neutral grey and coloured only when they belong to the chosen client
+     *    (see `recolourAddTaskTasks`).
+     *  - **Untracked stretches**, as `background` items — the pale bands the
+     *    chips refer to, so pressing a chip visibly lands on one of them.
+     *  - **The draft**, the only editable item, and the only one that isn't
+     *    there when the dialog opens. Dragging its body moves it; dragging an
+     *    edge resizes it; both write straight back into the two time fields.
      */
     async loadAddTaskTimeline(dateStr) {
         let response;
         try {
             response = await this.fetchFromAPI(`/api/day-timeline/${dateStr}`);
         } catch (error) {
-            // The timeline is a convenience; the two time fields work perfectly
-            // well without it, so this stays silent and just hides it.
+            // The timeline is a convenience; the chips and the two time fields
+            // carry the dialog without it, so this stays silent and hides it.
             console.error('Could not load the day timeline:', error);
             this.addTaskTimelineWrap.classList.add('hidden');
             return;
@@ -556,10 +778,64 @@ export class TaskBrowser extends TimeKeeper {
 
         this.addTaskDayData = response;
         this.buildAddTaskTimeline(dateStr);
+        this.renderAddTaskChips();
+        // Deliberately nothing applied. The recommendations are offered as
+        // buttons; a range that filled itself in would be agreed with rather
+        // than chosen, and the times are the part nobody else can vouch for.
+    }
 
-        if (response.suggested) {
-            this.applyRange(response.suggested.start_time, response.suggested.end_time);
-        }
+    /**
+     * The longest few free stretches, as buttons.
+     *
+     * These are the way in. The server sends at most three (`suggest_gaps`),
+     * longest first, and anything else is set with the pickers behind Edit
+     * times — a row of eight chips is a list to read, not a shortcut.
+     */
+    renderAddTaskChips() {
+        const recommended = this.addTaskDayData?.recommended ?? [];
+
+        setHtml(this.addTaskChips, recommended.map((gap) => {
+            const minutes = this.clockToMinutes(gap.end_time) - this.clockToMinutes(gap.start_time);
+            return `<button type="button" class="tk-gap-chip tabular"`
+                + ` data-start="${this.escapeHtmlAttr(gap.start_time)}"`
+                + ` data-end="${this.escapeHtmlAttr(gap.end_time)}">`
+                + `${this.escapeHtml(this.rangeLabel(gap))}`
+                + `<span class="tk-gap-chip-duration">${this.escapeHtml(this.formatDurationMinutes(minutes))}</span>`
+                + `</button>`;
+        }).join(''));
+
+        // The chip the pointer was over no longer exists, so nothing will fire
+        // the mouseout that would have taken its ghost off.
+        this.clearPreviewRange();
+
+        this.addTaskChips.classList.toggle('hidden', recommended.length === 0);
+        setText(
+            this.addTaskRangeEmpty,
+            recommended.length
+                ? 'Pick a free period, or set your own with Edit times.'
+                : 'No free time to suggest — set the times with Edit times.',
+        );
+        this.markActiveAddTaskChip();
+    }
+
+    /**
+     * Mark whichever chip matches the current range, if any.
+     *
+     * Pressing a chip and then nudging the draft leaves the two disagreeing;
+     * without this the chip goes on claiming to be what's selected.
+     */
+    markActiveAddTaskChip() {
+        const start = this.fieldMinutes(this.addTaskStart);
+        const end = this.fieldMinutes(this.addTaskEnd);
+
+        this.addTaskChips.querySelectorAll('.tk-gap-chip').forEach((chip) => {
+            const matches = start != null
+                && end != null
+                && this.clockToMinutes(chip.dataset.start) === start
+                && this.clockToMinutes(chip.dataset.end) === end;
+            chip.classList.toggle('is-active', matches);
+            chip.setAttribute('aria-pressed', String(matches));
+        });
     }
 
     buildAddTaskTimeline(dateStr) {
@@ -589,22 +865,32 @@ export class TaskBrowser extends TimeKeeper {
             items.push({
                 id: `task-${task.id}`,
                 type: 'range',
-                className: `tk-timeline-range tk-add-task-recorded${task.ongoing ? ' is-ongoing' : ''}`,
                 content: `<span class="tk-timeline-item"><span class="tk-timeline-item-client">${label}</span></span>`,
-                title: `<div class="tk-timeline-tooltip"><strong>${label}</strong>`
-                    + `<span>${this.rangeLabel(task)}</span>`
-                    + `<span>${task.ongoing ? 'Ongoing' : 'Recorded'}</span></div>`,
+                // `tkInsight`, not `title`: see timelineInsight. vis carries
+                // unknown fields through the DataSet untouched.
+                tkInsight: this.timelineInsight(
+                    task.client,
+                    [['When', this.rangeLabel(task)]],
+                    task.ongoing ? 'Ongoing' : null,
+                ),
                 start: at(task.start_time),
                 end: at(task.end_time),
                 // Recorded time is context here. It's edited in the table below,
                 // where the change is explicit and has a Save button.
                 editable: false,
                 selectable: false,
-                style: `background-color: ${clientColor(task.client)}; color: ${clientForeground(task.client)};`,
+                // className and style come from recolourAddTaskTasks, which
+                // depends on the client selection and is re-run when it changes.
+                ...this.recordedTaskAppearance(task),
             });
         }
 
         this.addTaskItems = new vis.DataSet(items);
+
+        // `item.vertical` is inert: app.css overrides the `top` vis derives from
+        // it. Kept at a sane value so a block is never laid out off the strip in
+        // the frame before the stylesheet applies.
+        const margin = { axis: 10, item: { horizontal: 0, vertical: 12 } };
 
         const timeline = new vis.Timeline(this.addTaskTimelineEl, this.addTaskItems, {
             start: at(data.window.start_time),
@@ -617,11 +903,21 @@ export class TaskBrowser extends TimeKeeper {
             zoomKey: 'ctrlKey',
             zoomMin: 30 * 60 * 1000,
             zoomMax: 24 * 60 * 60 * 1000,
-            height: '132px',
-            margin: { axis: 10, item: { horizontal: 0, vertical: 12 } },
+            height: this.timelineHeight(this.addTaskTimelineEl, ADD_TASK_TIMELINE_HEIGHT),
+            margin,
             showCurrentTime: dateStr === this.getLocalDateString(),
             format: visTimelineTimeFormat(),
-            tooltip: { followMouse: true, overflowMethod: 'cap' },
+            // Nothing on either strip is selectable. A selected block is a state
+            // with nothing behind it — no action reads it, and the ring it drew
+            // was one more outline competing with the ongoing task's.
+            selectable: false,
+            // Which is why this is here. vis gates dragging on `item.selected ||
+            // itemsAlwaysDraggable.item`, and the resize grips on `item.selected
+            // || itemsAlwaysDraggable.range` — so turning selection off freezes
+            // the draft and strips its handles unless both are set. Neither one
+            // grants editing to anything: `editable: false` on the recorded
+            // items and the gaps still decides that, item by item.
+            itemsAlwaysDraggable: { item: true, range: true },
             // Global editing is on so the draft can be dragged; every other item
             // opts out individually. `overrideItems` stays false — true would
             // make this win over those opt-outs and turn recorded time into
@@ -636,15 +932,20 @@ export class TaskBrowser extends TimeKeeper {
             snap: (date) => new Date(Math.round(date.valueOf() / ADD_TASK_SNAP_MS) * ADD_TASK_SNAP_MS),
             onMoving: (item, callback) => this.handleDraftMoving(item, callback),
             onMove: (item, callback) => this.handleDraftMoved(item, callback),
+            onInitialDrawComplete: () => {
+                // The axis can't be measured until vis says it has drawn one.
+                requestAnimationFrame(() => {
+                    if (this.addTaskTimeline !== timeline) return;
+                    this.syncTimelineLane(timeline, this.addTaskTimelineEl);
+                });
+            },
         });
 
-        timeline.on('click', (props) => {
-            // Anything with an id is an item — the draft, or recorded time.
-            // Both are handled by dragging, not by clicking.
-            if (props.item != null || !props.time) return;
-            const gap = this.gapAt(this.dateToMinutes(props.time));
-            if (gap) this.applyRange(gap.start_time, gap.end_time);
-        });
+        // No click handler, deliberately. Claiming a stretch by clicking the
+        // canvas competed with the chips for the same job and lost: a chip says
+        // what it will do before you press it, and a bare timeline doesn't say
+        // it can be clicked at all. The timeline shows the day and adjusts a
+        // draft that already exists.
 
         // Where the day itself begins and ends, which the drawn window doesn't
         // say — a task dragged past the close marker is visibly outside the day
@@ -657,15 +958,45 @@ export class TaskBrowser extends TimeKeeper {
         marker(data.day?.start_time, 'tk-day-start', 'Start');
         marker(data.day?.end_time, 'tk-day-close', 'Close');
 
+        // Without this the dialog's strip stays hidden until the DataSet is
+        // rewritten, which is what made the day look like it only arrived once
+        // a client had been chosen. See the note on finishInitialDraw.
+        this.finishInitialDraw(timeline);
+
+        this.bindTimelineTooltip(timeline, this.addTaskItems);
+
+        // Same as the History strip: the lane's measurements follow the axis,
+        // and the axis follows the zoom. See the note on syncTimelineLane.
+        timeline.on('changed', () => {
+            if (this.addTaskTimeline === timeline) {
+                this.syncTimelineLane(timeline, this.addTaskTimelineEl);
+            }
+        });
+
         this.addTaskTimeline = timeline;
         this.syncDraftItem();
     }
 
+    /**
+     * Tear down the timeline. **Not** the day's data.
+     *
+     * This used to null `addTaskDayData` too, and `buildAddTaskTimeline` calls
+     * it before rebuilding — so the payload was thrown away microseconds after
+     * arriving. The timeline itself still drew, because build had already taken
+     * a local reference, which is what made the damage silent: no chips ever
+     * (`recommended` read as empty), no drag ever accepted (`gaps` read as
+     * empty, so the draft overlapped nothing and every frame was refused), and
+     * no client highlight. The payload belongs to the open dialog, so
+     * `openAddTaskModal` clears it and nothing else does.
+     */
     destroyAddTaskTimeline() {
+        // The popover lives on document.body, so destroying the strip under an
+        // open one would leave it floating over the page with nothing to point
+        // at — `itemout` can't fire on an element that no longer exists.
+        hideInsight();
         this.addTaskTimeline?.destroy();
         this.addTaskTimeline = null;
         this.addTaskItems = null;
-        this.addTaskDayData = null;
     }
 
     /** The untracked stretch containing `minute`, or null. */
@@ -674,6 +1005,39 @@ export class TaskBrowser extends TimeKeeper {
             minute >= this.clockToMinutes(gap.start_time)
             && minute < this.clockToMinutes(gap.end_time)
         )) ?? null;
+    }
+
+    /**
+     * How one recorded block should look, given the client currently chosen.
+     *
+     * Grey by default. Colour is spent on one thing only — "you have already
+     * logged time against this client today" — which is the question someone
+     * adding a task most often wants answered and would otherwise have to read
+     * the table below to work out. A timeline where every block is a different
+     * colour answers nothing, because everything is emphasised.
+     */
+    recordedTaskAppearance(task) {
+        const highlighted = task.client_id != null && task.client_id === this.addTaskClientId();
+        return {
+            className: 'tk-add-task-recorded'
+                + (task.ongoing ? ' is-ongoing' : '')
+                + (highlighted ? ' is-highlighted' : ''),
+            // Cleared rather than omitted: vis writes whatever is here onto the
+            // element, so an absent value would leave the previous colour on a
+            // block that has just stopped matching.
+            style: highlighted
+                ? `background-color: ${clientColor(task.client)}; color: ${clientForeground(task.client)};`
+                : '',
+        };
+    }
+
+    /** Re-apply that appearance to every block. Cheap; runs on client change. */
+    recolourAddTaskTasks() {
+        if (!this.addTaskItems || !this.addTaskDayData) return;
+        this.addTaskItems.update(this.addTaskDayData.tasks.map((task) => ({
+            id: `task-${task.id}`,
+            ...this.recordedTaskAppearance(task),
+        })));
     }
 
     /**
@@ -761,6 +1125,58 @@ export class TaskBrowser extends TimeKeeper {
         callback(item);
     }
 
+    /**
+     * What hovering a block should say, in the insight format.
+     *
+     * Not HTML, and not vis's `title`. Setting `title` is what made vis draw its
+     * own `div.vis-tooltip` — a vendor-styled box that had to be argued back
+     * into the app's look one `!important` at a time, and lost the argument
+     * again on every property vis specified more tightly than we did. Blocks
+     * carry `tkInsight` instead, vis passes the field through untouched, and
+     * `bindTimelineTooltip` feeds it to the same popover the circled-i buttons
+     * use. Nothing competes for the styling because nothing else has an opinion
+     * about the element.
+     *
+     * `insight()` also removes the escaping question: `renderInsight` builds
+     * nodes and sets `textContent`, so a client named `<b>` is a client named
+     * `<b>` rather than markup.
+     */
+    timelineInsight(title, rows, state = null) {
+        return insight(
+            heading(title),
+            ...rows
+                .filter(([, value]) => value != null && value !== '')
+                .map(([label, value]) => row(label, value)),
+            state ? note(state) : null,
+        );
+    }
+
+    /**
+     * Show the app's popover while the pointer is on a block.
+     *
+     * Anchored to the block, not trailing the pointer, which is how every other
+     * tooltip in the app behaves. Hidden again on the way out, and on anything
+     * that moves a block out from under an open popover: a pan, a zoom, the
+     * start of a drag, or the strip being torn down.
+     */
+    bindTimelineTooltip(timeline, items) {
+        const show = (props) => {
+            if (props.item == null) return;
+            const text = items.get(props.item)?.tkInsight;
+            // `event.target` is whatever is under the pointer — the label span,
+            // usually — so climb to the block itself and anchor to that.
+            const block = props.event?.target?.closest?.('.vis-item');
+            if (text && block) showInsight(block, text);
+        };
+
+        timeline.on('itemover', show);
+        timeline.on('itemout', hideInsight);
+        // A pan or a zoom moves the blocks and leaves the popover pointing at
+        // where one used to be; `itemout` doesn't fire, because the pointer
+        // never moved.
+        timeline.on('rangechange', hideInsight);
+    }
+
     /** Put the draft on the timeline where the two time fields say it is. */
     syncDraftItem() {
         if (!this.addTaskItems) return;
@@ -777,15 +1193,18 @@ export class TaskBrowser extends TimeKeeper {
         this.addTaskItems.update({
             id: ADD_TASK_DRAFT_ID,
             type: 'range',
-            className: 'tk-timeline-range tk-add-task-draft',
+            className: 'tk-add-task-draft',
             content: '<span class="tk-timeline-item"><span class="tk-timeline-item-client">New task</span></span>',
-            title: `<div class="tk-timeline-tooltip"><strong>New task</strong>`
-                + `<span>${formatClockTime(this.minutesToClock(start))} – ${formatClockTime(this.minutesToClock(end))}</span>`
-                + `<span>Drag to move, drag an edge to resize</span></div>`,
+            tkInsight: this.timelineInsight('New task', [
+                ['When', `${formatClockTime(this.minutesToClock(start))} – ${formatClockTime(this.minutesToClock(end))}`],
+                ['Duration', this.formatDurationMinutes(end - start)],
+            ], 'Drag to move, drag an edge to resize'),
             start: this.minutesToDate(start),
             end: this.minutesToDate(end),
+            // Draggable without being selectable — `itemsAlwaysDraggable` in the
+            // constructor is what makes that combination work.
             editable: { updateTime: true, updateGroup: false, remove: false },
-            selectable: true,
+            selectable: false,
         });
     }
 
@@ -840,30 +1259,87 @@ export class TaskBrowser extends TimeKeeper {
         this.addTaskStartPicker.setDate(clockTimeToDate(startClock), false);
         this.addTaskEndPicker.setDate(clockTimeToDate(endClock), false);
         this.resetAddTaskConfirmation();
+        this.renderAddTaskRange();
     }
 
     /** Load a start/end pair into the form and onto the timeline. */
     applyRange(start, end) {
+        // The chip that was just pressed is still under the pointer, and its
+        // preview is now sitting exactly where the draft is. Take it off before
+        // the draft lands, or the two overlap until the pointer moves away.
+        this.clearPreviewRange();
         this.setAddTaskTimes(start, end);
         this.syncDraftItem();
     }
 
-    /** A time field was edited by hand; the draft follows it. */
+    /**
+     * Show a chip's stretch on the strip without committing to it.
+     *
+     * A ghost item of its own rather than a moved draft: the draft is the
+     * answer, and hovering a chip is a question. Keeping them separate means
+     * hovering can't lose times the person typed, and when a draft is already
+     * placed both are on screen at once — which is the comparison the hover is
+     * asking for. Nothing else is touched: not the fields, not the summary
+     * line, not the chip's own `is-active` mark.
+     */
+    previewRange(start, end) {
+        if (!this.addTaskItems || start == null || end == null) return;
+
+        const from = this.clockToMinutes(start);
+        const to = this.clockToMinutes(end);
+        if (!(to > from)) return;
+
+        // Nothing to preview when the draft is already this exact stretch —
+        // the ghost would land on top of it and only muddy the colour.
+        if (from === this.fieldMinutes(this.addTaskStart)
+            && to === this.fieldMinutes(this.addTaskEnd)) {
+            return;
+        }
+
+        this.addTaskItems.update({
+            id: ADD_TASK_PREVIEW_ID,
+            type: 'range',
+            className: 'tk-add-task-preview',
+            content: '<span class="tk-timeline-item"><span class="tk-timeline-item-client">New task</span></span>',
+            start: this.minutesToDate(from),
+            end: this.minutesToDate(to),
+            // No title: the chip under the pointer already says the times, and a
+            // second tooltip would open over the one the chip is answering.
+            editable: false,
+            selectable: false,
+        });
+    }
+
+    /** Take the ghost off. Safe to call when there isn't one. */
+    clearPreviewRange() {
+        if (this.addTaskItems?.get(ADD_TASK_PREVIEW_ID)) {
+            this.addTaskItems.remove(ADD_TASK_PREVIEW_ID);
+        }
+    }
+
+    /** A time field was edited by hand; the draft and the summary follow it. */
     handleAddTaskTimeChanged() {
         this.resetAddTaskConfirmation();
+        this.renderAddTaskRange();
         this.syncDraftItem();
     }
 
     // ---- Works, client, lifecycle ------------------------------------------
 
-    /** Point the works list at whichever client is selected, or hide it. */
+    /**
+     * Point the works list at whichever client is selected.
+     *
+     * The box is always on screen; only its contents change. Revealing it on
+     * selection moved the footer out from under the pointer at the exact moment
+     * someone was reaching for Add task.
+     */
     async syncAddTaskWorks() {
-        const clientId = parseInt(this.addTaskClient.value, 10);
-        if (Number.isNaN(clientId)) {
-            this.addTaskWorksSection.classList.add('hidden');
-            return;
-        }
-        this.addTaskWorksSection.classList.remove('hidden');
+        const clientId = this.addTaskClientId();
+
+        this.addTaskWorksEmpty.classList.toggle('hidden', clientId != null);
+        this.addTaskWorksList.classList.toggle('hidden', clientId == null);
+        if (clientId == null) return;
+
         try {
             await this.addTaskWorks.setTarget(this.selectedDate.value, clientId, { force: true });
         } catch (error) {
@@ -887,10 +1363,12 @@ export class TaskBrowser extends TimeKeeper {
     closeAddTaskModal() {
         if (!this.addTaskModal || this.addTaskModal.classList.contains('hidden')) return;
         this.addTaskModal.classList.add('hidden');
-        // vis-timeline keeps window listeners and a hammer.js instance per
-        // instance, so the one built for this session goes with the dialog
+        // vis-timeline and Choices both keep listeners and a detached DOM per
+        // instance, so the pair built for this session goes with the dialog
         // rather than being left behind for the next open to stack on.
         this.destroyAddTaskTimeline();
+        this.addTaskClientPicker?.destroy();
+        this.addTaskClientPicker = null;
         unlockBodyScroll();
 
         // Works save as they're typed, so closing without adding the task can
@@ -906,13 +1384,15 @@ export class TaskBrowser extends TimeKeeper {
     }
 
     async submitAddTask() {
-        const clientId = parseInt(this.addTaskClient.value, 10);
-        if (Number.isNaN(clientId)) {
-            this.showToast('Please select a client', 'error');
+        const clientId = this.addTaskClientId();
+        if (clientId == null) {
+            this.showToast('Choose a client first', 'warning');
+            this.addTaskClientPicker?.showDropdown();
             return;
         }
         if (!this.addTaskStart.value || !this.addTaskEnd.value) {
-            this.showToast('Please choose a start and end time', 'error');
+            // Say where the answer comes from, not just that it's missing.
+            this.showToast('Click free time on the timeline to set when', 'warning');
             return;
         }
 
@@ -1230,6 +1710,8 @@ export class TaskBrowser extends TimeKeeper {
         // zoom and pan for no reason.
         if (!background) {
             if (this.timeline) {
+                // See destroyAddTaskTimeline: the popover outlives the strip.
+                hideInsight();
                 this.timeline.destroy();
                 this.timeline = null;
                 this.timelineItems = null;
@@ -1830,19 +2312,18 @@ export class TaskBrowser extends TimeKeeper {
 
             return {
                 id: task.id,
-                className: task.is_ongoing ? 'tk-timeline-range is-ongoing' : 'tk-timeline-range',
+                className: task.is_ongoing ? 'is-ongoing' : '',
                 content: `
                     <span class="tk-timeline-item">
                         <span class="tk-timeline-item-client">${clientName}</span>
                     </span>
                 `,
-                title: `
-                    <div class="tk-timeline-tooltip">
-                        <strong>${clientName}</strong>
-                        <span>${startLabel}–${endLabel}</span>
-                        <span>${durationLabel}${task.is_ongoing ? ' · Ongoing' : ''}</span>
-                    </div>
-                `,
+                // `tkInsight`, not `title`: see timelineInsight. The raw name,
+                // because renderInsight sets textContent rather than markup.
+                tkInsight: this.timelineInsight(task.client_name, [
+                    ['When', `${startLabel}–${endLabel}`],
+                    ['Duration', durationLabel],
+                ], task.is_ongoing ? 'Ongoing' : null),
                 start: `${selectedDate}T${task.start_time}`,
                 end: `${selectedDate}T${task.end_time}`,
                 style: `background-color: ${clientColor(task.client_name)}; color: ${clientForeground(task.client_name)};`
@@ -1873,6 +2354,7 @@ export class TaskBrowser extends TimeKeeper {
         // this already; this covers the background pass that can't reuse —
         // a date change racing a tick, or a rebuild after a failed load.
         if (this.timeline) {
+            hideInsight();
             this.timeline.destroy();
             this.timeline = null;
             this.timelineItems = null;
@@ -1932,10 +2414,21 @@ export class TaskBrowser extends TimeKeeper {
             stack: false,
             verticalScroll: false,
             zoomKey: 'ctrlKey',
-            height: '132px',
+            // Read-only: the day is edited in the table below, so a block here
+            // has nothing to be selected *for*. Nothing is draggable either, so
+            // unlike the dialog's strip this needs no `itemsAlwaysDraggable` to
+            // go with it. Hover still gives the tooltip.
+            selectable: false,
+            height: this.timelineHeight(container, HISTORY_TIMELINE_HEIGHT),
+            // Both inert. `vertical` is overridden by app.css, which sets the
+            // `top` vis would derive from it; `horizontal` used to hold a 2px
+            // gap between blocks, and a gap is a border drawn in canvas colour —
+            // adjacent blocks are different clients in different colours (the
+            // same client's touching tasks are merged before they get here), so
+            // the colour change is the edge and the gap only shortened the bar.
             margin: {
                 axis: 10,
-                item: { horizontal: 2, vertical: 12 },
+                item: { horizontal: 0, vertical: 12 },
             },
             showCurrentTime: isSelectedDateToday,
             zoomMin: 30 * 60 * 1000,
@@ -1943,17 +2436,17 @@ export class TaskBrowser extends TimeKeeper {
             min: `${selectedDate}T00:00:00`,
             max: `${selectedDate}T23:59:59`,
             format: visTimelineTimeFormat(),
-            tooltip: {
-                followMouse: true,
-                overflowMethod: 'cap',
-            },
             onInitialDrawComplete: () => {
                 // vis-timeline fires this after its redraw loop has finished.
                 // Removing the overlay in the next frame keeps the spinner up
                 // until the completed timeline is ready for the same paint.
                 requestAnimationFrame(() => {
-                    container.querySelector('.tk-timeline-loading')?.remove();
-                    container.removeAttribute('aria-busy');
+                    this.clearTimelineLoading(container);
+                    // Skipped if this timeline has since been replaced or
+                    // torn down — the container would be a different one's.
+                    if (this.timeline === timeline) {
+                        this.syncTimelineLane(timeline, container);
+                    }
                 });
             },
         };
@@ -1962,6 +2455,43 @@ export class TaskBrowser extends TimeKeeper {
         // onInitialDrawComplete removes it only after the first full redraw.
         const dataSet = new vis.DataSet(items);
         const timeline = new vis.Timeline(container, dataSet, options);
+        this.finishInitialDraw(timeline);
+
+        this.bindTimelineTooltip(timeline, dataSet);
+
+        // The axis is not a fixed height: zoom far enough and vis adds a row of
+        // major labels, which shortens the lane under it. Re-measuring on every
+        // redraw keeps the markers in step with that; the early return in
+        // syncTimelineLane is what makes it affordable during a pan. The blocks
+        // need no help — they are a percentage of the lane, so they follow it.
+        timeline.on('changed', () => {
+            if (this.timeline === timeline) {
+                this.syncTimelineLane(timeline, container);
+            }
+        });
+
+        /* A spinner that can outlive its load is worse than no spinner: it says
+           the app is working when it has finished or given up. onInitialDrawComplete
+           is vis's own promise that it has drawn, and it is conditional on
+           internal state we don't control, so it gets a deadline. Whichever
+           arrives first clears the overlay; clearTimelineLoading is idempotent. */
+        clearTimeout(this.timelineLoadingTimer);
+        this.timelineLoadingTimer = setTimeout(() => {
+            if (container.querySelector('.tk-timeline-loading')) {
+                console.warn('Timeline draw callback never arrived; clearing the loader.');
+                this.clearTimelineLoading(container);
+                // Taking the overlay off a timeline vis is still holding at
+                // `visibility: hidden` swaps a spinner for an empty box, which
+                // is worse. finishInitialDraw should mean we never get here;
+                // if we do, show what was drawn rather than nothing.
+                if (timeline.dom?.root) timeline.dom.root.style.visibility = 'visible';
+                // Same guard as the callback: this timeline may have been
+                // replaced by a date change in the four seconds we waited.
+                if (this.timeline === timeline) {
+                    this.syncTimelineLane(timeline, container);
+                }
+            }
+        }, 4000);
 
         const addDayBoundary = (clockTime, id, label) => {
             if (!clockTime) return;

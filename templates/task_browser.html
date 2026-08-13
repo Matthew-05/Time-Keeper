@@ -4,7 +4,7 @@
   History | Time Keeper
 {% endblock %}
 
-{% block additional_styles %}
+{% block vendor_styles %}
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/vis-timeline/vis-timeline-graph2d.min.css') }}" />
 {% endblock %}
 
@@ -63,7 +63,6 @@
               class="tk-timeline"
               aria-label="Tasks arranged chronologically on a single track"
             ></div>
-            <div id="tooltip" class="tk-tooltip"></div>
           </div>
         </section>
 
@@ -175,18 +174,36 @@
     </div>
   </div>
 
-  <!-- Add task.
+  {#
+    Add task — when, who, what, in that order and one thing per step.
 
-       The timeline is the point of the whole dialog: the reason anyone opens it
-       is a stretch of the day with nothing against it, so the day is drawn to
-       scale — the same vis-timeline the page itself uses — and the new task is
-       a draggable range on it. Recorded blocks are drawn as context and are not
-       editable; untracked time is a background band you click to claim.
+    The reason anyone opens it is a stretch of the day with nothing against it,
+    so the day is drawn to scale (the same vis-timeline the page itself uses)
+    and its longest free stretches are offered as chips. Picking one puts a
+    draggable draft on the timeline; nothing is there before that.
 
-       Wide rather than the default 28rem: a day drawn to scale in a narrow
-       column puts a half-hour task under two pixels. -->
+    Recorded blocks are context: neutral grey, not editable, and only coloured
+    when they belong to the client currently chosen — which is the question
+    "have I already logged time against this client today?" answered without
+    anyone having to ask it.
+
+    Everything else is deliberately quiet. There is one control per question,
+    the times are stated in words rather than in two more inputs, and nothing
+    appears or disappears as the form is filled in — a dialog whose footer moves
+    while you are reaching for it is the thing that makes people mis-click.
+
+    Wide rather than the default 28rem: a day drawn to scale in a narrow column
+    puts a half-hour task under two pixels.
+  #}
   <div id="add-task-modal" class="tk-modal-backdrop hidden">
-    <div class="tk-modal tk-modal-wide" role="dialog" aria-modal="true" aria-labelledby="add-task-title">
+    <div
+      id="add-task-panel"
+      class="tk-modal tk-modal-wide"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="add-task-title"
+      tabindex="-1"
+    >
       <div class="tk-modal-header">
         <div>
           <span class="tk-card-title" id="add-task-title">Add task</span>
@@ -200,38 +217,81 @@
       </div>
 
       <div class="tk-modal-body space-y-4">
+        {#
+          Step 1 — who, and it comes first for two reasons. Choosing the client
+          lights up that client's existing blocks on the timeline below, so the
+          question "have I already logged time against them today?" is answered
+          before you go looking for a gap. And it is the only control with a
+          popup: at the top of the body its dropdown opens downward into three
+          hundred pixels of timeline, all inside the scroll container, so
+          Choices' own absolute positioning works exactly as the library
+          intends. Sitting last, it opened into the panel edge and was clipped
+          to about two rows.
+        #}
+        <div>
+          <label class="mb-1 block text-xs font-medium text-muted" for="add-task-client">Client</label>
+          <select id="add-task-client"></select>
+        </div>
+
+        {#
+          Step 2 — when. The chips are the way in and the timeline is context
+          until one is pressed: the dialog opens with nothing selected and no
+          draft on the timeline, because a form that opens with times already in
+          it invites agreement rather than a decision. Once a range exists it
+          becomes a draggable item, and the line under the timeline states it in
+          words. The two pickers behind "Edit" are the escape hatch for an exact
+          minute or a time outside the drawn day.
+        #}
         <div id="add-task-timeline-wrap">
           <div
             id="add-task-timeline"
             class="tk-timeline tk-add-task-timeline"
             aria-label="The day's tracked time, with the new task shown as a draggable range"
           ></div>
-          <p class="mt-1.5 text-xs text-faint">
-            Click untracked time to take all of it, then drag the draft or its edges to adjust.
-          </p>
+
+          {# The way in. The longest few free stretches, as buttons — nothing is
+             filled in until one is pressed, or the times are typed below. #}
+          <div id="add-task-chips" class="tk-add-task-chips"></div>
+
+          <div class="tk-add-task-summary">
+            {# No aria-live: this is rewritten on every frame of a drag, which
+               would put a screen reader into a stream of half-finished times. #}
+            <p id="add-task-range" class="tk-add-task-range tabular hidden"></p>
+            <p id="add-task-range-empty" class="text-sm text-muted"></p>
+            <button type="button" id="add-task-edit-times" class="tk-btn tk-btn-ghost tk-btn-sm" aria-expanded="false">
+              Edit times
+            </button>
+          </div>
+
+          <div id="add-task-times" class="tk-add-task-times hidden">
+            <div>
+              <label class="mb-1 block text-xs font-medium text-muted" for="add-task-start">Start</label>
+              <input type="text" id="add-task-start" class="tk-input tk-time tabular w-28 text-center" placeholder="Time" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-muted" for="add-task-end">End</label>
+              <input type="text" id="add-task-end" class="tk-input tk-time tabular w-28 text-center" placeholder="Time" />
+            </div>
+          </div>
         </div>
 
-        <div class="flex flex-wrap items-end gap-3">
-          <div class="min-w-[12rem] flex-1">
-            <label class="mb-1 block text-xs font-medium text-muted" for="add-task-client">Client</label>
-            <select id="add-task-client" class="tk-select w-full"></select>
-          </div>
-          <div class="w-32">
-            <label class="mb-1 block text-xs font-medium text-muted" for="add-task-start">Start</label>
-            <input type="text" id="add-task-start" class="tk-input tk-time tabular w-full text-center" placeholder="Time" />
-          </div>
-          <div class="w-32">
-            <label class="mb-1 block text-xs font-medium text-muted" for="add-task-end">End</label>
-            <input type="text" id="add-task-end" class="tk-input tk-time tabular w-full text-center" placeholder="Time" />
-          </div>
-        </div>
+        {#
+          Step 3 — what. Works belong to (client, day) rather than to a task, so
+          this is the same list the Today page and the Works modal show, and
+          edits to it save immediately whether or not the task is added.
 
-        <!-- Works belong to (client, day), not to a task, so this is the same
-             list the Today page and the Works modal show, and edits to it save
-             immediately and independently of whether the task is added. -->
-        <div id="add-task-works" class="hidden">
+          Always rendered, never revealed: it used to appear from nothing when a
+          client was picked, which moved the footer out from under the pointer.
+          It holds its own height and swaps its contents instead.
+        #}
+        <div id="add-task-works">
           <span class="mb-1 block text-xs font-medium text-muted">Works</span>
-          <div id="add-task-works-list" class="tk-add-task-works"></div>
+          <div class="tk-add-task-works">
+            <p id="add-task-works-empty" class="tk-add-task-works-empty">
+              Choose a client to record what you did.
+            </p>
+            <div id="add-task-works-list" class="hidden"></div>
+          </div>
         </div>
 
         <p id="add-task-warning" class="tk-add-task-warning hidden text-sm"></p>
