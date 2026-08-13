@@ -159,7 +159,7 @@
                  stored colour per client, so the grid and this list can be
                  read against each other. #}
               <span class="tk-label">Clients in this range</span>
-              <div id="summary-selection-clients" class="mt-2 space-y-2"></div>
+              <div id="summary-selection-clients" class="mt-2 max-h-[15rem] space-y-2 overflow-auto"></div>
             </div>
           </div>
         </aside>
@@ -241,9 +241,9 @@
             <canvas id="summary-mix-chart"></canvas>
           </div>
 
-          <div class="overflow-x-auto">
+          <div class="max-h-[15rem] overflow-auto">
             <table class="tk-table" id="summary-client-table">
-              <thead>
+              <thead class="sticky top-0 z-10">
                 <tr>
                   <th><button type="button" class="tk-sort" data-sort="client_name">Client</button></th>
                   <th class="text-right"><button type="button" class="tk-sort" data-sort="billable_hours">{% if settings.rounding_enabled %}Billable{% else %}Tracked{% endif %}</button></th>

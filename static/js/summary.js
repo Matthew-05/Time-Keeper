@@ -1150,7 +1150,7 @@ class SummaryDashboard extends TimeKeeper {
               <td class="tk-num text-right">
                 <span class="flex items-center justify-end gap-2">
                   <span class="tk-share-bar"><span style="width: ${client.share_percent ?? 0}%"></span></span>
-                  <span class="w-9 text-right">${percent(client.share_percent)}</span>
+                  <span class="w-14 text-right">${client.share_percent == null ? '—' : `${client.share_percent.toFixed(2)}%`}</span>
                 </span>
               </td>
             </tr>
