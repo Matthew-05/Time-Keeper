@@ -11,14 +11,21 @@
     </div>
 
     <div class="flex flex-shrink-0 items-center gap-2">
-      <!-- Running-task indicator. setTimerRunning() below swaps tk-badge-neutral
-           for tk-badge-accent while a task is running. -->
-      <div id="timer-pill" class="tk-badge tk-badge-neutral tabular normal-case tracking-normal px-[0.6875rem] py-[0.3125rem] text-xs">
+      <!-- Running-task indicator. It links to Today, where the active task can
+           be completed and its works recorded. setTimerRunning() below swaps
+           tk-badge-neutral for tk-badge-accent while a task is running. -->
+      <a
+        id="timer-pill"
+        href="/"
+        class="tk-badge tk-badge-neutral tabular normal-case tracking-normal px-[0.6875rem] py-[0.3125rem] text-xs"
+        title="Open Today"
+        aria-label="Open Today"
+      >
         <span id="timer-dot" class="tk-dot"></span>
         <span id="timer-client" class="hidden truncate font-medium" style="max-width: 10rem"></span>
         <span id="timer-separator" class="hidden" style="opacity: 0.6" aria-hidden="true">&middot;</span>
         <span id="timer">Loading…</span>
-      </div>
+      </a>
 
       <a
         href="/settings"
