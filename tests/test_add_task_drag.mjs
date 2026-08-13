@@ -31,7 +31,9 @@ const stubElement = () => ({
 });
 
 globalThis.document = {
-    readyState: 'complete',
+    // Keep the module's page bootstrap dormant; these checks exercise methods
+    // directly and do not provide the complete History DOM.
+    readyState: 'loading',
     documentElement: stubElement(),
     body: stubElement(),
     addEventListener() {},
@@ -179,6 +181,79 @@ console.log('\nHistory date navigation stops at today');
     check('next is enabled in the past', history.nextDayBtn.disabled, false);
     history.navigateDay(1);
     check('today remains reachable', [dates, fetches], [['2026-08-13'], 1]);
+}
+
+console.log('\nHistory keeps an ongoing task open while editing it');
+{
+    const classes = (...initial) => {
+        const values = new Set(initial);
+        return {
+            add: (...names) => names.forEach((name) => values.add(name)),
+            remove: (...names) => names.forEach((name) => values.delete(name)),
+            contains: (name) => values.has(name),
+            toggle: (name, force) => {
+                if (force === undefined ? !values.has(name) : force) values.add(name);
+                else values.delete(name);
+            },
+        };
+    };
+    const startDisplay = { dataset: { cell: 'start' }, classList: classes(), textContent: '' };
+    const endDisplay = { dataset: { cell: 'end' }, classList: classes(), innerHTML: '' };
+    const startInput = { dataset: {}, classList: classes('task-time-picker', 'start-time', 'hidden'), value: '09:00', focus() {} };
+    const endInput = { dataset: {}, classList: classes('task-time-picker', 'end-time', 'hidden'), disabled: false };
+    const viewActions = { classList: classes() };
+    const editControls = { classList: classes('hidden') };
+    const clientSelect = { value: '4', innerHTML: '' };
+    const duration = { textContent: '' };
+    const elements = {
+        '[data-cell="start"]': startDisplay,
+        '[data-cell="end"]': endDisplay,
+        '[data-cell="duration"]': duration,
+        '.start-time': startInput,
+        '.end-time': endInput,
+        '.task-view-actions': viewActions,
+        '.edit-controls': editControls,
+        '.client-select': clientSelect,
+    };
+    const taskRow = {
+        dataset: {},
+        classList: classes(),
+        querySelector: (selector) => elements[selector] ?? null,
+        querySelectorAll: (selector) => selector === '.time-display'
+            ? [startDisplay, endDisplay]
+            : selector === '.task-time-picker' ? [startInput, endInput] : [],
+    };
+    const ongoing = Object.create(TaskBrowser.prototype);
+    ongoing.clients = [{ id: 4, name: 'Acme' }];
+    ongoing.updateTaskRow(taskRow, {
+        id: 12,
+        start_time: '09:00:00',
+        end_time: '10:15:00', // API effective end; not a stored end.
+        client_id: 4,
+        is_ongoing: true,
+    });
+    check('end cell is only the pulsing badge', endDisplay.innerHTML,
+        '<span class="tk-badge tk-badge-warn"><span class="tk-dot tk-dot-pulse"></span>Ongoing</span>');
+    check('ongoing state disables the end picker', endInput.disabled, true);
+
+    ongoing.enableEditMode(taskRow);
+    check('edit reveals the start picker', startInput.classList.contains('hidden'), false);
+    check('edit leaves the end picker hidden', endInput.classList.contains('hidden'), true);
+    check('edit leaves the ongoing badge visible', endDisplay.classList.contains('hidden'), false);
+
+    const originalFetch = globalThis.fetch;
+    let submitted = null;
+    globalThis.fetch = async (_url, options) => {
+        submitted = JSON.parse(options.body);
+        return { ok: true, json: async () => ({ success: true }) };
+    };
+    ongoing.showToast = () => {};
+    ongoing.fetchTasks = async () => {};
+    ongoing.disableEditMode = () => {};
+    await ongoing.handleTaskUpdate(taskRow);
+    globalThis.fetch = originalFetch;
+    check('save sends only start and client', submitted,
+        { start_time: '09:00', client_id: 4 });
 }
 
 console.log(failures ? `\n${failures} failure(s)` : '\nall checks passed');

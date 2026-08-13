@@ -2674,14 +2674,32 @@ def update_task(task_id):
     if not isinstance(data, dict):
         return jsonify({'error': 'JSON object required'}), 400
     task = Task_Item.query.get_or_404(task_id)
+    is_ongoing = task.end_time is None
 
     try:
         new_start = parse_clock_time(data['start_time'])
-        new_end = parse_clock_time(data['end_time'])
     except (KeyError, ValueError):
-        return jsonify({'error': 'Invalid start or end time format'}), 400
+        return jsonify({'error': 'Invalid start time format'}), 400
 
-    clash, clash_end = _conflicting_task(task.date, new_start, new_end, ignore_id=task_id)
+    if is_ongoing:
+        # History may move the start of the live task, but must not turn the
+        # API's display-only effective end (the current time) into a real end.
+        # Validate its occupied interval through now while keeping it open.
+        conflict_end = datetime.now().time() if task.date == date.today() else new_start
+        new_end = None
+    else:
+        try:
+            new_end = parse_clock_time(data['end_time'])
+        except (KeyError, ValueError):
+            return jsonify({'error': 'Invalid end time format'}), 400
+        conflict_end = new_end
+
+    clash, clash_end = _conflicting_task(
+        task.date,
+        new_start,
+        conflict_end,
+        ignore_id=task_id,
+    )
     if clash is not None:
         return _conflict_response(clash, clash_end)
 

@@ -1514,9 +1514,18 @@ export class TaskBrowser extends TimeKeeper {
             if (editingRow !== row) this.disableEditMode(editingRow);
         });
 
+        const isOngoing = row.dataset.ongoing === 'true';
         row.classList.add('tk-row-editing');
-        row.querySelectorAll('.time-display').forEach(span => span.classList.add('hidden'));
-        row.querySelectorAll('.task-time-picker').forEach(input => input.classList.remove('hidden'));
+        row.querySelectorAll('.time-display').forEach((span) => {
+            // A running task has no end time to edit. Its status remains in the
+            // End column while only the start clock turns into a field.
+            if (!isOngoing || span.dataset.cell === 'start') span.classList.add('hidden');
+        });
+        row.querySelectorAll('.task-time-picker').forEach((input) => {
+            if (!isOngoing || input.classList.contains('start-time')) {
+                input.classList.remove('hidden');
+            }
+        });
         row.querySelector('.task-view-actions').classList.add('hidden');
         row.querySelector('.edit-controls').classList.remove('hidden');
         row.querySelector('.start-time')?.focus();
@@ -1537,7 +1546,7 @@ export class TaskBrowser extends TimeKeeper {
     async handleTaskUpdate(row) {
         const taskId = row.dataset.taskId;
         const startTime = row.querySelector('.start-time').value;
-        const endTime = row.querySelector('.end-time').value;
+        const isOngoing = row.dataset.ongoing === 'true';
         const rawClientId = row.querySelector('.client-select').value;
         const clientId = parseInt(rawClientId, 10);
         if (rawClientId === '' || Number.isNaN(clientId)) {
@@ -1545,15 +1554,19 @@ export class TaskBrowser extends TimeKeeper {
             return;
         }
 
+        const payload = {
+            start_time: serializeClockTime(startTime),
+            client_id: clientId,
+        };
+        if (!isOngoing) {
+            payload.end_time = serializeClockTime(row.querySelector('.end-time').value);
+        }
+
         try {
             const response = await fetch(`/update_task/${taskId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    start_time: serializeClockTime(startTime),
-                    end_time: serializeClockTime(endTime),
-                    client_id: clientId
-                })
+                body: JSON.stringify(payload)
             });
 
             const data = await response.json();
@@ -2207,6 +2220,7 @@ export class TaskBrowser extends TimeKeeper {
     /** Patch a task row's displayed values. Never called on a row being edited. */
     updateTaskRow(row, task) {
         row.classList.toggle('tk-row-ongoing', Boolean(task.is_ongoing));
+        row.dataset.ongoing = String(Boolean(task.is_ongoing));
 
         const startClock = serializeClockTime(task.start_time);
         const endClock = task.end_time ? serializeClockTime(task.end_time) : '';
@@ -2215,11 +2229,13 @@ export class TaskBrowser extends TimeKeeper {
         startCell.dataset.clockTime = startClock;
         setText(startCell, formatClockTime(task.start_time));
 
-        // The ongoing badge lives inside the end cell, so this one is markup.
+        // A running task has no end time. The API's effective end is still
+        // useful for duration and timeline arithmetic, but the table replaces
+        // that clock with the live-status badge.
         setHtml(
             row.querySelector('[data-cell="end"]'),
             task.is_ongoing
-                ? `<span data-clock-time="${endClock}">${formatClockTime(task.end_time)}</span> <span class="tk-badge tk-badge-warn ml-1.5">Ongoing</span>`
+                ? '<span class="tk-badge tk-badge-warn"><span class="tk-dot tk-dot-pulse"></span>Ongoing</span>'
                 : `<span data-clock-time="${endClock}">${formatClockTime(task.end_time)}</span>`
         );
 
@@ -2235,6 +2251,7 @@ export class TaskBrowser extends TimeKeeper {
         const endInput = row.querySelector('.end-time');
         this.syncPickerValue(startInput, startClock);
         this.syncPickerValue(endInput, endClock);
+        endInput.disabled = Boolean(task.is_ongoing);
 
         const select = row.querySelector('.client-select');
         if (select) setHtml(select, this.getClientOptions(task.client_id));
