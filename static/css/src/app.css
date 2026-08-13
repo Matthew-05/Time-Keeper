@@ -1114,14 +1114,16 @@
 
   /* ---- Clients ---- */
 
-  .tk-client-toolbar {
-    background-color: var(--surface);
-    border-bottom: 1px solid var(--border);
-    padding: 0.75rem 1rem;
+  .tk-client-page-actions {
+    align-items: center;
+    display: flex;
+    gap: 0.5rem;
+    width: 100%;
   }
 
   .tk-client-search {
-    max-width: 22rem;
+    flex: 1 1 auto;
+    min-width: 0;
     position: relative;
   }
 
@@ -1138,6 +1140,22 @@
 
   .tk-client-search > .tk-input {
     padding-left: 2.25rem;
+  }
+
+  .tk-client-page-actions > .tk-btn {
+    min-height: 2.5rem;
+  }
+
+  @media (min-width: 40rem) {
+    .tk-client-page-actions {
+      margin-left: auto;
+      width: auto;
+    }
+
+    .tk-client-search {
+      flex: 0 1 20rem;
+      width: 20rem;
+    }
   }
 
   .tk-client-table-scroll {

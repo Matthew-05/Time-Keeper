@@ -11,18 +11,9 @@
         <h1 class="tk-title">Clients</h1>
         <p class="tk-subtitle">{{ clients|length }} client{{ '' if clients|length == 1 else 's' }}</p>
       </div>
-      <button type="button" id="add-client-button" class="tk-btn tk-btn-primary">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-        Add client
-      </button>
-    </div>
-
-    <section class="tk-card overflow-hidden">
-      <div class="tk-client-toolbar" role="search">
-        <label for="client-filter" class="sr-only">Filter clients by name</label>
-        <div class="tk-client-search">
+      <div class="tk-client-page-actions">
+        <div class="tk-client-search" role="search">
+          <label for="client-filter" class="sr-only">Filter clients by name</label>
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="7" />
             <path d="m20 20-4-4" />
@@ -39,8 +30,17 @@
             aria-controls="client-table-body"
           />
         </div>
-      </div>
 
+        <button type="button" id="add-client-button" class="tk-btn tk-btn-primary flex-shrink-0">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          Add client
+        </button>
+      </div>
+    </div>
+
+    <section class="tk-card overflow-hidden">
       <div class="tk-client-table-scroll">
         <table class="tk-table tk-table-hover tk-client-table">
           <thead>
