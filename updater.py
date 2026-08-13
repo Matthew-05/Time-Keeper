@@ -115,9 +115,11 @@ def _validate_asset_response(response: httpx.Response) -> None:
 
 def check_for_update(current_version: str, client: httpx.Client | None = None) -> UpdateInfo | None:
     """Return the newest stable release when it is newer than ``current_version``."""
+    print(f"[updater] Checking for updates from installed version {current_version}.")
     try:
         current = Version(current_version)
     except InvalidVersion as exc:
+        print(f"[updater] Installed version is invalid: {current_version!r}.")
         raise UpdateError(f"The installed version {current_version!r} is invalid.") from exc
 
     owns_client = client is None
@@ -126,20 +128,26 @@ def check_for_update(current_version: str, client: httpx.Client | None = None) -
     client = client or httpx.Client(timeout=TIMEOUT, follow_redirects=False)
     try:
         try:
+            print(f"[updater] Requesting release metadata from {RELEASES_URL}.")
             response = client.get(
                 RELEASES_URL,
                 params={"per_page": 30},
                 headers=_headers(current_version),
             )
+            print(f"[updater] Release metadata response: HTTP {response.status_code}.")
             if response.history:
+                print("[updater] Rejected redirected release metadata response.")
                 raise UpdateError("GitHub redirected the trusted release metadata request.")
             response.raise_for_status()
             releases = response.json()
         except (httpx.HTTPError, ValueError) as exc:
+            print(f"[updater] Release metadata request failed: {exc}")
             raise _request_error(exc, "checking for updates") from exc
 
         if not isinstance(releases, list):
+            print("[updater] Rejected release metadata because it was not a list.")
             raise UpdateError("GitHub returned an unexpected release response.")
+        print(f"[updater] Received {len(releases)} release record(s).")
 
         candidates: list[tuple[Version, dict]] = []
         for release in releases:
@@ -155,9 +163,15 @@ def check_for_update(current_version: str, client: httpx.Client | None = None) -
             candidates.append((version, release))
 
         if not candidates:
+            print("[updater] No stable, parseable releases were found.")
             raise UpdateError("No stable Time Keeper release was found on GitHub.")
         latest, release = max(candidates, key=lambda item: item[0])
+        print(
+            f"[updater] Found {len(candidates)} stable candidate(s); "
+            f"latest is v{latest}."
+        )
         if latest <= current:
+            print(f"[updater] Already up to date (installed v{current}, latest v{latest}).")
             return None
 
         version_text = str(latest)
@@ -186,6 +200,10 @@ def check_for_update(current_version: str, client: httpx.Client | None = None) -
         release_url = str(release.get("html_url") or "")
         if not release_url.startswith(RELEASE_PAGE_PREFIX):
             release_url = RELEASE_PAGE_PREFIX.removesuffix("/")
+        print(
+            f"[updater] Update v{version_text} is available; "
+            f"installer={installer.name}, checksum_sidecar={checksum is not None}."
+        )
         return UpdateInfo(
             current_version=current_version,
             latest_version=version_text,
@@ -196,6 +214,7 @@ def check_for_update(current_version: str, client: httpx.Client | None = None) -
     finally:
         if owns_client:
             client.close()
+            print("[updater] Closed update-check HTTP client.")
 
 
 def _github_digest(value: str | None) -> str | None:

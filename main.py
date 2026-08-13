@@ -212,39 +212,51 @@ def _get_update_status():
 
 def _check_for_update_worker(automatic=False):
     global _update_info, _verified_installer
+    print(f'[updater] Starting {"automatic" if automatic else "manual"} update check.')
     try:
         result = app_updater.check_for_update(APP_VERSION)
         with _update_lock:
             _update_info = result
             _verified_installer = None
         if result is None:
+            print(f'[updater] Update check complete: application is current at v{APP_VERSION}.')
             _set_update_status(
                 state='up_to_date', latest_version=APP_VERSION,
                 release_url=None, progress=None, error=None,
             )
         else:
+            print(f'[updater] Update check complete: v{result.latest_version} is available.')
             _set_update_status(
                 state='available', latest_version=result.latest_version,
                 release_url=result.release_url, progress=None, error=None,
             )
     except app_updater.UpdateError as exc:
+        print(f'[updater] Update check failed: {exc}')
         _set_update_status(state='error', progress=None, error=str(exc))
     except Exception as exc:
+        print(f'[updater] Unexpected update check failure: {exc}')
         logger.exception('Unexpected update check failure')
         _set_update_status(state='error', progress=None, error='Could not check for updates.')
     finally:
         if automatic:
             try:
                 app_updater.record_automatic_check(_update_state_path)
+                print('[updater] Recorded automatic update-check timestamp.')
             except OSError as exc:
+                print(f'[updater] Could not record automatic update-check timestamp: {exc}')
                 logger.warning(f'Could not persist update check throttle: {exc}')
 
 
 def _start_update_check(automatic=False):
     with _update_lock:
         if _update_status['state'] in {'checking', 'downloading', 'installing'}:
+            print(
+                f"[updater] Ignored {'automatic' if automatic else 'manual'} update check; "
+                f"current state is {_update_status['state']}."
+            )
             return False
         _update_status.update(state='checking', progress=None, error=None)
+    print(f'[updater] Queued {"automatic" if automatic else "manual"} update check.')
     threading.Thread(
         target=_check_for_update_worker,
         kwargs={'automatic': automatic},
@@ -278,9 +290,12 @@ def _download_update_worker():
 def start_automatic_update_check():
     """Start at most one daily check, and only from an installed/frozen build."""
     if DEV_MODE:
+        print('[updater] Skipped automatic update check in development mode.')
         return False
     if not app_updater.automatic_check_due(_update_state_path):
+        print('[updater] Skipped automatic update check; the daily check is not due yet.')
         return False
+    print('[updater] Automatic update check is due.')
     return _start_update_check(automatic=True)
 
 # Now initialize the database with the configured app
