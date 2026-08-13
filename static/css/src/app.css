@@ -1731,8 +1731,10 @@
 
   .tk-titlebar-brand {
     align-items: center;
+    app-region: drag;
     display: flex;
     min-width: 0;
+    -webkit-app-region: drag;
   }
 
   .tk-titlebar-brand {

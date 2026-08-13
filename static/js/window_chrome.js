@@ -126,10 +126,6 @@ resizeHandles.forEach((handle) => {
   handle.addEventListener('pointerdown', beginResize)
 })
 
-document.querySelectorAll('.pywebview-drag-region').forEach((region) => {
-  region.addEventListener('dblclick', () => runWindowAction('maximize'))
-})
-
 window.timeKeeperWindowChrome = Object.freeze({ setMaximized })
 
 if (window.pywebview?.api) {

@@ -3174,6 +3174,7 @@ def create_window():
             else '#f6f7f9'
         ),
     )
+    window.events.before_show += window_api._configure_native_window
     window.events.maximized += window_api._handle_maximized
     window.events.restored += window_api._handle_restored
     return window
@@ -3247,6 +3248,48 @@ def start_webview():
 class WebviewAPI:
     def __init__(self):
         self._maximized = False
+        # Python.NET event delegates must be kept alive for as long as the form.
+        self._native_move_handler = None
+        self._webview_ready_handler = None
+
+    def _configure_native_window(self):
+        """Give the frameless WinForms window normal Windows chrome behavior.
+
+        WebView2 supports HTML regions that participate in native non-client
+        hit testing. Enabling that support makes CSS ``app-region: drag`` act
+        like a real caption, including Aero Snap, double-click maximize, and
+        the system menu. WinForms still needs an explicit maximized work area
+        because its borderless form otherwise covers the taskbar.
+        """
+        if sys.platform != 'win32' or not webview.windows:
+            return
+
+        try:
+            import System.Windows.Forms as WinForms
+
+            native = webview.windows[0].native
+
+            def enable_non_client_regions(sender, args):
+                if args.IsSuccess:
+                    sender.CoreWebView2.Settings.IsNonClientRegionSupportEnabled = True
+
+            self._webview_ready_handler = enable_non_client_regions
+            if native.webview.CoreWebView2:
+                native.webview.CoreWebView2.Settings.IsNonClientRegionSupportEnabled = True
+            else:
+                native.webview.CoreWebView2InitializationCompleted += self._webview_ready_handler
+
+            def update_maximized_bounds(*_args):
+                if native.WindowState == WinForms.FormWindowState.Normal:
+                    native.MaximizedBounds = WinForms.Screen.FromHandle(native.Handle).WorkingArea
+
+            self._native_move_handler = update_maximized_bounds
+            native.Move += self._native_move_handler
+            update_maximized_bounds()
+        except Exception as exc:
+            # The app remains usable with pywebview's basic frameless behavior
+            # if a future backend no longer exposes these WebView2 APIs.
+            logger.warning(f'Could not configure native Windows chrome: {exc}')
 
     def navigate(self, url):
         webview.windows[0].evaluate_js(f'window.location.href = "{url}"')
@@ -3256,13 +3299,36 @@ class WebviewAPI:
 
     def toggle_maximize(self):
         window = webview.windows[0]
-        if self._maximized:
-            window.restore()
-        else:
+        maximized = not self._maximized
+        if maximized:
+            self._refresh_maximized_bounds()
             window.maximize()
+        else:
+            window.restore()
 
-        self._maximized = not self._maximized
-        return self._maximized
+        self._sync_maximized(maximized)
+        return maximized
+
+    def _refresh_maximized_bounds(self):
+        if sys.platform != 'win32' or not webview.windows:
+            return
+
+        try:
+            import System.Windows.Forms as WinForms
+            from System import Action
+
+            native = webview.windows[0].native
+            native.Invoke(
+                Action(
+                    lambda: setattr(
+                        native,
+                        'MaximizedBounds',
+                        WinForms.Screen.FromHandle(native.Handle).WorkingArea,
+                    )
+                )
+            )
+        except Exception as exc:
+            logger.warning(f'Could not refresh maximized window bounds: {exc}')
 
     def resize_window(self, width, height, direction):
         """Resize from a custom frame edge while anchoring its opposite side."""
