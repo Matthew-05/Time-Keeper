@@ -41,6 +41,15 @@ class Settings extends TimeKeeper {
         this.intervalInput = document.getElementById('reminder-interval-input')
         this.snoozeInput = document.getElementById('reminder-snooze-input')
 
+        this.updateStatus = document.getElementById('update-status')
+        this.updateAction = document.getElementById('update-action')
+        this.updateReleaseLink = document.getElementById('update-release-link')
+        this.updateProgressWrap = document.getElementById('update-progress-wrap')
+        this.updateProgress = document.getElementById('update-progress')
+        this.updateProgressLabel = document.getElementById('update-progress-label')
+        this.updateState = null
+        this.updatePollTimer = null
+
         // Dev-only; absent in a packaged build.
         this.testButton = document.getElementById('reminder-test')
         this.statusList = document.getElementById('reminder-status')
@@ -70,6 +79,7 @@ class Settings extends TimeKeeper {
         this.initWeekStart()
         this.initRounding()
         this.initReminders()
+        this.initUpdates()
         this.initDevTools()
     }
 
@@ -372,6 +382,97 @@ class Settings extends TimeKeeper {
 
         this.intervalCustom.classList.toggle('hidden', isPreset)
         this.intervalCustom.classList.toggle('flex', !isPreset)
+    }
+
+    // -- application updates ----------------------------------------------
+
+    initUpdates() {
+        if (!this.updateAction) return
+        this.updateAction.addEventListener('click', () => this.performUpdateAction())
+        window.addEventListener('pagehide', () => clearTimeout(this.updatePollTimer), { once: true })
+        this.refreshUpdateStatus()
+    }
+
+    async refreshUpdateStatus() {
+        try {
+            const status = await this.fetchFromAPI(
+                '/api/update/status',
+                {},
+                { timeout: 5000, retries: 0, quiet: true }
+            )
+            this.renderUpdateStatus(status)
+        } catch (error) {
+            this.updateStatus.textContent = 'Update status is unavailable right now.'
+            this.updateAction.textContent = 'Try again'
+            this.updateAction.disabled = false
+            this.updateState = 'error'
+        }
+    }
+
+    scheduleUpdatePoll() {
+        clearTimeout(this.updatePollTimer)
+        this.updatePollTimer = setTimeout(() => this.refreshUpdateStatus(), 400)
+    }
+
+    renderUpdateStatus(status) {
+        if (!status) return
+        this.updateState = status.state
+        const latest = status.latest_version ? `v${status.latest_version}` : 'the latest version'
+        const states = {
+            idle: ['Check GitHub Releases for a newer stable version.', 'Check for updates', false],
+            checking: ['Checking GitHub Releases…', 'Checking…', true],
+            up_to_date: [`Time Keeper v${status.current_version} is up to date.`, 'Check again', false],
+            available: [`${latest} is available.`, 'Download update', false],
+            downloading: [`Downloading ${latest}…`, 'Downloading…', true],
+            ready: [`${latest} is verified and ready to install.`, 'Install update', false],
+            installing: ['Opening the installer and closing Time Keeper…', 'Opening installer…', true],
+            error: [status.error || 'The update could not be completed.', 'Try again', false],
+        }
+        const [message, label, disabled] = states[status.state] || states.idle
+        this.updateStatus.textContent = message
+        this.updateAction.textContent = label
+        this.updateAction.disabled = disabled
+
+        const showLink = Boolean(status.release_url)
+        this.updateReleaseLink.classList.toggle('hidden', !showLink)
+        if (showLink) this.updateReleaseLink.href = status.release_url
+
+        const showProgress = status.state === 'downloading'
+        const percentage = Number.isFinite(status.progress) ? Math.max(0, Math.min(status.progress, 100)) : 0
+        this.updateProgressWrap.classList.toggle('hidden', !showProgress)
+        this.updateProgressWrap.setAttribute('aria-hidden', showProgress ? 'false' : 'true')
+        this.updateProgress.style.width = `${percentage}%`
+        this.updateProgress.setAttribute('aria-valuenow', String(percentage))
+        this.updateProgressLabel.textContent = `${percentage}%`
+
+        if (['checking', 'downloading', 'installing'].includes(status.state)) {
+            this.scheduleUpdatePoll()
+        } else {
+            clearTimeout(this.updatePollTimer)
+        }
+    }
+
+    async performUpdateAction() {
+        const endpoint =
+            this.updateState === 'available'
+                ? '/api/update/download'
+                : this.updateState === 'ready'
+                  ? '/api/update/install'
+                  : '/api/update/check'
+        this.updateAction.disabled = true
+        try {
+            const status = await this.fetchFromAPI(
+                endpoint,
+                { method: 'POST' },
+                { timeout: 10000, retries: 0, quiet: false }
+            )
+            this.renderUpdateStatus(status)
+        } catch (error) {
+            this.updateStatus.textContent = error.message || 'The update action failed.'
+            this.updateAction.textContent = 'Try again'
+            this.updateAction.disabled = false
+            this.updateState = 'error'
+        }
     }
 
     /** Wire a valid number input into the current draft. */

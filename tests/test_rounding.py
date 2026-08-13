@@ -817,6 +817,7 @@ class BudgetDurationFormattingTests(unittest.TestCase):
             check=True,
             capture_output=True,
             text=True,
+            encoding='utf-8',
         )
 
         values = json.loads(result.stdout)
@@ -913,6 +914,7 @@ class BudgetDurationFormattingTests(unittest.TestCase):
             check=True,
             capture_output=True,
             text=True,
+            encoding='utf-8',
         )
         quarters, sixths, off = json.loads(result.stdout)
 

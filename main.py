@@ -1,9 +1,8 @@
 import sys
 import os
 from pathlib import Path
-import httpx
-import getpass
 import re
+from app_version import APP_VERSION
 
 # True when running from source, False inside the PyInstaller bundle.
 # Drives the dev-only niceties — most visibly the webview devtools.
@@ -25,6 +24,15 @@ if _toast_uri:
     import ipc
 
     sys.exit(0 if ipc.forward_uri(_toast_uri) else 1)
+
+from env_config import load_env_file
+from usage_logger import UsageLogger
+
+try:
+    load_env_file()
+except (OSError, ValueError) as exc:
+    # Telemetry is optional and must never prevent the desktop app from opening.
+    print(f"Could not load the optional Time Keeper environment file: {exc}")
 
 # Set up temp directories FIRST if running as frozen executable
 if not DEV_MODE:
@@ -59,6 +67,7 @@ from rounding import round_seconds_to_hours
 from manual_adjustments import adjustment_figures
 import notifications
 import ipc
+import updater as app_updater
 from reminders import ReminderService
 from client_colors import normalize_client_color, random_client_color
 import atexit
@@ -119,55 +128,6 @@ def parse_clock_time(value):
     return datetime(2000, 1, 1, hours, minutes, seconds).time()
 
 
-class UsageLogger:
-    """Handles logging of automation usage to external API."""
-
-    @staticmethod
-    def send_log(action_name, details=None):
-        """Send usage log to external API.
-
-        Args:
-            action_name: Name of the action/automation being logged
-            details: Optional dictionary of additional details to log
-        """
-        try:
-            url = 'https://matthewcodes.xyz/api/project-usage/'
-
-            headers = {
-                'Authorization': 'J9EuaQDk85QQIRbsKmQ-RfjKKzlT8U7NnBj-eJTr30c',
-                'Content-Type': 'application/json',
-            }
-
-            data = {
-                'application_name': 'Time-Keeper',
-                'action': action_name,
-                'username': getpass.getuser(),
-            }
-
-            # Add details if provided
-            if details:
-                data.update(details)
-
-            with httpx.Client() as client:
-                response = client.post(
-                    url,
-                    json=data,
-                    headers=headers,
-                    follow_redirects=True
-                )
-                print(f"Request method: {response.request.method}")
-                print(f"Response status: {response.status_code}")
-                print(f"Response content: {response.text}")
-
-                return response.json() if response.status_code in (200, 201) else response.text
-        except Exception as e:
-            print(f"Error sending log: {str(e)}")
-            return None
-
-
-APP_VERSION = "1.2.0"
-
-
 user_data_dir = os.path.join(Path.home(), 'AppData', 'Local', 'TimeKeeper')
 os.makedirs(user_data_dir, exist_ok=True)
 
@@ -220,6 +180,108 @@ if DEV_MODE:
 
 # Tell SQLAlchemy to use the user directory for instance data
 app.instance_path = user_data_dir
+
+# Update work is performed on background threads so neither app startup nor the
+# Settings page blocks on GitHub. Only this small state snapshot is shared with
+# Flask request threads; the network and filesystem operations live in updater.py.
+_update_lock = threading.Lock()
+_update_info = None
+_verified_installer = None
+_update_status = {
+    'state': 'idle',
+    'current_version': APP_VERSION,
+    'latest_version': None,
+    'release_url': None,
+    'progress': None,
+    'error': None,
+    'frozen': not DEV_MODE,
+}
+_update_dir = os.path.join(user_data_dir, 'updates')
+_update_state_path = os.path.join(user_data_dir, 'update-state.json')
+
+
+def _set_update_status(**changes):
+    with _update_lock:
+        _update_status.update(changes)
+
+
+def _get_update_status():
+    with _update_lock:
+        return dict(_update_status)
+
+
+def _check_for_update_worker(automatic=False):
+    global _update_info, _verified_installer
+    try:
+        result = app_updater.check_for_update(APP_VERSION)
+        with _update_lock:
+            _update_info = result
+            _verified_installer = None
+        if result is None:
+            _set_update_status(
+                state='up_to_date', latest_version=APP_VERSION,
+                release_url=None, progress=None, error=None,
+            )
+        else:
+            _set_update_status(
+                state='available', latest_version=result.latest_version,
+                release_url=result.release_url, progress=None, error=None,
+            )
+    except app_updater.UpdateError as exc:
+        _set_update_status(state='error', progress=None, error=str(exc))
+    except Exception as exc:
+        logger.exception('Unexpected update check failure')
+        _set_update_status(state='error', progress=None, error='Could not check for updates.')
+    finally:
+        if automatic:
+            try:
+                app_updater.record_automatic_check(_update_state_path)
+            except OSError as exc:
+                logger.warning(f'Could not persist update check throttle: {exc}')
+
+
+def _start_update_check(automatic=False):
+    with _update_lock:
+        if _update_status['state'] in {'checking', 'downloading', 'installing'}:
+            return False
+        _update_status.update(state='checking', progress=None, error=None)
+    threading.Thread(
+        target=_check_for_update_worker,
+        kwargs={'automatic': automatic},
+        name='timekeeper-update-check',
+        daemon=True,
+    ).start()
+    return True
+
+
+def _download_update_worker():
+    global _verified_installer
+    with _update_lock:
+        info = _update_info
+
+    def report(received, total):
+        percentage = min(100, int(received * 100 / total)) if total else None
+        _set_update_status(progress=percentage)
+
+    try:
+        verified = app_updater.download_update(info, _update_dir, progress=report)
+        with _update_lock:
+            _verified_installer = verified
+        _set_update_status(state='ready', progress=100, error=None)
+    except app_updater.UpdateError as exc:
+        _set_update_status(state='error', progress=None, error=str(exc))
+    except Exception:
+        logger.exception('Unexpected update download failure')
+        _set_update_status(state='error', progress=None, error='Could not download the update.')
+
+
+def start_automatic_update_check():
+    """Start at most one daily check, and only from an installed/frozen build."""
+    if DEV_MODE:
+        return False
+    if not app_updater.automatic_check_due(_update_state_path):
+        return False
+    return _start_update_check(automatic=True)
 
 # Now initialize the database with the configured app
 db.init_app(app)
@@ -348,6 +410,56 @@ def api_update_settings():
         return jsonify({'error': 'Could not write the settings file'}), 500
 
     return jsonify(saved)
+
+
+@app.route('/api/update/status', methods=['GET'])
+def api_update_status():
+    """Return the current background update job state."""
+    return jsonify(_get_update_status())
+
+
+@app.route('/api/update/check', methods=['POST'])
+def api_update_check():
+    started = _start_update_check(automatic=False)
+    return jsonify({**_get_update_status(), 'started': started}), (202 if started else 200)
+
+
+@app.route('/api/update/download', methods=['POST'])
+def api_update_download():
+    with _update_lock:
+        if _update_status['state'] != 'available' or _update_info is None:
+            return jsonify({'error': 'No verified update release is ready to download.'}), 409
+        _update_status.update(state='downloading', progress=0, error=None)
+    threading.Thread(
+        target=_download_update_worker,
+        name='timekeeper-update-download',
+        daemon=True,
+    ).start()
+    return jsonify(_get_update_status()), 202
+
+
+@app.route('/api/update/install', methods=['POST'])
+def api_update_install():
+    if DEV_MODE:
+        return jsonify({'error': 'Updates can only be installed from a packaged build.'}), 409
+
+    with _update_lock:
+        if _update_status['state'] != 'ready' or _verified_installer is None:
+            return jsonify({'error': 'No verified installer is ready to open.'}), 409
+        installer = _verified_installer
+        _update_status.update(state='installing', error=None)
+
+    try:
+        app_updater.launch_installer(installer)
+    except (app_updater.UpdateError, OSError) as exc:
+        _set_update_status(state='ready', error=f'Could not open the installer: {exc}')
+        return jsonify({'error': f'Could not open the installer: {exc}'}), 500
+
+    # Let this response reach the local UI, then use the same pywebview API seam
+    # as the title-bar Close button. Inno can now replace the executable without
+    # self-overwrite tricks or an abrupt os._exit.
+    threading.Timer(0.35, lambda: WebviewAPI().close()).start()
+    return jsonify(_get_update_status()), 202
 
 
 @app.route('/api/work-calendar', methods=['GET', 'POST'])
@@ -3631,6 +3743,7 @@ if __name__ == '__main__':
     t.start()
 
     start_reminders()
+    start_automatic_update_check()
 
     # Create and start webview window
     window = create_window()

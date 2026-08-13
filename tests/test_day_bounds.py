@@ -111,62 +111,62 @@ class FindGapsTests(unittest.TestCase):
         self.assertEqual(gaps(time(9, 0), time(9, 0), []), [])
 
 
-class LargestGapTests(unittest.TestCase):
+class SuggestGapsOrderingTests(unittest.TestCase):
     def test_picks_the_longest(self):
         self.assertEqual(
-            day_bounds.largest_gap([
+            day_bounds.suggest_gaps([
                 (time(9, 0), time(9, 30)),
                 (time(11, 0), time(13, 0)),
                 (time(15, 0), time(16, 0)),
-            ]),
-            (time(11, 0), time(13, 0)),
+            ], limit=1),
+            [(time(11, 0), time(13, 0))],
         )
 
     def test_ties_go_to_the_earliest(self):
         self.assertEqual(
-            day_bounds.largest_gap([
+            day_bounds.suggest_gaps([
                 (time(9, 0), time(10, 0)),
                 (time(14, 0), time(15, 0)),
             ]),
-            (time(9, 0), time(10, 0)),
+            [(time(9, 0), time(10, 0)), (time(14, 0), time(15, 0))],
         )
 
     def test_no_gaps_means_no_suggestion(self):
-        self.assertIsNone(day_bounds.largest_gap([]))
+        self.assertEqual(day_bounds.suggest_gaps([]), [])
 
 
-class SuggestGapTests(unittest.TestCase):
+class SuggestGapsThresholdTests(unittest.TestCase):
     def test_short_gaps_are_not_offered(self):
         # A two-minute gap between adjacent entries is not something anyone
         # means to fill, and offering it would put a two-minute task in the
         # form as the default.
-        self.assertIsNone(day_bounds.suggest_gap([(time(10, 0), time(10, 2))]))
+        self.assertEqual(day_bounds.suggest_gaps([(time(10, 0), time(10, 2))]), [])
 
     def test_the_longest_gap_over_the_threshold_wins(self):
         self.assertEqual(
-            day_bounds.suggest_gap([
+            day_bounds.suggest_gaps([
                 (time(9, 0), time(9, 2)),
                 (time(10, 0), time(10, 20)),
                 (time(12, 0), time(13, 30)),
             ]),
-            (time(12, 0), time(13, 30)),
+            [(time(12, 0), time(13, 30)), (time(10, 0), time(10, 20))],
         )
 
     def test_a_long_gap_is_not_hidden_by_a_sliver(self):
         # The sliver is dropped before the longest is chosen, not after — the
         # other order would throw the answer away whenever a sliver came first.
         self.assertEqual(
-            day_bounds.suggest_gap([(time(9, 0), time(9, 1)), (time(10, 0), time(11, 0))]),
-            (time(10, 0), time(11, 0)),
+            day_bounds.suggest_gaps([(time(9, 0), time(9, 1)), (time(10, 0), time(11, 0))]),
+            [(time(10, 0), time(11, 0))],
         )
 
     def test_the_threshold_is_inclusive_and_adjustable(self):
         exactly_five = [(time(10, 0), time(10, 5))]
-        self.assertEqual(day_bounds.suggest_gap(exactly_five), (time(10, 0), time(10, 5)))
-        self.assertIsNone(day_bounds.suggest_gap(exactly_five, minimum_minutes=6))
+        self.assertEqual(day_bounds.suggest_gaps(exactly_five), [(time(10, 0), time(10, 5))])
+        self.assertEqual(day_bounds.suggest_gaps(exactly_five, minimum_minutes=6), [])
 
     def test_nothing_to_suggest_from(self):
-        self.assertIsNone(day_bounds.suggest_gap([]))
+        self.assertEqual(day_bounds.suggest_gaps([]), [])
 
 
 class PlanStretchTests(unittest.TestCase):

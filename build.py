@@ -1,21 +1,35 @@
+"""Build Time Keeper's console and windowed PyInstaller executables."""
+
+import argparse
 import os
-import subprocess
+import re
 import shutil
+import subprocess
 import sys
+from pathlib import Path
 
-VERSION = "1.2.0"  # Match the version in main.py
 
-def ensure_build_directories():
-    build_dirs = ['Build/Console', 'Build/dist']
-    for dir in build_dirs:
-        os.makedirs(dir, exist_ok=True)
+REPO_ROOT = Path(__file__).resolve().parent
+DEFAULT_VERSION_FILE = REPO_ROOT / "VERSION"
+VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 
-def update_version_in_files():
-    version_parts = VERSION.split('.')
-    while len(version_parts) < 4:
-        version_parts.append('0')
-    
-    version_info = f"""# UTF-8
+
+def read_version(version_override=None):
+    """Return the validated release version, optionally supplied by automation."""
+    version = (
+        version_override.strip()
+        if version_override is not None
+        else DEFAULT_VERSION_FILE.read_text(encoding="utf-8").strip()
+    )
+    if not VERSION_PATTERN.fullmatch(version):
+        raise SystemExit(f"Version must use x.y.z format (received {version!r}).")
+    return version
+
+
+def write_version_info(path, version):
+    version_parts = version.split(".") + ["0"]
+    path.write_text(
+        f"""# UTF-8
 VSVersionInfo(
   ffi=FixedFileInfo(
     filevers=({','.join(version_parts)}),
@@ -31,171 +45,188 @@ VSVersionInfo(
     StringFileInfo([
       StringTable(
         u'040904B0',
-        [StringStruct(u'FileVersion', u'{VERSION}'),
-         StringStruct(u'ProductVersion', u'{VERSION}'),
+        [StringStruct(u'FileVersion', u'{version}'),
+         StringStruct(u'ProductVersion', u'{version}'),
          StringStruct(u'ProductName', u'Time Keeper'),
          StringStruct(u'CompanyName', u'Matthew Codes')])
       ]),
     VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
   ]
-)"""
-    with open('version_info.txt', 'w') as f:
-        f.write(version_info)
+)
+""",
+        encoding="utf-8",
+    )
+
 
 def build_frontend():
-    """Rebuild static/css/app.css and re-vendor static/vendor/ before packaging.
-
-    The desktop app loads zero assets from a CDN, so whatever is on disk at
-    package time is what ships. Skipped (with a warning) if npm isn't
-    available — the committed build output is still perfectly usable.
-    """
-    npm = shutil.which('npm')
+    """Rebuild all offline frontend assets from the lock file."""
+    npm = shutil.which("npm")
     if not npm:
-        print('WARNING: npm not found — shipping the committed static/css/app.css as-is.')
-        return
+        raise SystemExit("npm was not found on PATH; install Node.js before building.")
 
-    print('Building frontend assets ...')
-    subprocess.run([npm, 'install', '--no-audit', '--no-fund'], check=True, shell=os.name == 'nt')
-    subprocess.run([npm, 'run', 'build'], check=True, shell=os.name == 'nt')
+    print("Building frontend assets ...", flush=True)
+    subprocess.run(
+        [npm, "ci", "--no-audit", "--no-fund"],
+        cwd=REPO_ROOT,
+        check=True,
+        shell=os.name == "nt",
+    )
+    subprocess.run(
+        [npm, "run", "build"],
+        cwd=REPO_ROOT,
+        check=True,
+        shell=os.name == "nt",
+    )
 
 
-def build_application():
+def pyinstaller_arguments(python_dll, version_info, bundled_version):
+    return [
+        "--noconfirm",
+        "--clean",
+        "--onefile",
+        "--name=Time-Keeper",
+        f"--icon={REPO_ROOT / 'icon.ico'}",
+        f"--version-file={version_info}",
+        f"--add-data={REPO_ROOT / 'templates'};templates",
+        f"--add-data={REPO_ROOT / 'static'};static",
+        f"--add-data={REPO_ROOT / 'migrations'};migrations",
+        f"--add-data={REPO_ROOT / 'toast-icon.png'};.",
+        f"--add-data={bundled_version};.",
+        f"--add-binary={python_dll};.",
+        "--hidden-import=flask_sqlalchemy",
+        "--hidden-import=flask",
+        "--hidden-import=webview",
+        "--hidden-import=flask_migrate",
+        "--hidden-import=flask_admin",
+        "--hidden-import=flask_cors",
+        "--hidden-import=sqlalchemy",
+        "--hidden-import=werkzeug",
+        "--hidden-import=alembic",
+        "--collect-submodules=flask_sqlalchemy",
+        "--collect-submodules=flask",
+        "--collect-submodules=sqlalchemy",
+        "--collect-submodules=flask_migrate",
+        "--collect-submodules=alembic",
+        "--hidden-import=webview.platforms.winforms",
+        "--hidden-import=clr",
+        "--hidden-import=webview.window",
+        "--hidden-import=sqlite3",
+        "--hidden-import=winotify",
+        "--hidden-import=winreg",
+        "--hidden-import=packaging",
+        "--hidden-import=sqlalchemy.ext.declarative",
+        "--hidden-import=sqlalchemy.orm",
+        "--hidden-import=sqlalchemy.dialects.sqlite",
+        "--hidden-import=sqlalchemy.sql.default_comparator",
+        "--hidden-import=sqlalchemy.event",
+        "--hidden-import=sqlalchemy.pool",
+        "--hidden-import=flask_sqlalchemy.model",
+        "--hidden-import=flask_sqlalchemy.extension",
+        "--hidden-import=flask_migrate.cli",
+        "--hidden-import=flask_migrate.templates",
+        "--hidden-import=sqlalchemy.dialects.sqlite.pysqlite",
+        "--hidden-import=sqlalchemy.engine.result",
+        "--hidden-import=sqlalchemy.sql.functions",
+        "--hidden-import=sqlalchemy.sql.schema",
+        "--hidden-import=sqlalchemy.dialects.sqlite.base",
+        "--hidden-import=alembic.runtime.migration",
+        "--hidden-import=alembic.context",
+        "--hidden-import=alembic.script",
+        "--hidden-import=alembic.ddl",
+    ]
+
+
+def run_pyinstaller(common_args, mode, dist_path, work_path, spec_path):
+    command = [
+        sys.executable,
+        "-m",
+        "PyInstaller",
+        *common_args,
+        f"--{mode}",
+        f"--distpath={dist_path}",
+        f"--workpath={work_path}",
+        f"--specpath={spec_path}",
+        str(REPO_ROOT / "main.py"),
+    ]
+    print(f"Building {mode} executable ...", flush=True)
+    subprocess.run(command, cwd=REPO_ROOT, check=True)
+
+
+def build_application(version_override=None):
     if sys.version_info[:2] != (3, 12):
         raise SystemExit(
-            f"This build must run under Python 3.12 (found {sys.version_info.major}.{sys.version_info.minor}). "
-            "Use `py -3.12 build.py` or activate a 3.12 venv."
+            "This build must run under Python 3.12 "
+            f"(found {sys.version_info.major}.{sys.version_info.minor})."
         )
 
-    input('Check you have updated the main.py version number and press enter to continue')
-    input('Check you have updated the build.py version number and press enter to continue')
-    # DEV_MODE in main.py is derived from sys.frozen, so the packaged build turns
-    # devtools off on its own — nothing to toggle by hand.
+    version = read_version(version_override)
+    python_dll = Path(sys.base_prefix) / "python312.dll"
+    if not python_dll.is_file():
+        raise SystemExit(
+            f"Python DLL not found at {python_dll}; install a complete Python 3.12 runtime."
+        )
 
-    python_dll = os.path.join(
-        sys.base_prefix,
-        f"python{sys.version_info.major}{sys.version_info.minor}.dll",
-    )
-    if not os.path.isfile(python_dll):
-        raise SystemExit(f"Python DLL not found at {python_dll!r}; install Python 3.12 or fix base_prefix.")
-
+    print(f"Building Time Keeper {version}", flush=True)
     build_frontend()
 
-    if os.path.exists('Build'):
-        shutil.rmtree('Build')
-    ensure_build_directories()
+    build_root = REPO_ROOT / "Build"
+    if build_root.exists():
+        shutil.rmtree(build_root)
 
-    update_version_in_files()
+    staging_dir = build_root / "staging"
+    spec_dir = build_root / "spec"
+    staging_dir.mkdir(parents=True)
+    spec_dir.mkdir(parents=True)
 
-    # Common PyInstaller arguments (--onefile: single .exe, no _internal folder)
-    common_args = [
-        '--noconfirm',
-        '--onefile',
-        '--name=Time-Keeper',
-        '--icon=icon.ico',
-        '--version-file=version_info.txt',
-        '--add-data=templates;templates',
-        '--add-data=static;static',
-        '--add-data=migrations;migrations',
-        # icon.ico's artwork, pre-converted to PNG because toast images can't be
-        # ICO. --icon= sets the exe icon but doesn't bundle anything, so the
-        # toast needs its own copy — see notifications.install_icon.
-        '--add-data=toast-icon.png;.',
-        f'--add-binary={python_dll};.',
-        # Explicitly include all required modules
-        '--hidden-import=flask_sqlalchemy',
-        '--hidden-import=flask',
-        '--hidden-import=webview',
-        '--hidden-import=flask_migrate',
-        '--hidden-import=flask_admin',
-        '--hidden-import=flask_cors',
-        '--hidden-import=sqlalchemy',
-        '--hidden-import=werkzeug',
-        '--hidden-import=alembic',
-        # Include all submodules
-        '--collect-submodules=flask_sqlalchemy',
-        '--collect-submodules=flask',
-        '--collect-submodules=sqlalchemy',
-        '--collect-submodules=flask_migrate',
-        '--collect-submodules=alembic',
-        '--hidden-import=webview.platforms.winforms',
-        '--hidden-import=clr',
-        '--hidden-import=webview.window',
-        '--hidden-import=sqlite3',
-        # Imported inside a try/except in notifications.py, so it's worth being
-        # explicit; winreg likewise is only imported at call time.
-        '--hidden-import=winotify',
-        '--hidden-import=winreg',
-    ]
+    bundled_version = staging_dir / "VERSION"
+    bundled_version.write_text(f"{version}\n", encoding="utf-8")
+    version_info = staging_dir / "version_info.txt"
+    write_version_info(version_info, version)
 
-    # Add specific imports for SQLAlchemy components
-    sqlalchemy_imports = [
-        '--hidden-import=sqlalchemy.ext.declarative',
-        '--hidden-import=sqlalchemy.orm',
-        '--hidden-import=sqlalchemy.dialects.sqlite',
-        '--hidden-import=sqlalchemy.sql.default_comparator',
-        '--hidden-import=sqlalchemy.event',
-        '--hidden-import=sqlalchemy.pool',
-    ]
-    
-    # Add specific imports for Flask-SQLAlchemy components
-    flask_sqlalchemy_imports = [
-        '--hidden-import=flask_sqlalchemy.model',
-        '--hidden-import=flask_sqlalchemy.extension',
-    ]
-    
-    # Add specific imports for Flask-Migrate components
-    flask_migrate_imports = [
-        '--hidden-import=flask_migrate.cli',
-        '--hidden-import=flask_migrate.templates',
-        '--hidden-import=sqlalchemy.dialects.sqlite.pysqlite',
-        '--hidden-import=sqlalchemy.engine.result',
-        '--hidden-import=sqlalchemy.sql.functions',
-        '--hidden-import=sqlalchemy.sql.schema',
-        '--hidden-import=sqlalchemy.dialects.sqlite.base',
-    ]
-    
-    # Add specific imports for Alembic components
-    alembic_imports = [
-        '--hidden-import=alembic.runtime.migration',
-        '--hidden-import=alembic.context',
-        '--hidden-import=alembic.script',
-        '--hidden-import=alembic.ddl',
-    ]
+    common_args = pyinstaller_arguments(python_dll, version_info, bundled_version)
+    console_dir = build_root / "Console"
+    dist_dir = build_root / "dist"
+    run_pyinstaller(
+        common_args,
+        "console",
+        console_dir,
+        build_root / "work" / "console",
+        spec_dir,
+    )
+    run_pyinstaller(
+        common_args,
+        "windowed",
+        dist_dir,
+        build_root / "work" / "windowed",
+        spec_dir,
+    )
 
-    # Combine all arguments
-    all_args = common_args + sqlalchemy_imports + flask_sqlalchemy_imports + flask_migrate_imports + alembic_imports
+    console_exe = console_dir / "Time-Keeper.exe"
+    windowed_exe = dist_dir / "Time-Keeper.exe"
+    missing = [str(path) for path in (console_exe, windowed_exe) if not path.is_file()]
+    if missing:
+        raise SystemExit(f"Build completed without expected output(s): {', '.join(missing)}")
 
-    # Build console version (useful for debugging)
-    console_result = subprocess.run([
-        'pyinstaller',
-        *all_args,
-        '--console',
-        '--distpath=Build/Console',
-        'main.py'
-    ])
-
-    # Build windowed version
-    windowed_result = subprocess.run([
-        'pyinstaller',
-        *all_args,
-        '--windowed',
-        '--distpath=Build/dist',
-        'main.py'
-    ])
-
-    if console_result.returncode != 0:
-        raise SystemExit("Console build failed (see PyInstaller output above).")
-    if windowed_result.returncode != 0:
-        raise SystemExit("Windowed build failed (see PyInstaller output above).")
-
-    console_exe = os.path.abspath("Build/Console/Time-Keeper.exe")
-    windowed_exe = os.path.abspath("Build/dist/Time-Keeper.exe")
-    if not os.path.isfile(console_exe) or not os.path.isfile(windowed_exe):
-        raise SystemExit("Build reported success but expected .exe output was missing.")
     print("Build complete.")
+    print(f"  Version:  {version}")
     print(f"  Console:  {console_exe}")
     print(f"  Windowed: {windowed_exe}")
+    return windowed_exe
 
 
-if __name__ == '__main__':
-    build_application()
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--version",
+        dest="version_override",
+        help="release version to embed (x.y.z); defaults to the tracked VERSION file",
+    )
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    try:
+        build_application(args.version_override)
+    except subprocess.CalledProcessError as exc:
+        raise SystemExit(f"Build command failed with exit code {exc.returncode}.") from exc

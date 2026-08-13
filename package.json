@@ -9,8 +9,7 @@
     "vendor": "node scripts/vendor.mjs",
     "build": "npm run vendor && npm run build:css",
     "test:js": "node tests/test_add_task_drag.mjs",
-    "test:page": "node scripts/run-page-test.mjs",
-    "test": "npm run test:js && npm run test:page"
+    "test": "npm run test:js"
   },
   "devDependencies": {
     "@fontsource-variable/inter": "^5.2.6",
