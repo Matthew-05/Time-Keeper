@@ -33,8 +33,13 @@ by `release.ps1` to the installer build.
 From the repository root:
 
 ```powershell
+pipenv sync
 .\scripts\build-installer.ps1
 ```
+
+The installer build automatically prefers the interpreter returned by
+`pipenv --py`, including when Pipenv stores it outside the repository. If a
+different interpreter is required, select it explicitly with `-PythonPath`.
 
 This runs the Python and JavaScript tests, builds frontend assets and the
 one-file executable, compiles the per-user Inno installer, and writes:

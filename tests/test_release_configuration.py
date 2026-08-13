@@ -1,6 +1,7 @@
 import re
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import build
 
@@ -59,8 +60,27 @@ class ReleaseGuardTests(unittest.TestCase):
         self.assertNotIn("FullTests", build_script)
         self.assertNotIn("FullTests", self.script)
 
+    def test_installer_build_prefers_the_locked_pipenv_interpreter(self):
+        build_script = (ROOT / "scripts" / "build-installer.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Get-Command pipenv", build_script)
+        self.assertIn("$pipenv.Source --py", build_script)
+        self.assertIn('$ErrorActionPreference = "Continue"', build_script)
+        self.assertIn("$pipenvExitCode = $LASTEXITCODE", build_script)
+
 
 class PyInstallerConfigurationTests(unittest.TestCase):
+    def test_build_stops_when_runtime_dependencies_are_missing(self):
+        def import_module(name):
+            if name == "flask":
+                raise ModuleNotFoundError("No module named 'flask'")
+            return object()
+
+        with patch.object(build.importlib, "import_module", side_effect=import_module):
+            with self.assertRaisesRegex(SystemExit, "flask.*pipenv sync"):
+                build.assert_build_dependencies()
+
     def test_repository_assets_are_absolute_when_spec_lives_under_build(self):
         arguments = build.pyinstaller_arguments(
             Path("C:/Python312/python312.dll"),

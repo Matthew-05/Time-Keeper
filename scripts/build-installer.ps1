@@ -84,6 +84,39 @@ function Find-Python312([string]$RequestedPath) {
         }
     }
 
+    # `pipenv sync` normally stores the environment outside the repository,
+    # so it will not appear as .venv and may not be activated in this shell.
+    # Prefer that locked project environment over an unrelated system Python.
+    $pipenv = Get-Command pipenv.exe -ErrorAction SilentlyContinue
+    if (-not $pipenv) {
+        $pipenv = Get-Command pipenv -ErrorAction SilentlyContinue
+    }
+    $pipfile = Join-Path $RepoRoot "Pipfile"
+    if ($pipenv -and (Test-Path -LiteralPath $pipfile -PathType Leaf)) {
+        # Windows PowerShell 5.1 promotes native stderr to its error stream.
+        # Pipenv writes its harmless `.env` loading notice there, which would
+        # otherwise become terminating under the script-wide Stop preference.
+        $previousErrorActionPreference = $ErrorActionPreference
+        $pipenvOutput = @()
+        $pipenvExitCode = 1
+        try {
+            $ErrorActionPreference = "Continue"
+            $pipenvOutput = @(& $pipenv.Source --py 2>$null)
+            $pipenvExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        if ($pipenvExitCode -eq 0 -and $pipenvOutput.Count -gt 0) {
+            $pipenvPython = $pipenvOutput[-1].Trim()
+            if (Test-Path -LiteralPath $pipenvPython -PathType Leaf) {
+                $minor = & $pipenvPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+                if ($LASTEXITCODE -eq 0 -and $minor -eq "3.12") {
+                    return @{ Command = $pipenvPython; Prefix = @() }
+                }
+            }
+        }
+    }
+
     $python = Get-Command python.exe -ErrorAction SilentlyContinue
     if ($python) {
         $minor = & $python.Source -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"

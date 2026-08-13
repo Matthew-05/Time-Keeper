@@ -1,6 +1,7 @@
 """Build Time Keeper's console and windowed PyInstaller executables."""
 
 import argparse
+import importlib
 import os
 import re
 import shutil
@@ -12,6 +13,48 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_VERSION_FILE = REPO_ROOT / "VERSION"
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
+REQUIRED_BUILD_IMPORTS = {
+    "PyInstaller": "pyinstaller",
+    "alembic": "alembic",
+    "flask": "flask",
+    "flask_admin": "flask-admin",
+    "flask_admin.contrib.sqla": "flask-admin",
+    "flask_admin.theme": "flask-admin",
+    "flask_cors": "flask-cors",
+    "flask_migrate": "flask-migrate",
+    "flask_sqlalchemy": "flask-sqlalchemy",
+    "httpx": "httpx",
+    "packaging": "packaging",
+    "sqlalchemy": "sqlalchemy",
+    "webview": "pywebview",
+    "webview.window": "pywebview",
+    "werkzeug": "werkzeug",
+}
+
+
+def assert_build_dependencies():
+    """Fail before packaging when the selected interpreter cannot run the app."""
+    failures = []
+    for module, package in REQUIRED_BUILD_IMPORTS.items():
+        try:
+            importlib.import_module(module)
+        except Exception as exc:
+            failures.append((module, package, exc))
+
+    if not failures:
+        return
+
+    packages = sorted({package for _, package, _ in failures})
+    details = "; ".join(
+        f"{module}: {type(exc).__name__}: {exc}"
+        for module, _, exc in failures
+    )
+    raise SystemExit(
+        "The selected Python interpreter is missing or cannot import required "
+        f"build dependencies: {', '.join(packages)}. "
+        f"Interpreter: {sys.executable}. Run 'pipenv sync' or install the locked "
+        f"dependencies into that interpreter. Import failures: {details}"
+    )
 
 
 def read_version(version_override=None):
@@ -166,6 +209,7 @@ def build_application(version_override=None):
             f"Python DLL not found at {python_dll}; install a complete Python 3.12 runtime."
         )
 
+    assert_build_dependencies()
     print(f"Building Time Keeper {version}", flush=True)
     build_frontend()
 
