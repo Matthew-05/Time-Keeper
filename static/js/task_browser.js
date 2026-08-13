@@ -232,6 +232,20 @@ export class TaskBrowser extends TimeKeeper {
         clearTimeout(this.reloadTimer);
     }
 
+    historyDatePickerOptions() {
+        return flatpickrCalendarOptions({
+            altFormat: "D, F d, Y",
+            altInput: true,
+            defaultDate: this.getLocalDateString(),
+            dateFormat: "Y-m-d",
+            maxDate: "today",
+            onChange: () => {
+                this.updateDateNavigation();
+                this.fetchTasks();
+            }
+        });
+    }
+
     initializeElements() {
         this.selectedDate = document.getElementById('selected-date');
         this.dayStartTime = document.getElementById('day-start-time');
@@ -249,17 +263,14 @@ export class TaskBrowser extends TimeKeeper {
         this.originalStartTime = '';
         this.originalEndTime = '';
         
-        this.datePicker = flatpickr(this.selectedDate, flatpickrCalendarOptions({
-            defaultDate: new Date(),
-            dateFormat: "Y-m-d",
-            onChange: () => this.fetchTasks()
-        }));
+        this.datePicker = flatpickr(this.selectedDate, this.historyDatePickerOptions());
 
         // Prev/next day buttons
         this.prevDayBtn = document.getElementById('prev-day-btn');
         this.nextDayBtn = document.getElementById('next-day-btn');
         if (this.prevDayBtn) this.prevDayBtn.addEventListener('click', () => this.navigateDay(-1));
         if (this.nextDayBtn) this.nextDayBtn.addEventListener('click', () => this.navigateDay(1));
+        this.updateDateNavigation();
 
         // Bind action buttons
         this.saveStartBtn.addEventListener('click', () => this.handleSaveTime('start'));
@@ -277,10 +288,17 @@ export class TaskBrowser extends TimeKeeper {
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const day = String(date.getDate()).padStart(2, '0');
         const nextDateStr = `${year}-${month}-${day}`;
+        if (nextDateStr > this.getLocalDateString()) return;
         // Use the active flatpickr instance (timePicker is created second and replaces datePicker on same element)
         const picker = this.timePicker || this.datePicker;
         if (picker) picker.setDate(nextDateStr, true);
         this.fetchTasks();
+    }
+
+    updateDateNavigation() {
+        if (!this.nextDayBtn) return;
+        const selectedDate = this.selectedDate?.value;
+        this.nextDayBtn.disabled = !selectedDate || selectedDate >= this.getLocalDateString();
     }
 
     initializeDayTimePickers() {
@@ -2269,12 +2287,7 @@ export class TaskBrowser extends TimeKeeper {
     }
 
     initializeTimePicker() {
-        this.timePicker = flatpickr(this.selectedDate, flatpickrCalendarOptions({
-            enableTime: false,
-            dateFormat: "Y-m-d",
-            defaultDate: new Date(),
-            onChange: () => this.fetchTasks()
-        }));
+        this.timePicker = flatpickr(this.selectedDate, this.historyDatePickerOptions());
     }
 
     async checkDayStatus() {

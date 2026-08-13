@@ -152,5 +152,34 @@ console.log('\nAdd task stays disabled until both required choices are made');
     check('empty-length period', (form.updateAddTaskSaveState(), save.disabled), true);
 }
 
-console.log(failures ? `\n${failures} failure(s)` : '\nall drag checks passed');
+console.log('\nHistory date navigation stops at today');
+{
+    const history = Object.create(TaskBrowser.prototype);
+    const dates = [];
+    let fetches = 0;
+    history.selectedDate = { value: '2026-08-13' };
+    history.nextDayBtn = { disabled: false };
+    history.getLocalDateString = () => '2026-08-13';
+    history.timePicker = { setDate: (value) => dates.push(value) };
+    history.fetchTasks = () => { fetches++; };
+
+    const pickerOptions = history.historyDatePickerOptions();
+    check(
+        'picker starts today with a friendly display date',
+        [pickerOptions.defaultDate, pickerOptions.dateFormat, pickerOptions.altInput, pickerOptions.altFormat],
+        ['2026-08-13', 'Y-m-d', true, 'D, F d, Y'],
+    );
+    history.updateDateNavigation();
+    check('next is disabled on today', history.nextDayBtn.disabled, true);
+    history.navigateDay(1);
+    check('future day is refused', [dates, fetches], [[], 0]);
+
+    history.selectedDate.value = '2026-08-12';
+    history.updateDateNavigation();
+    check('next is enabled in the past', history.nextDayBtn.disabled, false);
+    history.navigateDay(1);
+    check('today remains reachable', [dates, fetches], [['2026-08-13'], 1]);
+}
+
+console.log(failures ? `\n${failures} failure(s)` : '\nall checks passed');
 process.exit(failures ? 1 : 0);
