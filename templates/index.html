@@ -205,6 +205,35 @@
       </section>
     </div>
   </div>
+
+  <!-- Ending a task without recording any work is easy to do by accident.
+       Keep the choice in-app and let the user return straight to the Works
+       card, rather than using a browser-native confirmation dialog. -->
+  <div
+    id="complete-without-works-modal"
+    class="tk-modal-backdrop hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="complete-without-works-title"
+    aria-describedby="complete-without-works-description"
+  >
+    <div class="tk-modal">
+      <div class="tk-modal-header">
+        <h2 class="tk-card-title" id="complete-without-works-title">No works recorded</h2>
+      </div>
+
+      <div class="tk-modal-body">
+        <p class="text-sm text-muted" id="complete-without-works-description">
+          No works have been added for this client today. Do you want to complete the task anyway?
+        </p>
+      </div>
+
+      <div class="tk-modal-footer flex justify-end gap-2">
+        <button type="button" id="complete-without-works-cancel" class="tk-btn tk-btn-secondary">Go back</button>
+        <button type="button" id="complete-without-works-confirm" class="tk-btn tk-btn-primary">Complete task</button>
+      </div>
+    </div>
+  </div>
 {% endblock %}
 
 {% block page_scripts %}

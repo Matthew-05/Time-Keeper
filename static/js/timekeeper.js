@@ -1,5 +1,13 @@
-import { TimeKeeper, createPoller, isInsightOpen, setHtml, ready } from './base.js';
-import { WorksList } from './works.js';
+import {
+    TimeKeeper,
+    createPoller,
+    isInsightOpen,
+    lockBodyScroll,
+    setHtml,
+    unlockBodyScroll,
+    ready,
+} from './base.js';
+import { fetchWorks, WorksList } from './works.js';
 import { BudgetWidget } from './budget_widget.js';
 import {
     clockTimeToDate,
@@ -106,6 +114,9 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.taskActualDurationValue = document.getElementById('task-actual-duration-value');
         this.recentTaskEndTime = document.getElementById('recent-task-end-time');
         this.recentTaskTimeValue = document.getElementById('recent-task-time-value');
+        this.completeWithoutWorksModal = document.getElementById('complete-without-works-modal');
+        this.completeWithoutWorksCancel = document.getElementById('complete-without-works-cancel');
+        this.completeWithoutWorksConfirm = document.getElementById('complete-without-works-confirm');
 
         // Works replace the old description box. There's no save button and no
         // debounce because each work is its own row — adding one is the save.
@@ -304,6 +315,16 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.endDayButton.addEventListener('click', () => this.handleEndDay());
         this.startButton.addEventListener('click', () => this.startTask());
         this.completeButton.addEventListener('click', () => this.completeTask());
+        this.completeWithoutWorksCancel.addEventListener('click', () => this.closeCompleteWithoutWorksModal());
+        this.completeWithoutWorksConfirm.addEventListener('click', () => {
+            this.closeCompleteWithoutWorksModal({ restoreFocus: false });
+            this.completeTask({ skipWorksWarning: true });
+        });
+        this.completeWithoutWorksModal.addEventListener('mousedown', (event) => {
+            if (event.target === this.completeWithoutWorksModal) {
+                this.closeCompleteWithoutWorksModal();
+            }
+        });
         this.reopenDayButton.addEventListener('click', () => this.handleReopenDay());
         this.currentTimeButton.addEventListener('click', () => this.setCurrentTime());
         this.clearTimeButton.addEventListener('click', () => this.clearTime());
@@ -312,6 +333,11 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.timePicker.addEventListener('change', () => this.syncContextualActions());
         this.clientInput.addEventListener('change', () => this.syncContextualActions());
         document.addEventListener('timeFormatChanged', () => this.handleTimeFormatChanged());
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && !this.completeWithoutWorksModal.classList.contains('hidden')) {
+                this.closeCompleteWithoutWorksModal();
+            }
+        });
 
     }
 
@@ -616,7 +642,7 @@ export class TimeKeeperIndex extends TimeKeeper {
 
 
 
-    async completeTask() {
+    async completeTask({ skipWorksWarning = false } = {}) {
         // Validate time selection
         if (!this.timePicker.value) {
             this.showToast('Please select a completion time.', 'error');
@@ -627,6 +653,15 @@ export class TimeKeeperIndex extends TimeKeeper {
         const isTimeValid = await this.validateSelectedTime();
         if (!isTimeValid) {
             return; // Stop if time validation fails
+        }
+
+        if (!skipWorksWarning) {
+            const hasWorks = await this.hasWorksForCurrentTask();
+            if (hasWorks === null) return;
+            if (!hasWorks) {
+                this.openCompleteWithoutWorksModal();
+                return;
+            }
         }
 
         const response = await this.fetchFromAPI('/complete_task', {
@@ -665,6 +700,44 @@ export class TimeKeeperIndex extends TimeKeeper {
             // Update recent task end time after completing a task
             await this.updateRecentTaskEndTime();
         }
+    }
+
+    /**
+     * Read the persisted list rather than trusting the copy currently rendered
+     * in the Works card. An add or delete can have completed while that list's
+     * own refresh was still in flight.
+     *
+     * `null` means the check could not be completed. In that case keeping the
+     * task open is safer than silently skipping the warning.
+     */
+    async hasWorksForCurrentTask() {
+        if (this.currentTaskClientId == null) {
+            this.showToast('Could not verify works for this task. Please try again.', 'warning');
+            return null;
+        }
+
+        try {
+            const works = await fetchWorks(this, this.todayISO(), this.currentTaskClientId);
+            return works.length > 0;
+        } catch (error) {
+            console.error('Failed to verify works before completing task:', error);
+            this.showToast('Could not verify works for this task. Please try again.', 'warning');
+            return null;
+        }
+    }
+
+    openCompleteWithoutWorksModal() {
+        if (!this.completeWithoutWorksModal.classList.contains('hidden')) return;
+        this.completeWithoutWorksModal.classList.remove('hidden');
+        lockBodyScroll();
+        requestAnimationFrame(() => this.completeWithoutWorksCancel.focus());
+    }
+
+    closeCompleteWithoutWorksModal({ restoreFocus = true } = {}) {
+        if (this.completeWithoutWorksModal.classList.contains('hidden')) return;
+        this.completeWithoutWorksModal.classList.add('hidden');
+        unlockBodyScroll();
+        if (restoreFocus && this.completeButton.isConnected) this.completeButton.focus();
     }
 
     async initializeAutocomplete() {
