@@ -1496,6 +1496,196 @@
     max-width: 44rem;
   }
 
+  /* The adjustment editor carries three linked numeric fields and a CRUD
+     table, so the default 28rem dialog makes the form unnecessarily cramped. */
+  .tk-adjust-time-modal {
+    max-width: 58rem;
+  }
+
+  /* Choices positions its menu inside `.choices`. A z-index alone cannot
+     escape the modal panel/body overflow used for ordinary scrolling, so lift
+     the client field and temporarily release both clipping ancestors while
+     the menu is open. Once it closes, the modal returns to its normal bounded
+     scrolling behavior. */
+  #adjust-time-modal .choices {
+    --choices-z-index: 80;
+  }
+
+  .tk-adjust-time-client-field {
+    position: relative;
+  }
+
+  .tk-adjust-time-client-field:has(.choices.is-open) {
+    z-index: 80;
+  }
+
+  .tk-adjust-time-modal:has(.choices.is-open),
+  .tk-adjust-time-modal:has(.choices.is-open) .tk-modal-body {
+    overflow: visible;
+  }
+
+  #adjust-time-modal .choices__list--dropdown .choices__list {
+    max-height: 18rem;
+  }
+
+  /* Keep a long date's adjustment history from growing the widened modal past
+     its viewport-bound max height; this region owns its own compact scroll. */
+  .tk-adjustment-list {
+    max-height: 14rem;
+    overflow-y: auto;
+  }
+
+  /* A vertical arithmetic layout makes the relationship legible at a glance:
+     raw time plus the signed correction equals the editable adjusted time.
+     When enabled, rounded time is a third synchronized input underneath it. */
+  .tk-adjustment-math {
+    background-color: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+  }
+
+  .tk-adjustment-math-row {
+    align-items: center;
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: 2rem 8.5rem minmax(0, 1fr);
+    min-height: 3.25rem;
+  }
+
+  .tk-adjustment-math-operator {
+    background: transparent;
+    border: 0;
+    color: var(--muted);
+    font-size: 1.125rem;
+    font-weight: 600;
+    padding: 0;
+    text-align: center;
+  }
+
+  .tk-adjustment-sign {
+    align-items: center;
+    background-color: var(--control-fill);
+    border: 1px solid var(--control-border);
+    border-radius: 6px;
+    color: var(--accent-text);
+    cursor: pointer;
+    display: inline-flex;
+    height: 2rem;
+    justify-content: center;
+    justify-self: center;
+    transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s, color 0.15s;
+    width: 2rem;
+  }
+
+  .tk-adjustment-sign:hover {
+    background-color: var(--control-hover);
+    color: var(--text);
+  }
+
+  .tk-adjustment-sign:focus-visible {
+    background-color: var(--surface);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--ring);
+    outline: none;
+  }
+
+  .tk-adjustment-math-label {
+    color: var(--muted);
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+
+  .tk-adjustment-static-field {
+    align-items: baseline;
+    color: var(--text);
+    display: flex;
+    font-size: 1rem;
+    font-weight: 600;
+    justify-content: space-between;
+    padding: 0.5625rem 0.75rem;
+    width: 7rem;
+  }
+
+  .tk-adjustment-static-field .tk-adjustment-unit {
+    margin-right: 0;
+  }
+
+  .tk-adjustment-unit {
+    color: var(--faint);
+    font-size: 0.75rem;
+    font-weight: 400;
+    margin-right: 0.4rem;
+  }
+
+  .tk-adjustment-time-fields {
+    align-items: center;
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-start;
+  }
+
+  .tk-adjustment-result-line {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .tk-adjustment-math-rule {
+    border-top: 2px solid var(--border-strong);
+    margin-left: 2rem;
+  }
+
+  .tk-adjustment-math-sum {
+    min-height: 3.75rem;
+  }
+
+  .tk-adjustment-rounded-row {
+    min-height: 3.75rem;
+  }
+
+  .tk-adjustment-difference {
+    color: var(--faint);
+    font-size: 0.75rem;
+    font-weight: 500;
+  }
+
+  .tk-adjustment-math-help {
+    color: var(--faint);
+    font-size: 0.75rem;
+    margin: 0.5rem 0 0 2rem;
+  }
+
+  @media (max-width: 39.999rem) {
+    .tk-adjustment-math-row {
+      gap: 0.5rem;
+      grid-template-columns: 2rem 6.75rem minmax(0, 1fr);
+    }
+
+    .tk-adjustment-time-fields {
+      flex-wrap: wrap;
+    }
+  }
+
+  /* Adjustment rows follow the same content-first interaction as task, work,
+     and client rows: actions appear only when the row is hovered or contains
+     keyboard focus. */
+  .tk-adjustment-actions {
+    align-items: center;
+    display: flex;
+    gap: 0.25rem;
+    justify-content: flex-end;
+    min-height: 2rem;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+
+  #adjust-time-list tr:hover .tk-adjustment-actions,
+  #adjust-time-list tr:focus-within .tk-adjustment-actions {
+    opacity: 1;
+  }
+
   .tk-modal-header {
     @apply flex items-center justify-between gap-3 border-b border-border px-5 py-3.5;
   }

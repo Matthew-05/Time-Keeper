@@ -50,6 +50,7 @@ globalThis.vis = {
 };
 
 const { TaskBrowser } = await import('../static/js/task_browser.js');
+const { ManualAdjustmentManager } = await import('../static/js/manual_adjustments.js');
 
 /* Recorded: 09:00–10:30 and 14:00–15:00, inside a 09:00–17:00 day. */
 const GAPS = [
@@ -254,6 +255,191 @@ console.log('\nHistory keeps an ongoing task open while editing it');
     globalThis.fetch = originalFetch;
     check('save sends only start and client', submitted,
         { start_time: '09:00', client_id: 4 });
+}
+
+console.log('\nManual adjustments require a non-zero delta and use hours/minutes');
+{
+    const manager = Object.create(ManualAdjustmentManager.prototype);
+    manager.owner = {
+        totalTimeSpentToFractionalHours: (minutes) => minutes / 60,
+        formatDurationMinutes: (minutes) => `${minutes}m`,
+        formatDecimalHours: (hours) => String(hours),
+        roundingEnabled: false,
+        roundingIntervalMinutes: 15,
+        roundingDirection: 'nearest',
+    };
+    manager.baseMinutes = 120;
+    manager.deltaHours = { value: '0' };
+    manager.deltaMinutesField = { value: '0' };
+    manager.deltaOperator = stubElement();
+    manager.deltaSign = 1;
+    manager.totalHours = { value: '' };
+    manager.totalMinutes = { value: '' };
+    manager.save = { disabled: false };
+    const roundingTone = new Set();
+    manager.difference = {
+        textContent: '',
+        classList: {
+            add: (...names) => names.forEach(name => roundingTone.add(name)),
+            remove: (...names) => names.forEach(name => roundingTone.delete(name)),
+        },
+    };
+    manager.rounded = stubElement();
+    const roundedInputTone = new Set();
+    manager.roundedHours = {
+        value: '',
+        step: '',
+        classList: {
+            add: (...names) => names.forEach(name => roundedInputTone.add(name)),
+            remove: (...names) => names.forEach(name => roundedInputTone.delete(name)),
+        },
+    };
+    manager.error = stubElement();
+    manager.clientId = () => 1;
+
+    manager.setAdjustedMinutes(135);
+    check('135 minutes splits into hour/minute inputs',
+        [manager.totalHours.value, manager.totalMinutes.value], ['2', '15']);
+
+    manager.renderResult();
+    check('zero adjustment keeps save disabled', manager.save.disabled, true);
+
+    manager.deltaMinutesField.value = '15';
+    manager.renderResult();
+    check('non-zero adjustment enables save', manager.save.disabled, false);
+
+    manager.totalHours.value = '3';
+    manager.totalMinutes.value = '5';
+    manager.syncFromTotal();
+    check('editing adjusted time recalculates adjustment hours/minutes',
+        [manager.deltaHours.value, manager.deltaMinutesField.value], ['1', '5']);
+
+    manager.owner.roundingEnabled = true;
+    manager.owner.totalTimeSpentToFractionalHours = (minutes) => (
+        Math.floor(minutes / 15 + 0.5) * 15 / 60
+    );
+    manager.owner.formatDecimalHours = (hours) => Number(hours.toFixed(2)).toString();
+
+    manager.setDeltaMinutes(0);
+    manager.setAdjustedMinutes(manager.baseMinutes);
+    manager.renderResult();
+    check('a new client starts with an explicit zero adjustment',
+        [manager.deltaHours.value, manager.deltaMinutesField.value], ['0', '0']);
+    check('a zero adjustment still populates the rounded calculation',
+        manager.roundedHours.value, '2');
+    check('a zero adjustment is calculated but cannot be saved',
+        manager.save.disabled, true);
+
+    manager.totalHours.value = '3';
+    manager.totalMinutes.value = '5';
+    manager.syncFromTotal();
+    manager.renderResult();
+    check('rounded result is an editable decimal-hours value',
+        manager.roundedHours.value, '3');
+    check('rounded result shows only a compact signed-minute difference',
+        manager.difference.textContent, '−5m');
+    check('rounding that removes time is red',
+        [roundingTone.has('text-danger'), roundedInputTone.has('text-danger')],
+        [true, true]);
+
+    manager.totalHours.value = '3';
+    manager.totalMinutes.value = '8';
+    manager.syncFromTotal();
+    check('rounding that adds time is green',
+        [roundingTone.has('text-success'), roundedInputTone.has('text-success')],
+        [true, true]);
+
+    manager.roundedHours.value = '1.5';
+    check('rounded hours accepts half-hour decimals',
+        manager.roundedTargetMinutes(), 90);
+    manager.roundedHours.value = '1.25';
+    check('rounded hours accepts quarter-hour decimals',
+        manager.roundedTargetMinutes(), 75);
+
+    manager.owner.roundingDirection = 'down';
+    manager.owner.totalTimeSpentToFractionalHours = (minutes) => (
+        Math.floor(minutes / 15) * 15 / 60
+    );
+    manager.roundedHours.value = '3.2';
+    manager.syncFromRounded(true);
+    check('rounded-hours entry snaps to the nearest policy interval',
+        manager.roundedHours.value, '3.25');
+    check('editing rounded hours recalculates adjusted hours/minutes',
+        [manager.totalHours.value, manager.totalMinutes.value], ['3', '15']);
+    check('editing rounded hours recalculates adjustment hours/minutes',
+        [manager.deltaHours.value, manager.deltaMinutesField.value], ['1', '15']);
+
+    const deleteClasses = new Set(['hidden']);
+    manager.deleteButton = {
+        classList: {
+            add: (...names) => names.forEach(name => deleteClasses.add(name)),
+            remove: (...names) => names.forEach(name => deleteClasses.delete(name)),
+            contains: (name) => deleteClasses.has(name),
+            toggle: (name, force) => force
+                ? deleteClasses.add(name)
+                : deleteClasses.delete(name),
+        },
+    };
+    manager.setDeleteAvailable(true);
+    check('existing adjustments expose the form delete action',
+        deleteClasses.has('hidden'), false);
+    manager.setDeleteAvailable(false);
+    check('new adjustments hide the form delete action',
+        deleteClasses.has('hidden'), true);
+
+    const restrictedListeners = {};
+    const restrictedInteger = {
+        value: '2',
+        dataset: {},
+        addEventListener: (type, callback) => { restrictedListeners[type] = callback; },
+    };
+    manager.restrictNumberInput(restrictedInteger, { integer: true });
+    restrictedListeners.focus();
+    let prevented = false;
+    restrictedListeners.keydown({ key: '.', preventDefault: () => { prevented = true; } });
+    check('integer controls block decimal keystrokes', prevented, true);
+    restrictedInteger.value = '-1';
+    restrictedListeners.input();
+    check('integer controls reject pasted negative values', restrictedInteger.value, '2');
+    restrictedInteger.value = '2.5';
+    restrictedListeners.input();
+    check('integer controls reject pasted fractional values', restrictedInteger.value, '2');
+
+    manager.owner.roundingEnabled = true;
+    manager.owner.escapeHtml = (value) => String(value);
+    manager.owner.formatDecimalHours = (hours) => Number(hours.toFixed(2)).toString();
+    manager.list = { innerHTML: '' };
+    manager.adjustments = [{
+        id: 8,
+        client_name: 'Acme',
+        adjustment_minutes: 8,
+        adjusted_minutes: 68,
+        billable_minutes: 75,
+    }];
+    manager.renderList();
+    check('adjustment rows include rounded hours and a green positive difference', [
+        manager.list.innerHTML.includes('1.25'),
+        manager.list.innerHTML.includes('+7m'),
+        manager.list.innerHTML.includes('text-success'),
+    ], [true, true, true]);
+
+    manager.adjustments[0].billable_minutes = 60;
+    manager.renderList();
+    check('adjustment rows show a red negative rounding difference', [
+        manager.list.innerHTML.includes('−8m'),
+        manager.list.innerHTML.includes('text-danger'),
+    ], [true, true]);
+
+    manager.owner.roundingEnabled = false;
+    manager.renderList();
+    check('rounded adjustment columns are omitted when rounding is disabled',
+        manager.list.innerHTML.includes('hrs.'), false);
+    manager.adjustments = [];
+    manager.renderList();
+    check('empty adjustment rows span only the visible columns',
+        manager.list.innerHTML.includes('colspan="4"'), true);
+    check('running-task base drops partial minutes',
+        manager.normalizedBaseMinutes(65.98, true), 65);
 }
 
 console.log(failures ? `\n${failures} failure(s)` : '\nall checks passed');

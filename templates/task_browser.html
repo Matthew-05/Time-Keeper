@@ -73,12 +73,20 @@
             <!-- The way in for time that was never tracked live. Sits on the
                  card it adds a row to, not in the page header, which scopes the
                  date rather than the contents. -->
-            <button type="button" id="add-task-btn" class="tk-btn tk-btn-secondary tk-btn-sm">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-              Add task
-            </button>
+            <div class="flex items-center gap-2">
+              <button type="button" id="adjust-time-btn" class="tk-btn tk-btn-secondary tk-btn-sm">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 3v18M5 8h14M7 16h10" />
+                </svg>
+                Adjust time
+              </button>
+              <button type="button" id="add-task-btn" class="tk-btn tk-btn-secondary tk-btn-sm">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                Add task
+              </button>
+            </div>
           </div>
           <div class="overflow-x-auto">
             <table class="tk-table tk-table-hover">
@@ -170,6 +178,134 @@
       <div class="tk-modal-footer flex justify-end gap-2">
         <button type="button" id="works-modal-copy" class="tk-btn tk-btn-secondary">Copy</button>
         <button type="button" id="works-modal-done" class="tk-btn tk-btn-primary">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- One manual override per client for the selected date. Adjustment,
+       adjusted time, and rounded hours are synchronized authoring paths. -->
+  <div id="adjust-time-modal" class="tk-modal-backdrop hidden">
+    <div
+      id="adjust-time-panel"
+      class="tk-modal tk-modal-wide tk-adjust-time-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="adjust-time-title"
+      tabindex="-1"
+    >
+      <div class="tk-modal-header">
+        <div>
+          <span class="tk-card-title" id="adjust-time-title">Manual adjustments</span>
+          <p class="text-xs text-faint" id="adjust-time-subtitle"></p>
+        </div>
+        <button type="button" id="adjust-time-close" class="tk-btn-icon tk-btn-icon-sm" title="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="tk-modal-body space-y-4">
+        <div class="tk-adjust-time-client-field">
+          <label class="mb-1 block text-xs font-medium text-muted" for="adjust-time-client">Client</label>
+          <select id="adjust-time-client"></select>
+        </div>
+
+        <div class="tk-adjustment-math">
+          <div class="tk-adjustment-math-row">
+            <span class="tk-adjustment-math-operator" aria-hidden="true"></span>
+            <span class="tk-adjustment-math-label">Logged time</span>
+            <div class="tk-adjustment-time-fields" aria-label="Raw logged time">
+              <span class="tk-adjustment-static-field">
+                <span id="adjust-time-base-hours">—</span>
+                <span class="tk-adjustment-unit">hr</span>
+              </span>
+              <span class="tk-adjustment-static-field">
+                <span id="adjust-time-base-minutes">—</span>
+                <span class="tk-adjustment-unit">min</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="tk-adjustment-math-row">
+            <button id="adjust-time-operator" class="tk-adjustment-math-operator tk-adjustment-sign" type="button" aria-label="Use a positive adjustment" aria-pressed="false" title="Adding time; click to subtract">+</button>
+            <span class="tk-adjustment-math-label">Adjustment</span>
+            <div class="tk-adjustment-time-fields">
+              <div class="relative w-28">
+                <input id="adjust-time-delta-hours" class="tk-input tabular pr-10" type="number" min="0" step="1" aria-label="Adjustment hours" />
+                <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-faint">hr</span>
+              </div>
+              <div class="relative w-28">
+                <input id="adjust-time-delta-minutes" class="tk-input tabular pr-10" type="number" min="0" max="59" step="1" aria-label="Adjustment minutes" />
+                <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-faint">min</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="tk-adjustment-math-rule" aria-hidden="true"></div>
+
+          <div class="tk-adjustment-math-row tk-adjustment-math-sum">
+            <span class="tk-adjustment-math-operator" aria-hidden="true">=</span>
+            <span class="tk-adjustment-math-label">Adjusted time</span>
+            <div class="tk-adjustment-result-line">
+              <div class="tk-adjustment-time-fields">
+                <div class="relative w-28">
+                  <input id="adjust-time-total-hours" class="tk-input tabular pr-10" type="number" min="0" step="1" aria-label="Adjusted hours" />
+                  <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-faint">hr</span>
+                </div>
+                <div class="relative w-28">
+                  <input id="adjust-time-total-minutes" class="tk-input tabular pr-10" type="number" min="0" max="59.99" step="any" aria-label="Adjusted minutes" />
+                  <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-faint">min</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="adjust-time-rounded" class="tk-adjustment-math-row tk-adjustment-rounded-row hidden">
+            <span class="tk-adjustment-math-operator" aria-hidden="true">→</span>
+            <span class="tk-adjustment-math-label">Rounded time</span>
+            <div class="tk-adjustment-result-line">
+              <div class="relative w-28">
+                <input id="adjust-time-rounded-hours" class="tk-input tabular pr-10" type="number" inputmode="decimal" min="0" step="any" aria-label="Rounded adjusted hours" />
+                <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-faint">hr</span>
+              </div>
+              <span id="adjust-time-difference" class="tk-adjustment-difference">—</span>
+            </div>
+          </div>
+
+          <p class="tk-adjustment-math-help" id="adjust-time-help"></p>
+        </div>
+
+        <p id="adjust-time-error" class="hidden text-sm text-danger" role="alert"></p>
+
+        <div>
+          <span class="mb-1 block text-xs font-medium text-muted">Adjustments on this date</span>
+          <div class="tk-adjustment-list rounded-lg border border-border">
+            <table class="tk-table tk-table-hover">
+              <thead>
+                <tr>
+                  <th>Client</th>
+                  <th class="tk-num">Adjustment</th>
+                  <th class="tk-num">Adjusted</th>
+                  {% if settings.rounding_enabled %}
+                    <th class="tk-num">Rounded</th>
+                    <th class="tk-num">Diff</th>
+                  {% endif %}
+                  <th class="tk-num"><span class="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody id="adjust-time-list"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="tk-modal-footer flex flex-wrap items-center justify-between gap-3">
+        <button type="button" id="adjust-time-delete" class="tk-btn tk-btn-danger hidden">Delete adjustment</button>
+        <div class="flex items-center gap-2">
+          <button type="button" id="adjust-time-cancel" class="tk-btn tk-btn-secondary">Cancel</button>
+          <button type="button" id="adjust-time-save" class="tk-btn tk-btn-primary" disabled>Save adjustment</button>
+        </div>
       </div>
     </div>
   </div>

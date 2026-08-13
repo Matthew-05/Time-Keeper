@@ -13,6 +13,7 @@ import {
 } from './time_format.js';
 import { flatpickrCalendarOptions } from './week_start.js';
 import { localDate } from './calendar_dates.js';
+import { ManualAdjustmentManager } from './manual_adjustments.js';
 
 /** The id of the one editable item on the Add task timeline. */
 const ADD_TASK_DRAFT_ID = 'draft';
@@ -73,6 +74,7 @@ export class TaskBrowser extends TimeKeeper {
         this.initializeElements();
         this.initializeWorksModal();
         this.initializeAddTaskModal();
+        this.manualAdjustmentManager = new ManualAdjustmentManager(this);
         this.initializeTimePicker();
         this.initializeDayTimePickers();
         // Floating this promise un-caught meant any failure during startup
@@ -116,6 +118,8 @@ export class TaskBrowser extends TimeKeeper {
         // Add task open: it holds times chosen against the gaps as they were
         // when it opened, and a refresh would move the table underneath it.
         if (this.addTaskModal && !this.addTaskModal.classList.contains('hidden')) return true;
+
+        if (this.manualAdjustmentManager?.isOpen()) return true;
 
         // A task row mid-edit, with unsaved times in its pickers.
         if (document.querySelector('#tasks-tbody .tk-row-editing')) return true;
@@ -1786,7 +1790,13 @@ export class TaskBrowser extends TimeKeeper {
             // Always fetch and populate day data first
             await this.populateDayTimes();
 
-            const response = await this.fetchFromAPI(`/tasks/${date}`);
+            const [response, adjustments] = await Promise.all([
+                this.fetchFromAPI(`/tasks/${date}`),
+                this.fetchFromAPI(
+                    `/api/manual-adjustments?date=${encodeURIComponent(date)}`
+                ),
+            ]);
+            this.manualAdjustments = adjustments;
             await this.renderTasks(response);
             this.renderTimeline(response, date, { background });
 
@@ -1968,9 +1978,9 @@ export class TaskBrowser extends TimeKeeper {
         this.clientsByKey = new Map(clientGroups.map((c) => [c.detailKey, c]));
 
         for (const client of clientGroups) {
-            const totalMinutes = this.totalNumberofMinutesPerClient(client.tasks);
-            totalMinutesForAll += totalMinutes;
-            totalFractionalHours += this.totalTimeSpentToFractionalHours(totalMinutes);
+            const figures = this.summaryFigures(client);
+            totalMinutesForAll += figures.totalMinutes;
+            totalFractionalHours += figures.fractionalHours;
         }
 
         reconcileChildren(tbody, clientGroups, {
@@ -1991,12 +2001,20 @@ export class TaskBrowser extends TimeKeeper {
 
     /** Per-client totals, derived identically for create and update. */
     summaryFigures(client) {
-        const totalMinutes = this.totalNumberofMinutesPerClient(client.tasks);
-        const fractionalHours = this.totalTimeSpentToFractionalHours(totalMinutes);
+        const trackedMinutes = this.totalNumberofMinutesPerClient(client.tasks);
+        const adjustment = client.adjustment;
+        const totalMinutes = adjustment
+            ? Number(adjustment.adjusted_minutes)
+            : trackedMinutes;
+        const fractionalHours = adjustment
+            ? Number(adjustment.billable_minutes) / 60
+            : this.totalTimeSpentToFractionalHours(totalMinutes);
         return {
+            trackedMinutes,
             totalMinutes,
             fractionalHours,
             roundingDiff: Math.round(fractionalHours * 60 - totalMinutes),
+            adjustmentMinutes: adjustment?.adjustment_minutes ?? null,
         };
     }
 
@@ -2063,12 +2081,20 @@ export class TaskBrowser extends TimeKeeper {
      * a given key because the key is derived from the client id.
      */
     updateSummaryRow(summaryRow, client) {
-        const { totalMinutes, fractionalHours, roundingDiff } = this.summaryFigures(client);
+        const {
+            totalMinutes,
+            fractionalHours,
+            roundingDiff,
+            adjustmentMinutes,
+        } = this.summaryFigures(client);
 
         setText(summaryRow.querySelector('[data-cell="name"]'), client.name);
-        setText(
+        setHtml(
             summaryRow.querySelector('[data-cell="minutes"]'),
-            this.formatDurationMinutes(totalMinutes)
+            `${this.formatDurationMinutes(totalMinutes)}`
+            + (adjustmentMinutes == null
+                ? ''
+                : ` <span class="ml-1 text-xs font-medium text-accent" title="Manual adjustment">${adjustmentMinutes > 0 ? '+' : adjustmentMinutes < 0 ? '−' : ''}${Math.abs(adjustmentMinutes)}m adj.</span>`)
         );
 
         const hoursCell = summaryRow.querySelector('[data-cell="hours"]');
@@ -2107,6 +2133,20 @@ export class TaskBrowser extends TimeKeeper {
             clientMap[detailKey].totalTimeSpent += task.time_spent;
             clientMap[detailKey].tasks.push(task);
         });
+
+        for (const adjustment of this.manualAdjustments || []) {
+            const detailKey = String(adjustment.client_id);
+            if (!clientMap[detailKey]) {
+                clientMap[detailKey] = {
+                    id: adjustment.client_id,
+                    detailKey,
+                    name: adjustment.client_name,
+                    totalTimeSpent: 0,
+                    tasks: [],
+                };
+            }
+            clientMap[detailKey].adjustment = adjustment;
+        }
         return Object.values(clientMap);
     }
 

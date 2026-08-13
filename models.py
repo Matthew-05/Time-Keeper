@@ -17,6 +17,51 @@ class Client(db.Model):
     def __repr__(self):
         return f'<Client {self.name}>'
 
+
+class ManualAdjustment(db.Model):
+    """One signed time correction for a client on a date.
+
+    The adjustment stays at the current billing boundary (client + date).  A
+    future task-level rounding mode can extend this model with a nullable task
+    target without changing the meaning of existing rows.
+    """
+    __tablename__ = 'manual_adjustment'
+
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, nullable=False)
+    client_id = db.Column(
+        db.Integer,
+        db.ForeignKey('client.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    client = db.relationship(
+        'Client',
+        backref=db.backref(
+            'manual_adjustments', lazy=True, passive_deletes=True
+        ),
+    )
+    adjustment_minutes = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.now, onupdate=datetime.now
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            'date', 'client_id', name='uq_manual_adjustment_date_client'
+        ),
+        db.CheckConstraint(
+            'adjustment_minutes != 0', name='ck_manual_adjustment_nonzero'
+        ),
+        db.Index('ix_manual_adjustment_date_client', 'date', 'client_id'),
+    )
+
+    def __repr__(self):
+        return (
+            f'<ManualAdjustment {self.date} client={self.client_id} '
+            f'{self.adjustment_minutes:+d}m>'
+        )
+
 class Budget(db.Model):
     """A pot of hours for one client over one date range.
 

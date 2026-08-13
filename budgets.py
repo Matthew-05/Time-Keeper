@@ -29,6 +29,7 @@ import math
 from datetime import date, datetime, timedelta
 
 from rounding import round_seconds_to_hours
+from manual_adjustments import adjustment_figures
 
 DEFAULT_WORK_DAYS = frozenset({0, 1, 2, 3, 4})
 
@@ -487,7 +488,13 @@ def eligible_budgets(budgets, day):
     return covering
 
 
-def allocation_ledger(budgets, tasks, now=None, rounding_policy=None):
+def allocation_ledger(
+    budgets,
+    tasks,
+    now=None,
+    rounding_policy=None,
+    manual_adjustments=None,
+):
     """Round known day categories once, then pour the integer automatic pool.
 
     Returns ``(used, entries, unbudgeted_hours, days)``. ``entries`` contains
@@ -505,6 +512,7 @@ def allocation_ledger(budgets, tasks, now=None, rounding_policy=None):
     """
     now = now or datetime.now()
     tasks = list(tasks)
+    manual_adjustments = dict(manual_adjustments or {})
     raw_seconds = {task.id: task_seconds(task, now) for task in tasks}
     by_id = {b.id: b for b in budgets}
 
@@ -519,7 +527,9 @@ def allocation_ledger(budgets, tasks, now=None, rounding_policy=None):
         if t.budget_id is None or t.budget_id not in by_id
     ]
 
-    all_days = sorted({task.date for task in tasks})
+    all_days = sorted(
+        {task.date for task in tasks} | set(manual_adjustments)
+    )
     tasks_by_day = {}
     for task in tasks:
         tasks_by_day.setdefault(task.date, []).append(task)
@@ -538,10 +548,21 @@ def allocation_ledger(budgets, tasks, now=None, rounding_policy=None):
     # The categories are fixed facts, so this is the sole LR pass for each day.
     day_plans = {}
     for day in all_days:
-        day_tasks = tasks_by_day[day]
-        total_raw_seconds = sum(raw_seconds[task.id] for task in day_tasks)
-        rounded_hours = round_seconds_to_hours(total_raw_seconds, rounding_policy)
-        rounded_seconds = max(0, int(round(rounded_hours * 3600)))
+        day_tasks = tasks_by_day.get(day, [])
+        recorded_seconds = sum(raw_seconds[task.id] for task in day_tasks)
+        tracked_seconds = recorded_seconds
+        if day in manual_adjustments and any(
+            task.end_time is None for task in day_tasks
+        ):
+            # A live timer has partial seconds by definition. Manual adjustment
+            # inputs use only fully elapsed minutes so the saved arithmetic
+            # agrees with the History editor while that timer is running.
+            tracked_seconds = tracked_seconds // 60 * 60
+        figures = adjustment_figures(
+            tracked_seconds, manual_adjustments.get(day), rounding_policy
+        )
+        total_raw_seconds = figures['adjusted_seconds']
+        rounded_seconds = figures['billable_seconds']
         covering = eligible_budgets(budgets, day)
         categories = {}
 
@@ -557,10 +578,20 @@ def allocation_ledger(budgets, tasks, now=None, rounding_policy=None):
             destination = ('auto_pool', None) if covering else ('no_budget', None)
             add_category(destination, raw_seconds[task.id])
 
+        # A client-day adjustment may be the only time on its date.  Give that
+        # manual-only total the same automatic destination a normal loose task
+        # would have, while keeping task-level traces empty and honest.
+        if not day_tasks and total_raw_seconds > 0:
+            destination = ('auto_pool', None) if covering else ('no_budget', None)
+            add_category(destination, total_raw_seconds)
+
         category_shares = _apportion_day(categories, rounded_seconds)
         day_plans[day] = {
+            'recorded_seconds': recorded_seconds,
+            'tracked_seconds': tracked_seconds,
             'raw_seconds': total_raw_seconds,
             'rounded_seconds': rounded_seconds,
+            'manual_adjustment_minutes': manual_adjustments.get(day),
             'covering': covering,
             'category_shares': category_shares,
             'auto_raw_seconds': categories.get(
@@ -651,6 +682,43 @@ def allocation_ledger(budgets, tasks, now=None, rounding_policy=None):
 
         auto_tasks = loose_by_day.get(day, []) if plan['covering'] else []
         if not auto_tasks:
+            # A positive manual-only day has no task to call record() for.  Add
+            # a destination trace here after the automatic pool has been poured.
+            if plan['tracked_seconds'] == 0 and plan['raw_seconds'] > 0:
+                if plan['covering']:
+                    billable_total = max(1, auto_billable)
+                    assigned_raw = 0
+                    for index, (budget_id, billable) in enumerate(allocations):
+                        raw_value = (
+                            plan['raw_seconds'] - assigned_raw
+                            if index == len(allocations) - 1
+                            else round(plan['raw_seconds'] * billable / billable_total)
+                        )
+                        assigned_raw += raw_value
+                        per_day.setdefault(day, {})[('budget', budget_id)] = {
+                            'raw_seconds': raw_value,
+                            'task_ids': set(),
+                            'reason_raw_seconds': {},
+                            'reason_task_ids': {},
+                        }
+                    if not allocations:
+                        per_day.setdefault(day, {})[
+                            ('budget', plan['covering'][0].id)
+                        ] = {
+                            'raw_seconds': plan['raw_seconds'],
+                            'task_ids': set(),
+                            'reason_raw_seconds': {},
+                            'reason_task_ids': {},
+                        }
+                else:
+                    per_day.setdefault(day, {})[('no_budget', None)] = {
+                        'raw_seconds': plan['raw_seconds'],
+                        'task_ids': set(),
+                        'reason_raw_seconds': {
+                            'coverage_gap': plan['raw_seconds']
+                        },
+                        'reason_task_ids': {'coverage_gap': set()},
+                    }
             continue
         if auto_billable <= 0 or plan['auto_raw_seconds'] <= 0:
             destination = ('budget', plan['covering'][0].id)
@@ -680,6 +748,22 @@ def allocation_ledger(budgets, tasks, now=None, rounding_policy=None):
                 if not last_allocation and billable_left <= 1e-7:
                     allocation_index += 1
                     billable_left = allocations[allocation_index][1]
+
+    # Destination raw values describe the adjusted actual total, even though
+    # the task traces above deliberately remain the immutable recorded facts.
+    # Scale after every task destination has been recorded so all paths
+    # reconcile with the client-day override.
+    for day in manual_adjustments:
+        destinations = per_day.get(day, {})
+        recorded = day_plans[day]['recorded_seconds']
+        adjusted = day_plans[day]['raw_seconds']
+        if recorded <= 0:
+            continue
+        scale = adjusted / recorded
+        for destination in destinations.values():
+            destination['raw_seconds'] *= scale
+            for reason in list(destination['reason_raw_seconds']):
+                destination['reason_raw_seconds'][reason] *= scale
 
     used_seconds = {b.id: 0 for b in budgets}
     unbudgeted_seconds = 0
@@ -745,9 +829,11 @@ def allocation_ledger(budgets, tasks, now=None, rounding_policy=None):
 
         days.append({
             'date': day,
+            'tracked_hours': plan['tracked_seconds'] / 3600.0,
             'raw_hours': total_raw_seconds / 3600.0,
             'rounded_hours': rounded_seconds / 3600.0,
             'rounding_adjustment_hours': (rounded_seconds - total_raw_seconds) / 3600.0,
+            'manual_adjustment_minutes': plan['manual_adjustment_minutes'],
             # Today's total can change when another entry is added even if no
             # timer is currently running, so the whole current day is tentative.
             'provisional': day == now.date(),
@@ -758,10 +844,20 @@ def allocation_ledger(budgets, tasks, now=None, rounding_policy=None):
     return used, split, unbudgeted_seconds / 3600.0, days
 
 
-def allocate(budgets, tasks, now=None, rounding_policy=None):
+def allocate(
+    budgets,
+    tasks,
+    now=None,
+    rounding_policy=None,
+    manual_adjustments=None,
+):
     """Compatibility wrapper returning the allocator's original three values."""
     used, split, unbudgeted, _days = allocation_ledger(
-        budgets, tasks, now, rounding_policy
+        budgets,
+        tasks,
+        now,
+        rounding_policy,
+        manual_adjustments=manual_adjustments,
     )
     return used, split, unbudgeted
 

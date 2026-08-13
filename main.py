@@ -44,7 +44,8 @@ if not DEV_MODE:
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from models import (
-    db, Client, Task_Item, TimeTracking, BreakTracking, Work, Budget, BudgetHold
+    db, Client, Task_Item, TimeTracking, BreakTracking, Work, Budget, BudgetHold,
+    ManualAdjustment,
 )
 import settings as user_settings
 # Aliased: `budgets` is also the name of the page's view function and of half
@@ -55,6 +56,7 @@ import summary as summary_report
 import day_close
 import day_bounds
 from rounding import round_seconds_to_hours
+from manual_adjustments import adjustment_figures
 import notifications
 import ipc
 from reminders import ReminderService
@@ -968,6 +970,9 @@ def delete_client(id):
     # hand because SQLite runs with foreign_keys OFF, which makes the model's
     # ondelete='CASCADE' documentation rather than enforcement.
     Work.query.filter(Work.client_id == id).delete(synchronize_session=False)
+    ManualAdjustment.query.filter(ManualAdjustment.client_id == id).delete(
+        synchronize_session=False
+    )
     # Budgets go the same way as works, and for the same reason: a pot of hours
     # for a client that no longer exists has nothing to measure. Un-pin first —
     # the tasks survive as "removed client" time and must not be left pointing
@@ -1113,20 +1118,175 @@ def get_client_day_total(date_string, client_id):
         task_duration_seconds(task, now) for task in tasks if task.end_time is None
     )
     tracked_seconds = logged_seconds + unlogged_seconds
+    adjustment_input_seconds = (
+        tracked_seconds // 60 * 60
+        if any(task.end_time is None for task in tasks)
+        else tracked_seconds
+    )
     policy = _rounding_policy()
-    rounded_hours = round_seconds_to_hours(tracked_seconds, policy)
+    adjustment = ManualAdjustment.query.filter_by(
+        date=day, client_id=client_id
+    ).first()
+    figures = adjustment_figures(
+        adjustment_input_seconds,
+        adjustment.adjustment_minutes if adjustment else None,
+        policy,
+    )
     client = db.session.get(Client, client_id)
 
     return jsonify({
         'client_name': client.name if client else None,
+        'has_running_task': any(task.end_time is None for task in tasks),
         'logged_minutes': logged_seconds / 60,
         'unlogged_minutes': unlogged_seconds / 60,
         'tracked_minutes': tracked_seconds / 60,
-        'rounded_hours': rounded_hours,
+        'base_minutes': figures['base_seconds'] / 60,
+        'adjustment_minutes': adjustment.adjustment_minutes if adjustment else None,
+        'adjusted_minutes': figures['adjusted_seconds'] / 60,
+        'rounded_hours': figures['billable_seconds'] / 3600,
         'rounding_enabled': policy['enabled'],
         'rounding_interval_minutes': policy['interval_minutes'],
         'rounding_direction': policy['direction'],
     })
+
+
+def _manual_adjustment_payload(adjustment, policy=None, now=None):
+    """Serialize one adjustment with live totals derived from its tasks."""
+    policy = policy or _rounding_policy()
+    now = now or datetime.now()
+    tasks = Task_Item.query.filter_by(
+        date=adjustment.date, client_id=adjustment.client_id
+    ).all()
+    has_running_task = any(task.end_time is None for task in tasks)
+    tracked_seconds = sum(task_duration_seconds(task, now) for task in tasks)
+    if has_running_task:
+        tracked_seconds = tracked_seconds // 60 * 60
+    figures = adjustment_figures(
+        tracked_seconds, adjustment.adjustment_minutes, policy
+    )
+    client = adjustment.client
+    return {
+        'id': adjustment.id,
+        'date': adjustment.date.isoformat(),
+        'client_id': adjustment.client_id,
+        'client_name': client.name if client else None,
+        'client_color': client.color if client else None,
+        'has_running_task': has_running_task,
+        'tracked_minutes': figures['tracked_seconds'] / 60,
+        'base_minutes': figures['base_seconds'] / 60,
+        'adjustment_minutes': adjustment.adjustment_minutes,
+        'adjusted_minutes': figures['adjusted_seconds'] / 60,
+        'billable_minutes': figures['billable_seconds'] / 60,
+    }
+
+
+def _parse_adjustment_date(value):
+    try:
+        return datetime.strptime(value or '', '%Y-%m-%d').date(), None
+    except (TypeError, ValueError):
+        return None, 'Invalid date format. Use YYYY-MM-DD.'
+
+
+def _parse_adjustment_minutes(value):
+    if isinstance(value, bool):
+        return None, 'Adjustment minutes must be a whole number.'
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError):
+        return None, 'Adjustment minutes must be a whole number.'
+    if str(value).strip() != str(minutes):
+        return None, 'Adjustment minutes must be a whole number.'
+    if minutes == 0:
+        return None, 'Adjustment must be greater or less than zero.'
+    return minutes, None
+
+
+def _validate_adjustment_total(day, client_id, minutes):
+    tasks = Task_Item.query.filter_by(date=day, client_id=client_id).all()
+    tracked_seconds = sum(task_duration_seconds(task) for task in tasks)
+    if any(task.end_time is None for task in tasks):
+        tracked_seconds = tracked_seconds // 60 * 60
+    try:
+        adjustment_figures(tracked_seconds, minutes, _rounding_policy())
+    except ValueError as error:
+        return str(error)
+    return None
+
+
+@app.route('/api/manual-adjustments', methods=['GET'])
+def api_list_manual_adjustments():
+    day, error = _parse_adjustment_date(request.args.get('date'))
+    if error:
+        return jsonify({'error': error}), 400
+
+    policy = _rounding_policy()
+    rows = ManualAdjustment.query.filter_by(date=day).join(Client).order_by(
+        Client.name
+    ).all()
+    return jsonify([_manual_adjustment_payload(row, policy) for row in rows])
+
+
+@app.route('/api/manual-adjustments', methods=['POST'])
+def api_create_manual_adjustment():
+    data = request.get_json(silent=True) or {}
+    day, error = _parse_adjustment_date(data.get('date'))
+    if error:
+        return jsonify({'error': error}), 400
+    try:
+        client_id = int(data.get('client_id'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Client is required.'}), 400
+    client = db.session.get(Client, client_id)
+    if client is None:
+        return jsonify({'error': 'Client not found.'}), 404
+    minutes, error = _parse_adjustment_minutes(data.get('adjustment_minutes'))
+    if error:
+        return jsonify({'error': error}), 400
+    if ManualAdjustment.query.filter_by(date=day, client_id=client_id).first():
+        return jsonify({
+            'error': 'This client already has an adjustment for the selected date.'
+        }), 409
+    error = _validate_adjustment_total(day, client_id, minutes)
+    if error:
+        return jsonify({'error': error}), 400
+
+    adjustment = ManualAdjustment(
+        date=day, client_id=client_id, adjustment_minutes=minutes
+    )
+    db.session.add(adjustment)
+    db.session.commit()
+    return jsonify(_manual_adjustment_payload(adjustment)), 201
+
+
+@app.route('/api/manual-adjustments/<int:adjustment_id>', methods=['PUT'])
+def api_update_manual_adjustment(adjustment_id):
+    adjustment = db.session.get(ManualAdjustment, adjustment_id)
+    if adjustment is None:
+        return jsonify({'error': 'Manual adjustment not found.'}), 404
+    data = request.get_json(silent=True) or {}
+    minutes, error = _parse_adjustment_minutes(data.get('adjustment_minutes'))
+    if error:
+        return jsonify({'error': error}), 400
+    error = _validate_adjustment_total(
+        adjustment.date, adjustment.client_id, minutes
+    )
+    if error:
+        return jsonify({'error': error}), 400
+
+    adjustment.adjustment_minutes = minutes
+    adjustment.updated_at = datetime.now()
+    db.session.commit()
+    return jsonify(_manual_adjustment_payload(adjustment))
+
+
+@app.route('/api/manual-adjustments/<int:adjustment_id>', methods=['DELETE'])
+def api_delete_manual_adjustment(adjustment_id):
+    adjustment = db.session.get(ManualAdjustment, adjustment_id)
+    if adjustment is None:
+        return jsonify({'error': 'Manual adjustment not found.'}), 404
+    db.session.delete(adjustment)
+    db.session.commit()
+    return jsonify({'success': True})
 
 
 @app.route('/unfinished_tasks', methods=['GET'])
@@ -1799,9 +1959,32 @@ def bucket_by_client_and_day(start, end, now=None):
     now = now or datetime.now()
 
     buckets = {}
+    running = set()
     for task in tasks_between(start, end):
         key = (task_client_display_name(task), task.date)
         buckets[key] = buckets.get(key, 0) + task_duration_seconds(task, now)
+        if task.end_time is None:
+            running.add(key)
+
+    policy = _rounding_policy()
+    adjustments = ManualAdjustment.query.filter(
+        ManualAdjustment.date >= start,
+        ManualAdjustment.date <= end,
+    ).all()
+    for adjustment in adjustments:
+        if adjustment.client is None:
+            continue
+        key = (adjustment.client.name, adjustment.date)
+        tracked_seconds = buckets.get(key, 0)
+        if key in running:
+            tracked_seconds = tracked_seconds // 60 * 60
+        figures = adjustment_figures(
+            tracked_seconds, adjustment.adjustment_minutes, policy
+        )
+        # Summary treats this value as actual time and applies the rounding
+        # policy to it for billable time.  That is precisely the override
+        # contract: adjusted actual is the new input to rounding.
+        buckets[key] = figures['adjusted_seconds']
     return buckets
 
 
@@ -1979,8 +2162,25 @@ def _client_allocation(client_id, now=None, every_task=False):
         if pinned_dates:
             date_scope = or_(date_scope, Task_Item.date.in_(pinned_dates))
         tasks = task_query.filter(date_scope).all()
+    adjustment_query = ManualAdjustment.query.filter_by(client_id=client_id)
+    if every_task:
+        adjustment_rows = adjustment_query.all()
+    elif not budgets:
+        adjustment_rows = []
+    else:
+        adjustment_rows = adjustment_query.filter(
+            ManualAdjustment.date >= window_start,
+            ManualAdjustment.date <= window_end,
+        ).all()
+    adjustments = {
+        row.date: row.adjustment_minutes for row in adjustment_rows
+    }
     used, split, unbudgeted, days = budget_allocation.allocation_ledger(
-        budgets, tasks, now, rounding_policy
+        budgets,
+        tasks,
+        now,
+        rounding_policy,
+        manual_adjustments=adjustments,
     )
     return budgets, used, split, unbudgeted, tasks, days
 
