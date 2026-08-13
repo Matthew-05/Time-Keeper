@@ -132,5 +132,25 @@ check('the opening instant is inside', browser.gapAt(browser.clockToMinutes('10:
 check('the closing instant is outside', browser.gapAt(browser.clockToMinutes('14:00')), null);
 check('a minute before the close is inside', browser.gapAt(browser.clockToMinutes('13:59'))?.start_time, '10:30');
 
+console.log('\nAdd task stays disabled until both required choices are made');
+{
+    const save = { disabled: false };
+    const form = Object.create(TaskBrowser.prototype);
+    form.addTaskSave = save;
+    form.addTaskSubmitting = false;
+    form.addTaskClient = { value: '' };
+    form.addTaskStart = { value: '' };
+    form.addTaskEnd = { value: '' };
+
+    check('no client or period', (form.updateAddTaskSaveState(), save.disabled), true);
+    form.addTaskClient.value = '4';
+    check('client without period', (form.updateAddTaskSaveState(), save.disabled), true);
+    form.addTaskStart.value = '09:00';
+    form.addTaskEnd.value = '10:00';
+    check('client and period', (form.updateAddTaskSaveState(), save.disabled), false);
+    form.addTaskEnd.value = '09:00';
+    check('empty-length period', (form.updateAddTaskSaveState(), save.disabled), true);
+}
+
 console.log(failures ? `\n${failures} failure(s)` : '\nall drag checks passed');
 process.exit(failures ? 1 : 0);

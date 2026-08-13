@@ -541,6 +541,7 @@ export class TaskBrowser extends TimeKeeper {
         // Set when the server has asked to confirm a change to the day's
         // bounds. The next Save re-sends the same task with permission.
         this.addTaskStretchConfirmed = false;
+        this.addTaskSubmitting = false;
         // The live timeline, its DataSet, and the payload both were built from.
         this.addTaskTimeline = null;
         this.addTaskItems = null;
@@ -577,6 +578,7 @@ export class TaskBrowser extends TimeKeeper {
         this.addTaskClient.addEventListener('change', () => {
             this.syncAddTaskWorks();
             this.recolourAddTaskTasks();
+            this.updateAddTaskSaveState();
         });
 
         // Delegated: the chips are rebuilt from each day's response.
@@ -634,6 +636,7 @@ export class TaskBrowser extends TimeKeeper {
         this.resetAddTaskConfirmation();
         this.addTaskStartPicker.clear();
         this.addTaskEndPicker.clear();
+        this.updateAddTaskSaveState();
         this.addTaskWorksDirty = false;
         this.setAddTaskTimesVisible(false);
         this.renderAddTaskRange();
@@ -716,7 +719,7 @@ export class TaskBrowser extends TimeKeeper {
     renderAddTaskRange() {
         const start = this.fieldMinutes(this.addTaskStart);
         const end = this.fieldMinutes(this.addTaskEnd);
-        const chosen = start != null && end != null && end > start;
+        const chosen = this.hasAddTaskTimePeriod();
 
         this.addTaskRange.classList.toggle('hidden', !chosen);
         this.addTaskRangeEmpty.classList.toggle('hidden', chosen);
@@ -729,6 +732,21 @@ export class TaskBrowser extends TimeKeeper {
             + ` – ${this.escapeHtml(formatClockTime(this.minutesToClock(end)))}`
             + `<span class="tk-add-task-duration">${this.escapeHtml(this.formatDurationMinutes(end - start))}</span>`
         );
+    }
+
+    /** Whether the dialog has a complete, forward-running time period. */
+    hasAddTaskTimePeriod() {
+        const start = this.fieldMinutes(this.addTaskStart);
+        const end = this.fieldMinutes(this.addTaskEnd);
+        return start != null && end != null && end > start;
+    }
+
+    /** Enable Add task only after its client and time period have been chosen. */
+    updateAddTaskSaveState() {
+        if (!this.addTaskSave) return;
+        this.addTaskSave.disabled = this.addTaskSubmitting
+            || this.addTaskClientId() == null
+            || !this.hasAddTaskTimePeriod();
     }
 
     toggleAddTaskTimes() {
@@ -1260,6 +1278,7 @@ export class TaskBrowser extends TimeKeeper {
         this.addTaskEndPicker.setDate(clockTimeToDate(endClock), false);
         this.resetAddTaskConfirmation();
         this.renderAddTaskRange();
+        this.updateAddTaskSaveState();
     }
 
     /** Load a start/end pair into the form and onto the timeline. */
@@ -1322,6 +1341,7 @@ export class TaskBrowser extends TimeKeeper {
         this.resetAddTaskConfirmation();
         this.renderAddTaskRange();
         this.syncDraftItem();
+        this.updateAddTaskSaveState();
     }
 
     // ---- Works, client, lifecycle ------------------------------------------
@@ -1396,7 +1416,8 @@ export class TaskBrowser extends TimeKeeper {
             return;
         }
 
-        this.addTaskSave.disabled = true;
+        this.addTaskSubmitting = true;
+        this.updateAddTaskSaveState();
         try {
             // Raw fetch rather than fetchFromAPI: the 409 carries a body that
             // has to be read to know it's a confirmation rather than a refusal,
@@ -1440,7 +1461,8 @@ export class TaskBrowser extends TimeKeeper {
             // corrected against the conflict the message just named.
             this.showToast(error.message, 'error');
         } finally {
-            this.addTaskSave.disabled = false;
+            this.addTaskSubmitting = false;
+            this.updateAddTaskSaveState();
         }
     }
 
