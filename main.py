@@ -3581,6 +3581,7 @@ class WebviewAPI:
             return
 
         try:
+            import System.Drawing as Drawing
             import System.Windows.Forms as WinForms
 
             native = webview.windows[0].native
@@ -3597,7 +3598,7 @@ class WebviewAPI:
 
             def update_maximized_bounds(*_args):
                 if native.WindowState == WinForms.FormWindowState.Normal:
-                    native.MaximizedBounds = WinForms.Screen.FromHandle(native.Handle).WorkingArea
+                    self._set_maximized_bounds(native, WinForms, Drawing)
 
             self._native_move_handler = update_maximized_bounds
             native.Move += self._native_move_handler
@@ -3630,21 +3631,37 @@ class WebviewAPI:
             return
 
         try:
+            import System.Drawing as Drawing
             import System.Windows.Forms as WinForms
             from System import Action
 
             native = webview.windows[0].native
             native.Invoke(
                 Action(
-                    lambda: setattr(
-                        native,
-                        'MaximizedBounds',
-                        WinForms.Screen.FromHandle(native.Handle).WorkingArea,
-                    )
+                    lambda: self._set_maximized_bounds(native, WinForms, Drawing)
                 )
             )
         except Exception as exc:
             logger.warning(f'Could not refresh maximized window bounds: {exc}')
+
+    @staticmethod
+    def _set_maximized_bounds(native, winforms, drawing):
+        """Constrain a borderless maximized form to its monitor's work area.
+
+        WinForms treats ``MaximizedBounds.X/Y`` as offsets from the current
+        monitor, rather than virtual-desktop coordinates. Supplying
+        ``WorkingArea`` directly therefore applies a negative monitor position
+        twice and can move the window entirely off-screen.
+        """
+        screen = winforms.Screen.FromHandle(native.Handle)
+        work_area = screen.WorkingArea
+        screen_bounds = screen.Bounds
+        native.MaximizedBounds = drawing.Rectangle(
+            work_area.X - screen_bounds.X,
+            work_area.Y - screen_bounds.Y,
+            work_area.Width,
+            work_area.Height,
+        )
 
     def resize_window(self, width, height, direction):
         """Resize from a custom frame edge while anchoring its opposite side."""
