@@ -81,6 +81,9 @@ dashboard.initializeDateRangePicker()
 
 assert.equal(rangeOptions.mode, 'range')
 assert.equal(rangeOptions.dateFormat, 'Y-m-d')
+assert.equal(rangeOptions.altInput, true)
+assert.equal(rangeOptions.altFormat, 'M j, Y')
+assert.equal(rangeOptions.locale.rangeSeparator, ' – ')
 assert.equal(rangeOptions.showMonths, 2)
 assert.equal(rangeOptions.maxDate, '2026-08-13')
 

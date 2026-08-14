@@ -105,7 +105,14 @@ export function flatpickrFirstDayOfWeek(weekStart = currentWeekStart()) {
  */
 export function flatpickrCalendarOptions(overrides = {}, weekStart = currentWeekStart()) {
     return {
-        locale: { firstDayOfWeek: flatpickrFirstDayOfWeek(weekStart) },
+        // Keep the real input ISO-shaped for APIs and date arithmetic, while
+        // every visible calendar field uses the same concise human format.
+        altInput: true,
+        altFormat: 'M j, Y',
+        locale: {
+            firstDayOfWeek: flatpickrFirstDayOfWeek(weekStart),
+            rangeSeparator: ' – ',
+        },
         ...overrides,
     }
 }

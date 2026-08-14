@@ -238,8 +238,6 @@ export class TaskBrowser extends TimeKeeper {
 
     historyDatePickerOptions() {
         return flatpickrCalendarOptions({
-            altFormat: "D, F d, Y",
-            altInput: true,
             defaultDate: this.getLocalDateString(),
             dateFormat: "Y-m-d",
             maxDate: "today",
