@@ -19,7 +19,6 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path $PSScriptRoot -Parent
-$VersionFile = Join-Path $RepoRoot "VERSION"
 $InstallerScript = Join-Path $RepoRoot "installer.iss"
 
 function Fail([string]$Message) {
@@ -199,11 +198,8 @@ function Find-Iscc([string]$RequestedPath) {
     Fail "Inno Setup Compiler (ISCC.exe) was not found. Install Inno Setup 6 or pass -IsccPath."
 }
 
-if (-not (Test-Path -LiteralPath $VersionFile -PathType Leaf)) {
-    Fail "VERSION file not found at $VersionFile."
-}
 if (-not $Version) {
-    $Version = (Get-Content -Raw -LiteralPath $VersionFile).Trim()
+    $Version = (Read-Host "Application version to embed in the installer (x.y.z)").Trim()
 }
 if ($Version -notmatch '^\d+\.\d+\.\d+$') {
     Fail "Version must use x.y.z format (received '$Version')."

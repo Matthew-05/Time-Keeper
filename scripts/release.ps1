@@ -5,14 +5,18 @@
 
 .DESCRIPTION
     This script is intentionally strict. It only releases an unchanged main
-    commit that exactly matches origin/main and the tracked VERSION file.
+    commit that exactly matches origin/main. The latest published stable release
+    is read from GitHub, while the new version is entered by the user or supplied
+    explicitly; VERSION is never used as a default.
 
 .EXAMPLE
-    .\scripts\release.ps1 -Version 1.3.0 -GenerateNotes
-    .\scripts\release.ps1 -Version 1.3.0 -NotesFile .\release-notes.md -Draft
+    .\scripts\release.ps1 -GenerateNotes
+    .\scripts\release.ps1 -CurrentReleaseVersion 1.3.0 -GenerateNotes
+    .\scripts\release.ps1 -CurrentReleaseVersion 1.3.0 -NotesFile .\release-notes.md -Draft
 #>
 param(
-    [string]$Version = "",
+    [Alias("Version")]
+    [string]$CurrentReleaseVersion = "",
     [string]$PythonPath = "",
     [string]$IsccPath = "",
     [string]$Notes = "",
@@ -25,7 +29,6 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path $PSScriptRoot -Parent
-$VersionFile = Join-Path $RepoRoot "VERSION"
 $BuildScript = Join-Path $PSScriptRoot "build-installer.ps1"
 $ExpectedRepo = "Matthew-05/Time-Keeper"
 
@@ -57,6 +60,42 @@ function Assert-NoTag([string]$Tag) {
     if ($remoteTag) { Fail "Remote tag $Tag already exists on origin." }
 }
 
+function Get-LatestPublishedReleaseVersion {
+    # Avoid PowerShell 5.1 promoting native stderr to a terminating error. The
+    # exit code is still checked, so GitHub/network failures cannot be ignored.
+    $previousErrorActionPreference = $ErrorActionPreference
+    $releaseOutput = @()
+    $releaseExitCode = 1
+    try {
+        $ErrorActionPreference = "Continue"
+        $releaseOutput = @(& gh release list `
+            --repo $ExpectedRepo `
+            --exclude-drafts `
+            --exclude-pre-releases `
+            --limit 1 `
+            --json tagName 2>$null)
+        $releaseExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($releaseExitCode -ne 0) {
+        Fail "Could not retrieve the latest published release from GitHub."
+    }
+
+    $releaseJson = ($releaseOutput | Out-String).Trim()
+    if (-not $releaseJson -or $releaseJson -eq "[]") { return $null }
+    try {
+        $release = $releaseJson | ConvertFrom-Json
+        $tag = @($release)[0].tagName
+    } catch {
+        Fail "GitHub returned unreadable release metadata."
+    }
+    if ($tag -notmatch '^v?(\d+\.\d+\.\d+)$') {
+        Fail "Latest published release tag '$tag' does not use vX.Y.Z format."
+    }
+    return $Matches[1]
+}
+
 function Sync-OriginMain {
     & git fetch --prune origin "+refs/heads/main:refs/remotes/origin/main"
     if ($LASTEXITCODE -ne 0) { Fail "Could not fetch origin/main." }
@@ -68,17 +107,6 @@ function Sync-OriginMain {
     if ($head -ne $originMain) {
         Fail "Local main is not exactly synced with origin/main. Local: $head; origin/main: $originMain"
     }
-}
-
-if (-not (Test-Path -LiteralPath $VersionFile -PathType Leaf)) {
-    Fail "VERSION file not found at $VersionFile."
-}
-if (-not $Version) {
-    $Version = (Get-Content -Raw -LiteralPath $VersionFile).Trim()
-    Write-Host "Using the tracked VERSION value: $Version" -ForegroundColor DarkGray
-}
-if ($Version -notmatch '^\d+\.\d+\.\d+$') {
-    Fail "Version must use x.y.z format (received '$Version')."
 }
 
 $notesOptions = 0
@@ -100,9 +128,11 @@ if ($PSBoundParameters.ContainsKey("NotesFile")) {
     $resolvedNotesFile = (Resolve-Path -LiteralPath $NotesFile).Path
 }
 
-$Tag = "v$Version"
-$Artifact = Join-Path $RepoRoot "Build\installer\Time-Keeper-Setup-$Version.exe"
-$Checksum = "$Artifact.sha256"
+$LatestReleaseVersion = $null
+$LatestTag = $null
+$Tag = $null
+$Artifact = $null
+$Checksum = $null
 $tagCreated = $false
 $tagPushed = $false
 
@@ -131,23 +161,38 @@ try {
         Fail "origin points to '$originUrl', not the expected GitHub repository $ExpectedRepo."
     }
 
-    & git ls-files --error-unmatch -- VERSION 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { Fail "VERSION must be tracked by Git before releasing." }
-    $committedVersion = ((& git show "HEAD:VERSION") | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0) { Fail "Could not read VERSION from HEAD." }
-    $workingVersion = (Get-Content -Raw -LiteralPath $VersionFile).Trim()
-    if ($workingVersion -ne $Version -or $committedVersion -ne $Version) {
-        Fail "Release version $Version must exactly match both the working and committed VERSION values (working '$workingVersion', committed '$committedVersion')."
-    }
-
     Step "Fetching and verifying origin/main"
     Sync-OriginMain
+
+    $LatestReleaseVersion = Get-LatestPublishedReleaseVersion
+    if ($LatestReleaseVersion) {
+        $LatestTag = "v$LatestReleaseVersion"
+        Write-Host "  Latest published release: $LatestTag" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  Latest published release: none (first release)" -ForegroundColor DarkGray
+    }
+    if (-not $CurrentReleaseVersion) {
+        $CurrentReleaseVersion = (Read-Host "Current release version to publish (x.y.z)").Trim()
+    }
+    if ($CurrentReleaseVersion -notmatch '^\d+\.\d+\.\d+$') {
+        Fail "Current release version must use x.y.z format (received '$CurrentReleaseVersion')."
+    }
+    if (
+        $LatestReleaseVersion -and
+        [version]$CurrentReleaseVersion -le [version]$LatestReleaseVersion
+    ) {
+        Fail "Current release version $CurrentReleaseVersion must be newer than latest release version $LatestReleaseVersion."
+    }
+
+    $Tag = "v$CurrentReleaseVersion"
+    $Artifact = Join-Path $RepoRoot "Build\installer\Time-Keeper-Setup-$CurrentReleaseVersion.exe"
+    $Checksum = "$Artifact.sha256"
     Assert-NoTag $Tag
 
     Step "Building installer and checksum"
     $buildArguments = @(
         "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-        "-File", $BuildScript, "-Version", $Version
+        "-File", $BuildScript, "-Version", $CurrentReleaseVersion
     )
     if ($PythonPath) { $buildArguments += @("-PythonPath", $PythonPath) }
     if ($IsccPath) { $buildArguments += @("-IsccPath", $IsccPath) }
@@ -173,10 +218,14 @@ try {
     Assert-CleanWorktree
     Step "Rechecking remote state before publishing"
     Sync-OriginMain
+    $latestReleaseAtPublish = Get-LatestPublishedReleaseVersion
+    if ($latestReleaseAtPublish -ne $LatestReleaseVersion) {
+        Fail "The latest GitHub release changed during the build. Start the release again."
+    }
     Assert-NoTag $Tag
 
     Step "Creating annotated tag $Tag"
-    & git tag --annotate $Tag --message "Time Keeper $Version"
+    & git tag --annotate $Tag --message "Time Keeper $CurrentReleaseVersion"
     if ($LASTEXITCODE -ne 0) { Fail "Could not create annotated tag $Tag." }
     $tagCreated = $true
 
@@ -199,6 +248,9 @@ try {
         $releaseArguments += @("--notes-file", $resolvedNotesFile)
     } else {
         $releaseArguments += "--generate-notes"
+        if ($LatestTag) {
+            $releaseArguments += @("--notes-start-tag", $LatestTag)
+        }
     }
 
     $releaseUrl = & gh @releaseArguments
@@ -206,7 +258,7 @@ try {
 
     Write-Host ""
     Write-Host "Release published successfully." -ForegroundColor Green
-    Write-Host "  Version : $Version" -ForegroundColor Green
+    Write-Host "  Version : $CurrentReleaseVersion" -ForegroundColor Green
     Write-Host "  Tag     : $Tag" -ForegroundColor Green
     Write-Host "  Release : $releaseUrl" -ForegroundColor Green
 } catch {

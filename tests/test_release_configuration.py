@@ -48,6 +48,22 @@ class ReleaseGuardTests(unittest.TestCase):
     def test_release_script_does_not_request_elevation(self):
         self.assertNotRegex(self.script, re.compile(r"\bRunAs\b", re.IGNORECASE))
 
+    def test_release_fetches_latest_then_prompts_for_current_version(self):
+        latest_fetch = self.script.index(
+            "$LatestReleaseVersion = Get-LatestPublishedReleaseVersion"
+        )
+        current_prompt = self.script.index('Read-Host "Current release version to publish')
+        self.assertLess(latest_fetch, current_prompt)
+        self.assertIn("gh release list", self.script)
+        self.assertIn("--exclude-drafts", self.script)
+        self.assertIn("--exclude-pre-releases", self.script)
+        self.assertNotIn("Get-Content -Raw -LiteralPath $VersionFile", self.script)
+        self.assertNotIn('$VersionFile = Join-Path $RepoRoot "VERSION"', self.script)
+
+    def test_latest_version_anchors_generated_notes(self):
+        self.assertIn('$LatestTag = "v$LatestReleaseVersion"', self.script)
+        self.assertIn('@("--notes-start-tag", $LatestTag)', self.script)
+
     def test_release_gate_runs_complete_configured_suites(self):
         build_script = (ROOT / "scripts" / "build-installer.ps1").read_text(
             encoding="utf-8"
@@ -59,6 +75,14 @@ class ReleaseGuardTests(unittest.TestCase):
             self.assertIn(full_suite_command, build_script)
         self.assertNotIn("FullTests", build_script)
         self.assertNotIn("FullTests", self.script)
+
+    def test_current_release_version_flows_into_dist_build(self):
+        build_script = (ROOT / "scripts" / "build-installer.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"-Version", $CurrentReleaseVersion', self.script)
+        self.assertIn('@("build.py", "--version", $Version)', build_script)
+        self.assertNotIn("Get-Content -Raw -LiteralPath $VersionFile", build_script)
 
     def test_installer_build_prefers_the_locked_pipenv_interpreter(self):
         build_script = (ROOT / "scripts" / "build-installer.ps1").read_text(

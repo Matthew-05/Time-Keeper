@@ -11,7 +11,6 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parent
-DEFAULT_VERSION_FILE = REPO_ROOT / "VERSION"
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 REQUIRED_BUILD_IMPORTS = {
     "PyInstaller": "pyinstaller",
@@ -57,16 +56,18 @@ def assert_build_dependencies():
     )
 
 
-def read_version(version_override=None):
-    """Return the validated release version, optionally supplied by automation."""
-    version = (
-        version_override.strip()
-        if version_override is not None
-        else DEFAULT_VERSION_FILE.read_text(encoding="utf-8").strip()
-    )
+def read_version(version_override):
+    """Return the validated version explicitly supplied for a packaged build."""
+    version = version_override.strip() if version_override is not None else ""
     if not VERSION_PATTERN.fullmatch(version):
         raise SystemExit(f"Version must use x.y.z format (received {version!r}).")
     return version
+
+
+def write_bundled_version(path, version):
+    """Write the runtime VERSION resource injected into the frozen app."""
+    validated_version = read_version(version)
+    path.write_text(f"{validated_version}\n", encoding="utf-8")
 
 
 def write_version_info(path, version):
@@ -195,7 +196,7 @@ def run_pyinstaller(common_args, mode, dist_path, work_path, spec_path):
     subprocess.run(command, cwd=REPO_ROOT, check=True)
 
 
-def build_application(version_override=None):
+def build_application(version_override):
     if sys.version_info[:2] != (3, 12):
         raise SystemExit(
             "This build must run under Python 3.12 "
@@ -223,7 +224,7 @@ def build_application(version_override=None):
     spec_dir.mkdir(parents=True)
 
     bundled_version = staging_dir / "VERSION"
-    bundled_version.write_text(f"{version}\n", encoding="utf-8")
+    write_bundled_version(bundled_version, version)
     version_info = staging_dir / "version_info.txt"
     write_version_info(version_info, version)
 
@@ -263,7 +264,8 @@ def parse_args():
     parser.add_argument(
         "--version",
         dest="version_override",
-        help="release version to embed (x.y.z); defaults to the tracked VERSION file",
+        required=True,
+        help="release version to embed in the executable (x.y.z)",
     )
     return parser.parse_args()
 

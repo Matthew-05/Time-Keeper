@@ -19,10 +19,13 @@ scripts and may be governed by the tool vendor's installer.
   `-IsccPath` to the installer-build script).
 - For publishing: Git, GitHub CLI, and `gh auth login` completed.
 
-`VERSION` is the single tracked application version and must contain exactly
-`x.y.z`. The build script may receive `-Version`, but it does not rewrite source
-files. The release script requires its version to exactly match the committed
-`VERSION` value.
+`VERSION` is used by source/development runs only. Packaged builds never read it
+automatically. The release script retrieves the latest published stable release
+from GitHub, displays it, and then prompts for the current version being
+published. That entered version is injected into the executable's runtime
+`VERSION` resource, Windows file metadata, installer metadata, filename, tag,
+and GitHub release. If GitHub has no releases, it treats the run as the first
+release.
 
 If Python 3.12 is installed somewhere the script cannot auto-discover, pass its
 executable with `-PythonPath`. Both `-PythonPath` and `-IsccPath` are forwarded
@@ -88,7 +91,15 @@ product.
 Commit the version and all intended changes, then ensure `main` is clean. Run:
 
 ```powershell
-.\scripts\release.ps1 -Version 1.2.0 -GenerateNotes
+.\scripts\release.ps1 -GenerateNotes
+```
+
+For non-interactive use, supply the current version explicitly:
+
+```powershell
+.\scripts\release.ps1 `
+    -CurrentReleaseVersion 1.2.0 `
+    -GenerateNotes
 ```
 
 Use `-Notes "..."` or `-NotesFile .\notes.md` instead of `-GenerateNotes` for
@@ -96,11 +107,12 @@ curated notes. Add `-Draft` to create a draft release; drafts are not offered by
 the updater.
 
 The script verifies GitHub authentication, the expected origin repository, a
-clean `main`, exact synchronization with freshly fetched `origin/main`, version
-agreement, and absence of the tag locally and remotely. After a successful
-build it rechecks repository state, creates and pushes an annotated tag, then
-creates the GitHub release with both assets and `--verify-tag`. It never edits,
-commits, or pushes a branch.
+clean `main`, exact synchronization with freshly fetched `origin/main`, a
+current version newer than the retrieved latest release, and absence of the new
+tag locally and remotely. Generated notes start at the retrieved latest release
+tag. After a successful build it rechecks repository state, creates and pushes
+an annotated tag, then creates the GitHub release with both assets and
+`--verify-tag`. It never edits, commits, or pushes a branch.
 
 ## Code-signing caveat
 

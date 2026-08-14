@@ -30,7 +30,7 @@ PowerShell is the canonical Windows build and release interface:
 
 ```powershell
 .\scripts\build-installer.ps1
-.\scripts\release.ps1 -Version 1.2.0 -GenerateNotes
+.\scripts\release.ps1 -GenerateNotes
 ```
 
 These commands run the complete Python and JavaScript test suites, including
