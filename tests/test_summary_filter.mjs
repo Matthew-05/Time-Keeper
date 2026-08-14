@@ -95,4 +95,48 @@ dashboard.markActivePreset = () => {}
 dashboard.selectRange({ start: '2026-08-03', end: '2026-08-07', weekdays: null })
 assert.deepEqual(rangePicker.dateSets.at(-1), [['2026-08-03', '2026-08-07'], false])
 
+let sticky = false
+const stickyProperties = {}
+let resizeCallback = null
+let intersectionCallback = null
+const sentinel = {}
+const page = { style: { setProperty(name, value) { stickyProperties[name] = value } } }
+const scrollRoot = { getBoundingClientRect: () => ({ top: 88 }) }
+dashboard.viewBar = {
+    offsetHeight: 70,
+    closest: () => page,
+    classList: { toggle(_name, value) { sticky = value } },
+}
+dashboard.viewSentinel = sentinel
+document.querySelector = (selector) => selector === 'main' ? scrollRoot : null
+globalThis.ResizeObserver = window.ResizeObserver = class {
+    constructor(callback) { resizeCallback = callback }
+    observe(target) { assert.equal(target, dashboard.viewBar) }
+}
+globalThis.IntersectionObserver = window.IntersectionObserver = class {
+    constructor(callback) { intersectionCallback = callback }
+    observe(target) { assert.equal(target, sentinel) }
+}
+
+dashboard.initializeStickyView()
+assert.equal(stickyProperties['--summary-view-docked-height'], '70px')
+assert.equal(stickyProperties['--summary-view-sticky-offset'], 'calc(70px + 1rem)')
+dashboard.viewBar.offsetHeight = 82
+resizeCallback()
+assert.equal(stickyProperties['--summary-view-docked-height'], '82px')
+assert.equal(stickyProperties['--summary-view-sticky-offset'], 'calc(82px + 1rem)')
+
+intersectionCallback([{
+    isIntersecting: false,
+    boundingClientRect: { bottom: 87 },
+    rootBounds: { top: 88 },
+}])
+assert.equal(sticky, true)
+intersectionCallback([{
+    isIntersecting: true,
+    boundingClientRect: { bottom: 120 },
+    rootBounds: { top: 88 },
+}])
+assert.equal(sticky, false)
+
 console.log('summary view controls keep client and date filters in sync')

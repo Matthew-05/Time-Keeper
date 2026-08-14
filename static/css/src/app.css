@@ -3324,10 +3324,56 @@
   /* The controls that define the dashboard's current view live in one
      compact toolbar. `main` is the scrolling element, so this offset is from
      the top of the content viewport rather than the desktop chrome. */
+  .tk-summary-view-sentinel {
+    height: 1px;
+    margin-bottom: -1px;
+    pointer-events: none;
+  }
+
   .tk-summary-view {
+    isolation: isolate;
     margin-bottom: 1rem;
     position: sticky;
-    top: 0.75rem;
+    top: 0;
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease,
+      border-radius 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+
+  /* In normal flow this is a card. Once pinned it becomes part of the app
+     chrome: a full-width surface with a divider, not a rounded panel floating
+     over the content that scrolls beneath it. */
+  .tk-summary-view::before {
+    backdrop-filter: saturate(180%) blur(12px);
+    background-color: color-mix(in srgb, var(--surface) 94%, transparent);
+    border-bottom: 1px solid var(--border);
+    content: '';
+    height: var(--summary-view-docked-height, 4.375rem);
+    left: 0;
+    opacity: 0;
+    pointer-events: none;
+    position: fixed;
+    right: 0;
+    top: var(--chrome-h);
+    transition: opacity 0.15s ease;
+    z-index: -1;
+  }
+
+  .tk-summary-view.is-stuck {
+    background-color: transparent;
+    border-color: transparent;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .tk-summary-view.is-stuck::before {
+    opacity: 1;
+  }
+
+  .tk-summary-view.is-stuck .tk-summary-view-controls {
+    transform: translateY(-2px);
   }
 
   .tk-summary-view-controls {
@@ -3336,6 +3382,8 @@
     gap: 1rem 1.5rem;
     grid-template-columns: minmax(24rem, 1fr) minmax(13rem, 18rem) minmax(16rem, 24rem);
     padding: 0.75rem 1rem;
+    transform: translateY(0);
+    transition: transform 0.18s ease-out;
   }
 
   .tk-summary-client-filter {
@@ -3399,13 +3447,12 @@
     min-width: 0;
   }
 
-  /* At the desktop breakpoint where the range card becomes sticky, the View
-     bar is one 4.375rem row. Its 0.75rem top offset plus the normal 1rem card
-     gap puts the range card at 6.125rem, immediately below it. */
+  /* The controller measures the View bar and writes this offset onto the page.
+     The fallback is its ordinary single-row height plus the normal card gap. */
   @media (min-width: 80rem) {
     .tk-summary-selection {
       position: sticky;
-      top: 6.125rem;
+      top: var(--summary-view-sticky-offset, 5.375rem);
     }
   }
 
@@ -4342,5 +4389,11 @@ span.flatpickr-weekday {
   .tk-spinner,
   .tk-skeleton {
     animation: none;
+  }
+
+  .tk-summary-view,
+  .tk-summary-view::before,
+  .tk-summary-view-controls {
+    transition: none;
   }
 }

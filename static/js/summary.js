@@ -172,6 +172,10 @@ export class SummaryDashboard extends TimeKeeper {
         this.clientFilterValue = this.clientFilter.value
         this.rangeInput = document.getElementById('summary-date-range')
         this.rangePicker = null
+        this.viewBar = document.querySelector('.tk-summary-view')
+        this.viewSentinel = document.querySelector('.tk-summary-view-sentinel')
+        this.viewIntersectionObserver = null
+        this.viewResizeObserver = null
 
         this.calendar = new SummaryCalendar({
             fetchWindow: (start, end) => this.fetchFromAPI(
@@ -185,6 +189,7 @@ export class SummaryDashboard extends TimeKeeper {
     init() {
         this.initializeClientFilter()
         this.initializeDateRangePicker()
+        this.initializeStickyView()
         this.bindEvents()
         /* This week so far — Monday (or Sunday, if that's the preference) up to
            yesterday. On the first day of the week that range is empty, so the
@@ -232,6 +237,35 @@ export class SummaryDashboard extends TimeKeeper {
         document.addEventListener('themeChanged', () => {
             if (this.overview) this.renderCharts()
         })
+    }
+
+    initializeStickyView() {
+        if (!this.viewBar || !this.viewSentinel) return
+
+        const page = this.viewBar.closest('.tk-page')
+        const scrollRoot = document.querySelector('main')
+        const updateSelectionOffset = () => {
+            const height = this.viewBar.offsetHeight
+            page?.style.setProperty('--summary-view-docked-height', `${height}px`)
+            page?.style.setProperty(
+                '--summary-view-sticky-offset',
+                `calc(${height}px + 1rem)`,
+            )
+        }
+
+        updateSelectionOffset()
+        if ('ResizeObserver' in window) {
+            this.viewResizeObserver = new ResizeObserver(updateSelectionOffset)
+            this.viewResizeObserver.observe(this.viewBar)
+        }
+
+        if (!scrollRoot || !('IntersectionObserver' in window)) return
+        this.viewIntersectionObserver = new IntersectionObserver(([entry]) => {
+            const rootTop = entry.rootBounds?.top ?? scrollRoot.getBoundingClientRect().top
+            const stuck = !entry.isIntersecting && entry.boundingClientRect.bottom <= rootTop
+            this.viewBar.classList.toggle('is-stuck', stuck)
+        }, { root: scrollRoot, threshold: 0 })
+        this.viewIntersectionObserver.observe(this.viewSentinel)
     }
 
     /* ---- Ranges ---- */
