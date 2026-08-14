@@ -194,7 +194,7 @@ console.log('\nHistory date navigation stops at today');
     check(
         'picker starts today with a friendly display date',
         [pickerOptions.defaultDate, pickerOptions.dateFormat, pickerOptions.altInput, pickerOptions.altFormat, pickerOptions.locale.rangeSeparator],
-        ['2026-08-13', 'Y-m-d', true, 'M j, Y', ' – '],
+        ['2026-08-13', 'Y-m-d', true, 'l, M j, Y', ' – '],
     );
     history.updateDateNavigation();
     check('next is disabled on today', history.nextDayBtn.disabled, true);

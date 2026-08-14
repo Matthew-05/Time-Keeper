@@ -240,6 +240,7 @@ export class TaskBrowser extends TimeKeeper {
         return flatpickrCalendarOptions({
             defaultDate: this.getLocalDateString(),
             dateFormat: "Y-m-d",
+            altFormat: "l, M j, Y",
             maxDate: "today",
             onChange: () => {
                 this.updateDateNavigation();
