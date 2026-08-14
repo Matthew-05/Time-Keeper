@@ -36,7 +36,7 @@ import {
     setHtml,
     setText,
 } from './base.js'
-import { daysSinceWeekStart } from './week_start.js'
+import { daysSinceWeekStart, flatpickrCalendarOptions } from './week_start.js'
 import { addDays, endOfMonth, isoDate, startOfMonth } from './calendar_dates.js'
 import { SummaryCalendar } from './summary_calendar.js'
 import {
@@ -170,6 +170,8 @@ export class SummaryDashboard extends TimeKeeper {
         this.clientFilterClear = document.getElementById('summary-client-filter-clear')
         this.clientFilterPicker = null
         this.clientFilterValue = this.clientFilter.value
+        this.rangeInput = document.getElementById('summary-date-range')
+        this.rangePicker = null
 
         this.calendar = new SummaryCalendar({
             fetchWindow: (start, end) => this.fetchFromAPI(
@@ -182,6 +184,7 @@ export class SummaryDashboard extends TimeKeeper {
 
     init() {
         this.initializeClientFilter()
+        this.initializeDateRangePicker()
         this.bindEvents()
         /* This week so far — Monday (or Sunday, if that's the preference) up to
            yesterday. On the first day of the week that range is empty, so the
@@ -232,6 +235,30 @@ export class SummaryDashboard extends TimeKeeper {
     }
 
     /* ---- Ranges ---- */
+
+    initializeDateRangePicker() {
+        this.rangePicker = flatpickr(this.rangeInput, flatpickrCalendarOptions({
+            mode: 'range',
+            dateFormat: 'Y-m-d',
+            showMonths: 2,
+            maxDate: this.calendar.lastComplete,
+            onOpen: () => {
+                if (this.selection) this.rangePicker.jumpToDate(this.selection.start)
+            },
+            onChange: (selectedDates) => {
+                if (selectedDates.length !== 2) return
+                this.calendar.setRange(isoDate(selectedDates[0]), isoDate(selectedDates[1]))
+            },
+            // A single completed date is still a useful Summary selection.
+            // Budget creation extends it to month-end because budgets describe
+            // periods; this field describes exactly what the user picked.
+            onClose: (selectedDates) => {
+                if (selectedDates.length !== 1) return
+                const key = isoDate(selectedDates[0])
+                this.calendar.setRange(key, key)
+            },
+        }))
+    }
 
     initializeClientFilter() {
         this.clientFilterPicker = new Choices(this.clientFilter, {
@@ -346,6 +373,7 @@ export class SummaryDashboard extends TimeKeeper {
     /** Adopt a range and reload everything that depends on it. */
     selectRange(selection) {
         this.selection = selection
+        this.rangePicker?.setDate([selection.start, selection.end], false)
         // Painted from the selection alone, before any request goes out — the
         // panel should confirm the click immediately, not a round-trip later.
         this.renderSelectionHeader()

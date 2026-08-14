@@ -37,7 +37,12 @@ dashboard.clientFilterPicker = {
 
 let calendarLoads = 0
 let overviewLoads = 0
-dashboard.calendar = { load() { calendarLoads++ } }
+let selectedCalendarRange = null
+dashboard.calendar = {
+    lastComplete: '2026-08-13',
+    load() { calendarLoads++ },
+    setRange(start, end) { selectedCalendarRange = [start, end] },
+}
 dashboard.refresh = () => { overviewLoads++ }
 
 dashboard.selectClient(42)
@@ -61,4 +66,33 @@ assert.equal(
     'start=2026-08-01&end=2026-08-07',
 )
 
-console.log('summary client filter scopes both dashboard reads')
+let rangeOptions = null
+const rangePicker = {
+    dateSets: [],
+    setDate(value, trigger) { this.dateSets.push([value, trigger]) },
+    jumpToDate() {},
+}
+globalThis.flatpickr = (_input, options) => {
+    rangeOptions = options
+    return rangePicker
+}
+dashboard.rangeInput = stubElement()
+dashboard.initializeDateRangePicker()
+
+assert.equal(rangeOptions.mode, 'range')
+assert.equal(rangeOptions.dateFormat, 'Y-m-d')
+assert.equal(rangeOptions.showMonths, 2)
+assert.equal(rangeOptions.maxDate, '2026-08-13')
+
+rangeOptions.onChange([new Date(2026, 7, 4), new Date(2026, 7, 8)])
+assert.deepEqual(selectedCalendarRange, ['2026-08-04', '2026-08-08'])
+
+rangeOptions.onClose([new Date(2026, 7, 6)])
+assert.deepEqual(selectedCalendarRange, ['2026-08-06', '2026-08-06'])
+
+dashboard.renderSelectionHeader = () => {}
+dashboard.markActivePreset = () => {}
+dashboard.selectRange({ start: '2026-08-03', end: '2026-08-07', weekdays: null })
+assert.deepEqual(rangePicker.dateSets.at(-1), [['2026-08-03', '2026-08-07'], false])
+
+console.log('summary view controls keep client and date filters in sync')

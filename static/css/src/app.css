@@ -1373,6 +1373,7 @@
 
      The app's z-index scale, in one place so it can be reasoned about:
 
+       30  sticky page controls
        40  nav bar
        50  dropdowns (Choices)
        60  modal backdrops, tooltips
@@ -1385,6 +1386,10 @@
      modal or with a date picker open — exactly the layers that would otherwise
      cover the message. Nothing should be added above 80 without moving toasts
      with it. */
+
+  .tk-summary-view {
+    z-index: 30;
+  }
 
   .tk-save-changes {
     z-index: 70;
@@ -3316,14 +3321,144 @@
     @apply flex items-center gap-2;
   }
 
+  /* The controls that define the dashboard's current view live in one
+     compact toolbar. `main` is the scrolling element, so this offset is from
+     the top of the content viewport rather than the desktop chrome. */
+  .tk-summary-view {
+    margin-bottom: 1rem;
+    position: sticky;
+    top: 0.75rem;
+  }
+
+  .tk-summary-view-controls {
+    align-items: center;
+    display: grid;
+    gap: 1rem 1.5rem;
+    grid-template-columns: minmax(24rem, 1fr) minmax(13rem, 18rem) minmax(16rem, 24rem);
+    padding: 0.75rem 1rem;
+  }
+
   .tk-summary-client-filter {
+    justify-self: end;
     max-width: 100%;
+    min-width: 0;
     width: 24rem;
   }
 
-  .tk-summary-client-filter .choices {
+  .tk-summary-client-control {
+    align-items: center;
+    display: flex;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+
+  .tk-summary-client-control .choices {
     flex: 1 1 auto;
     min-width: 0;
+  }
+
+  /* The general calendar header is a three-column card header. In the sticky
+     toolbar it becomes a compact month value followed by its controls. */
+  .tk-summary-view-calendar {
+    align-items: center;
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-width: 0;
+  }
+
+  .tk-summary-view-period {
+    align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.125rem 0.625rem;
+    min-width: 0;
+  }
+
+  .tk-summary-view-calendar .tk-calendar-month {
+    font-size: 1rem;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .tk-summary-view-calendar .tk-calendar-month-capacity {
+    justify-self: auto;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .tk-summary-view-calendar .tk-calendar-nav {
+    justify-self: end;
+  }
+
+  .tk-summary-view-calendar .tk-calendar-nav button {
+    height: 2.625rem;
+  }
+
+  .tk-summary-date-range {
+    min-width: 0;
+  }
+
+  /* At the desktop breakpoint where the range card becomes sticky, the View
+     bar is one 4.375rem row. Its 0.75rem top offset plus the normal 1rem card
+     gap puts the range card at 6.125rem, immediately below it. */
+  @media (min-width: 80rem) {
+    .tk-summary-selection {
+      position: sticky;
+      top: 6.125rem;
+    }
+  }
+
+  @media (max-width: 1099px) {
+    .tk-summary-view-controls {
+      grid-template-columns: minmax(13rem, 1fr) minmax(16rem, 24rem);
+    }
+
+    .tk-summary-view-calendar {
+      grid-column: 1 / -1;
+    }
+
+    .tk-summary-client-filter {
+      width: 100%;
+    }
+  }
+
+  @media (max-width: 539px) {
+    .tk-summary-view-controls {
+      gap: 0.75rem;
+      grid-template-columns: minmax(0, 1fr);
+      padding: 0.75rem;
+    }
+
+    .tk-summary-view-calendar {
+      grid-column: auto;
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .tk-summary-view-calendar .tk-calendar-nav {
+      grid-column: auto;
+      justify-self: end;
+    }
+
+    .tk-summary-view-calendar .tk-calendar-month {
+      order: initial;
+    }
+
+    .tk-summary-view-calendar .tk-calendar-month-capacity {
+      justify-self: auto;
+      text-align: left;
+    }
+  }
+
+  @media (max-width: 359px) {
+    .tk-summary-view-calendar {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .tk-summary-view-calendar .tk-calendar-nav {
+      grid-column: auto;
+      justify-self: start;
+    }
   }
 
   .tk-summary-client-clear {

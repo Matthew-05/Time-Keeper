@@ -30,18 +30,49 @@
           {% endif %}
         </p>
       </div>
-
-      <div class="tk-summary-client-filter flex items-center gap-2">
-        <label for="summary-client-filter" class="tk-label mb-0">Client</label>
-        <select id="summary-client-filter" class="tk-select">
-          <option value="">All clients</option>
-          {% for client in clients %}
-            <option value="{{ client.id }}">{{ client.name }}</option>
-          {% endfor %}
-        </select>
-        <button id="summary-client-filter-clear" type="button" class="tk-summary-client-clear" hidden>Clear</button>
-      </div>
     </div>
+
+    {# The controls that change what the dashboard is showing stay available
+       while the results scroll beneath them. Keep their existing IDs: the
+       summary controller and calendar both own their behaviour. #}
+    <section class="tk-card tk-summary-view" aria-label="Summary view controls">
+      <div class="tk-summary-view-controls">
+        <div class="tk-calendar-header tk-summary-view-calendar">
+          <div class="tk-summary-view-period">
+            <h2 id="summary-calendar-month" class="tk-calendar-month" aria-live="polite"></h2>
+            <p id="summary-calendar-month-total" class="tk-calendar-month-capacity"></p>
+          </div>
+          <div class="tk-calendar-nav">
+            <button id="summary-calendar-previous" type="button" class="tk-calendar-nav-arrow" aria-label="Previous month">&larr;</button>
+            <button id="summary-calendar-today" type="button" class="tk-calendar-nav-today">Today</button>
+            <button id="summary-calendar-next" type="button" class="tk-calendar-nav-arrow" aria-label="Next month">&rarr;</button>
+          </div>
+        </div>
+
+        <input
+          type="text"
+          id="summary-date-range"
+          class="tk-input tk-summary-date-range tabular cursor-pointer"
+          aria-label="Selected date range"
+          placeholder="Select date range…"
+          autocomplete="off"
+          readonly
+        />
+
+        <div class="tk-summary-client-filter">
+          <label for="summary-client-filter" class="sr-only">Filter by client</label>
+          <div class="tk-summary-client-control">
+            <select id="summary-client-filter" class="tk-select">
+              <option value="">All clients</option>
+              {% for client in clients %}
+                <option value="{{ client.id }}">{{ client.name }}</option>
+              {% endfor %}
+            </select>
+            <button id="summary-client-filter-clear" type="button" class="tk-summary-client-clear" hidden>Clear</button>
+          </div>
+        </div>
+      </div>
+    </section>
 
     {# One grid, one gap. Two of these cards hide themselves when they have
        nothing to say, and a margin would leave its spacing behind. #}
@@ -95,16 +126,6 @@
 
       <div class="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_23rem]">
         <section class="tk-card overflow-hidden">
-          <div class="tk-card-header tk-calendar-header">
-            <div class="tk-calendar-nav">
-              <button id="summary-calendar-previous" type="button" class="tk-calendar-nav-arrow" aria-label="Previous month">&larr;</button>
-              <button id="summary-calendar-today" type="button" class="tk-calendar-nav-today">Today</button>
-              <button id="summary-calendar-next" type="button" class="tk-calendar-nav-arrow" aria-label="Next month">&rarr;</button>
-            </div>
-            <h2 id="summary-calendar-month" class="tk-calendar-month" aria-live="polite"></h2>
-            <p id="summary-calendar-month-total" class="tk-calendar-month-capacity"></p>
-          </div>
-
           <div class="p-3 sm:p-5">
             {#
               The chips set the calendar's selection rather than being a second
@@ -142,7 +163,7 @@
           </div>
         </section>
 
-        <aside class="tk-card xl:sticky xl:top-4">
+        <aside class="tk-card tk-summary-selection">
           <div class="tk-card-header">
             <h2 class="tk-card-title">Selected range</h2>
             <span id="summary-selection-count" class="tk-badge tk-badge-neutral"></span>
