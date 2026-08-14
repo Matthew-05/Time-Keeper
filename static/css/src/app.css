@@ -1892,9 +1892,8 @@
      only the empty state still needs trimming — `.tk-empty`'s full height is
      sized for a whole page, not for one card among five.
 
-     Scoped to `#works-list` (the Today card) rather than to a class: the same
-     renderer also fills `#works-modal-list` in the Task Browser, where the
-     modal body supplies its own padding. */
+     Scoped to the three containers that use the shared renderer: the Today
+     card, the Works modal, and the add-task modal on History. */
   #works-list .tk-empty {
     @apply px-3 py-6;
   }
@@ -1903,18 +1902,14 @@
     @apply flex items-center gap-2 rounded-lg border border-transparent px-2 py-1.5;
   }
 
-  .works-add-input,
-  .works-edit-input {
-    @apply min-h-20 resize-y;
-  }
-
   .tk-work-row-edit {
-    @apply items-end;
+    @apply items-center;
   }
 
   /* Both works views read like a short work log. */
   #works-list .tk-work-row::before,
-  #works-modal-list .tk-work-row::before {
+  #works-modal-list .tk-work-row::before,
+  #add-task-works-list .tk-work-row::before {
     content: "\2022";
     @apply flex-shrink-0 text-muted;
   }

@@ -158,13 +158,13 @@ export class WorksList {
         this.container.innerHTML = `
             <div class="works-rows space-y-0.5">${rows}</div>
             <form class="works-add mt-2 flex items-end gap-2">
-                <textarea
+                <input
+                    type="text"
                     class="works-add-input tk-input"
                     placeholder="Add a work…"
                     autocomplete="off"
-                    rows="3"
                     ${this.clientId == null ? 'disabled' : ''}
-                ></textarea>
+                />
                 <button type="submit" class="works-add-button tk-btn tk-btn-primary flex-shrink-0" disabled>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M12 5v14M5 12h14" />
@@ -178,7 +178,7 @@ export class WorksList {
         if (work.id === this.editingId) {
             return `
                 <div class="tk-work-row tk-work-row-edit" data-work-id="${work.id}">
-                    <textarea class="works-edit-input tk-input text-sm" autocomplete="off" rows="3">${esc(work.text)}</textarea>
+                    <input type="text" class="works-edit-input tk-input text-sm" autocomplete="off" value="${esc(work.text).replace(/"/g, '&quot;')}" />
                     <div class="flex flex-shrink-0 gap-1">
                         <button type="button" class="works-save tk-btn tk-btn-primary tk-btn-sm">Save</button>
                         <button type="button" class="works-cancel tk-btn tk-btn-secondary tk-btn-sm">Cancel</button>
@@ -262,8 +262,14 @@ export class WorksList {
     }
 
     handleKeydown(e) {
+        if (e.target.classList.contains('works-add-input') && e.key === 'Enter') {
+            e.preventDefault();
+            this.handleAdd();
+            return;
+        }
+
         if (e.target.classList.contains('works-edit-input')) {
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            if (e.key === 'Enter') {
                 e.preventDefault();
                 this.handleSave(Number(e.target.closest('[data-work-id]').dataset.workId));
             } else if (e.key === 'Escape') {
@@ -274,7 +280,7 @@ export class WorksList {
         }
     }
 
-    /** Enable Add only when the shared textarea contains meaningful text. */
+    /** Enable Add only when the shared input contains meaningful text. */
     updateAddButton() {
         const input = this.container.querySelector('.works-add-input');
         const button = this.container.querySelector('.works-add-button');
