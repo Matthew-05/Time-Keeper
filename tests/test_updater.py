@@ -290,7 +290,18 @@ class UpdaterTests(unittest.TestCase):
         self.assertIn("def start_startup_update_check():", main_source)
         self.assertIn("return _start_update_check(startup=True)", main_source)
         self.assertIn("\n    start_startup_update_check()\n", main_source)
+        self.assertIn("started = _start_update_check(startup=False)", main_source)
         self.assertNotIn("automatic_check_due", main_source)
+
+    def test_startup_update_prompt_is_loaded_globally(self):
+        base_template = (ROOT / "templates" / "base.html").read_text(encoding="utf-8")
+        prompt_source = (ROOT / "static" / "js" / "update_prompt.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("js/update_prompt.js", base_template)
+        self.assertIn("class StartupUpdatePrompt", prompt_source)
+        self.assertIn("state === 'available'", prompt_source)
+        self.assertIn("Install and restart", prompt_source)
 
 
 if __name__ == "__main__":

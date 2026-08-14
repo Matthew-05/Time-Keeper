@@ -44,8 +44,10 @@ The installer build automatically prefers the interpreter returned by
 `pipenv --py`, including when Pipenv stores it outside the repository. If a
 different interpreter is required, select it explicitly with `-PythonPath`.
 
-This runs the Python and JavaScript tests, builds frontend assets and the
-one-file executable, compiles the per-user Inno installer, and writes:
+This runs the Python and JavaScript tests, builds frontend assets and a standard
+PyInstaller one-directory application, then compiles that complete runtime into
+the per-user Inno installer. PyInstaller discovers and packages its own Python
+DLL; the build does not locate or inject one manually. It writes:
 
 ```text
 Build\installer\Time-Keeper-Setup-<version>.exe
@@ -74,8 +76,11 @@ Before the first public release, test in Windows Sandbox or a disposable VM:
 
 ## Update cycle
 
-The Settings page checks stable GitHub Releases. A usable release must have a
-`v<version>` tag and these exact assets:
+Every packaged-app launch checks stable GitHub Releases in the background. If a
+new release exists, a modal offers to download it, shows verification progress,
+and then offers to open the installer and restart. The same controls remain on
+the Settings page. A usable release must have a `v<version>` tag and these exact
+assets:
 
 - `Time-Keeper-Setup-<version>.exe`
 - `Time-Keeper-Setup-<version>.exe.sha256`

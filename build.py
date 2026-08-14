@@ -1,4 +1,4 @@
-"""Build Time Keeper's console and windowed PyInstaller executables."""
+"""Build Time Keeper's console and windowed PyInstaller application folders."""
 
 import argparse
 import importlib
@@ -123,11 +123,11 @@ def build_frontend():
     )
 
 
-def pyinstaller_arguments(python_dll, version_info, bundled_version):
+def pyinstaller_arguments(version_info, bundled_version):
     return [
         "--noconfirm",
         "--clean",
-        "--onefile",
+        "--onedir",
         "--name=Time-Keeper",
         f"--icon={REPO_ROOT / 'icon.ico'}",
         f"--version-file={version_info}",
@@ -136,7 +136,6 @@ def pyinstaller_arguments(python_dll, version_info, bundled_version):
         f"--add-data={REPO_ROOT / 'migrations'};migrations",
         f"--add-data={REPO_ROOT / 'toast-icon.png'};.",
         f"--add-data={bundled_version};.",
-        f"--add-binary={python_dll};.",
         "--hidden-import=flask_sqlalchemy",
         "--hidden-import=flask",
         "--hidden-import=webview",
@@ -204,12 +203,6 @@ def build_application(version_override):
         )
 
     version = read_version(version_override)
-    python_dll = Path(sys.base_prefix) / "python312.dll"
-    if not python_dll.is_file():
-        raise SystemExit(
-            f"Python DLL not found at {python_dll}; install a complete Python 3.12 runtime."
-        )
-
     assert_build_dependencies()
     print(f"Building Time Keeper {version}", flush=True)
     build_frontend()
@@ -228,7 +221,7 @@ def build_application(version_override):
     version_info = staging_dir / "version_info.txt"
     write_version_info(version_info, version)
 
-    common_args = pyinstaller_arguments(python_dll, version_info, bundled_version)
+    common_args = pyinstaller_arguments(version_info, bundled_version)
     console_dir = build_root / "Console"
     dist_dir = build_root / "dist"
     run_pyinstaller(
@@ -246,8 +239,8 @@ def build_application(version_override):
         spec_dir,
     )
 
-    console_exe = console_dir / "Time-Keeper.exe"
-    windowed_exe = dist_dir / "Time-Keeper.exe"
+    console_exe = console_dir / "Time-Keeper" / "Time-Keeper.exe"
+    windowed_exe = dist_dir / "Time-Keeper" / "Time-Keeper.exe"
     missing = [str(path) for path in (console_exe, windowed_exe) if not path.is_file()]
     if missing:
         raise SystemExit(f"Build completed without expected output(s): {', '.join(missing)}")

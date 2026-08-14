@@ -226,7 +226,7 @@ try {
     Step "Building Time Keeper $Version"
     Invoke-Python312 $Python @("build.py", "--version", $Version)
 
-    $Executable = Join-Path $RepoRoot "Build\dist\Time-Keeper.exe"
+    $Executable = Join-Path $RepoRoot "Build\dist\Time-Keeper\Time-Keeper.exe"
     if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
         Fail "Expected executable not found at $Executable."
     }

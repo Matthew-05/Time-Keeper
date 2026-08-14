@@ -1,6 +1,7 @@
 {
   "name": "time-keeper",
   "version": "1.0.0",
+  "type": "module",
   "private": true,
   "description": "Frontend asset pipeline for Time-Keeper. Builds the Tailwind stylesheet and vendors third-party assets so the packaged desktop app works offline.",
   "scripts": {
@@ -8,7 +9,7 @@
     "watch:css": "tailwindcss -i ./static/css/src/app.css -o ./static/css/app.css --watch",
     "vendor": "node scripts/vendor.mjs",
     "build": "npm run vendor && npm run build:css",
-    "test:js": "node tests/test_add_task_drag.mjs",
+    "test:js": "node tests/test_add_task_drag.mjs && node tests/test_update_prompt.mjs",
     "test": "npm run test:js"
   },
   "devDependencies": {

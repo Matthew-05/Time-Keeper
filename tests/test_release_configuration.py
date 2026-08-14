@@ -107,7 +107,6 @@ class PyInstallerConfigurationTests(unittest.TestCase):
 
     def test_repository_assets_are_absolute_when_spec_lives_under_build(self):
         arguments = build.pyinstaller_arguments(
-            Path("C:/Python312/python312.dll"),
             Path("C:/staging/version_info.txt"),
             Path("C:/staging/VERSION"),
         )
@@ -118,6 +117,25 @@ class PyInstallerConfigurationTests(unittest.TestCase):
                     for argument in arguments),
                 f"PyInstaller source path must be absolute: {source}",
             )
+
+    def test_pyinstaller_uses_standard_onedir_runtime_layout(self):
+        arguments = build.pyinstaller_arguments(
+            Path("C:/staging/version_info.txt"),
+            Path("C:/staging/VERSION"),
+        )
+        self.assertIn("--onedir", arguments)
+        self.assertNotIn("--onefile", arguments)
+        self.assertFalse(any(argument.startswith("--add-binary=") for argument in arguments))
+        self.assertNotIn("python312.dll", (ROOT / "build.py").read_text(encoding="utf-8"))
+
+    def test_installer_packages_the_complete_onedir_application(self):
+        installer = (ROOT / "installer.iss").read_text(encoding="utf-8")
+        build_script = (ROOT / "scripts" / "build-installer.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('Source: "Build\\dist\\Time-Keeper\\*"', installer)
+        self.assertIn("recursesubdirs createallsubdirs", installer)
+        self.assertIn("Build\\dist\\Time-Keeper\\Time-Keeper.exe", build_script)
 
 
 if __name__ == "__main__":

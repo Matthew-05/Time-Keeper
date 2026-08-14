@@ -244,7 +244,10 @@ def _start_update_check(startup=False):
                 f"current state is {_update_status['state']}."
             )
             return False
-        _update_status.update(state='checking', progress=None, error=None)
+        _update_status.update(
+            state='checking', latest_version=None, release_url=None,
+            progress=None, error=None,
+        )
     print(f'[updater] Queued {"startup" if startup else "manual"} update check.')
     threading.Thread(
         target=_check_for_update_worker,
@@ -421,7 +424,7 @@ def api_update_status():
 
 @app.route('/api/update/check', methods=['POST'])
 def api_update_check():
-    started = _start_update_check(automatic=False)
+    started = _start_update_check(startup=False)
     return jsonify({**_get_update_status(), 'started': started}), (202 if started else 200)
 
 

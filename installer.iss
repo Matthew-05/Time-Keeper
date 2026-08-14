@@ -36,7 +36,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "startupicon"; Description: "Start at system startup"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-Source: "Build\dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Build\dist\Time-Keeper\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{userprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
