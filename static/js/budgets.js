@@ -128,6 +128,7 @@ class Budgets extends TimeKeeper {
     }
 
     async init() {
+        this.initializeClientPickers()
         this.bindFilters()
         this.bindForm()
         this.bindModals()
@@ -137,6 +138,31 @@ class Budgets extends TimeKeeper {
         })
         await this.load()
         await this.openLinkedBudget()
+    }
+
+    /**
+     * Keep both client controls consistent with the searchable picker on
+     * Today.  The native selects remain the source of truth, so filtering,
+     * validation, and form submission continue to use their normal values.
+     */
+    initializeClientPickers() {
+        const pickerOptions = {
+            searchPlaceholderValue: 'Start typing client name...',
+            searchResultLimit: 10,
+            shouldSort: false,
+            itemSelectText: '',
+        }
+
+        this.clientFilterPicker = new Choices(this.clientFilter, {
+            ...pickerOptions,
+            placeholder: true,
+            placeholderValue: 'All clients',
+        })
+        this.budgetClientPicker = new Choices(this.fields.client, {
+            ...pickerOptions,
+            placeholder: true,
+            placeholderValue: 'Choose a client…',
+        })
     }
 
     /** Open a budget linked from another page once the budget list is ready. */
@@ -457,7 +483,11 @@ class Budgets extends TimeKeeper {
         this.deleteButton.classList.toggle('hidden', !budget)
 
         this.fields.name.value = budget?.name ?? ''
-        this.fields.client.value = budget ? String(budget.client_id) : ''
+        if (budget) {
+            this.budgetClientPicker.setChoiceByValue(String(budget.client_id))
+        } else {
+            this.budgetClientPicker.removeActiveItems()
+        }
         this.fields.hours.value = budget?.budgeted_hours ?? ''
         this.fields.riskThreshold.value = budget?.risk_threshold_percent ?? 10
         this.fields.notes.value = budget?.notes ?? ''

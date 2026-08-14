@@ -216,9 +216,9 @@ Budgets already over are counted separately, under Over budget."
       </button>
     </div>
 
-    <label class="flex items-center gap-2">
+    <label class="tk-budget-client-filter flex items-center gap-2">
       <span class="tk-label mb-0">Client</span>
-      <select id="client-filter" class="tk-select w-56">
+      <select id="client-filter" class="tk-select">
         <option value="">All clients</option>
         {% for client in clients %}
         <option value="{{ client.id }}">{{ client.name }}</option>
@@ -247,7 +247,7 @@ Budgets already over are counted separately, under Over budget."
   aria-modal="true"
   aria-labelledby="budget-form-title"
 >
-  <div class="tk-modal">
+  <div class="tk-modal tk-budget-form-modal">
     <div class="tk-modal-header">
       <h2 class="tk-card-title" id="budget-form-title">New budget</h2>
       <button
@@ -285,7 +285,7 @@ Budgets already over are counted separately, under Over budget."
           />
         </div>
 
-        <div>
+        <div class="tk-budget-client-field">
           <label class="tk-label" for="budget-client">Client</label>
           <select id="budget-client" class="tk-select" required>
             <option value="">Choose a client…</option>
@@ -359,7 +359,7 @@ Budgets already over are counted separately, under Over budget."
           >
           <textarea
             id="budget-notes"
-            class="tk-input"
+            class="tk-input tk-budget-notes"
             rows="2"
             maxlength="2000"
           ></textarea>

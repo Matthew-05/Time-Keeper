@@ -1491,6 +1491,54 @@
     max-width: 52rem;
   }
 
+  /* A budget has several full-width controls; a little extra room prevents
+     long client and project names from being needlessly truncated. */
+  .tk-budget-form-modal {
+    max-width: 34rem;
+  }
+
+  /* Choices wraps the original select, so sizing the select itself no longer
+     controls the visible filter once the picker is initialized. */
+  .tk-budget-client-filter {
+    max-width: 100%;
+    width: 30rem;
+  }
+
+  .tk-budget-client-filter .choices {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  /* Let the client menu escape the form's scroll container while it is open.
+     The field is raised as well so later inputs cannot paint over the menu. */
+  #budget-form-modal .choices {
+    --choices-z-index: 80;
+  }
+
+  .tk-budget-client-field {
+    position: relative;
+  }
+
+  .tk-budget-client-field:has(.choices.is-open) {
+    z-index: 80;
+  }
+
+  .tk-budget-form-modal:has(.choices.is-open),
+  .tk-budget-form-modal:has(.choices.is-open) .tk-modal-body {
+    overflow: visible;
+  }
+
+  #budget-form-modal .choices__list--dropdown .choices__list {
+    max-height: 18rem;
+  }
+
+  /* Releasing the modal overflow for the client menu must not let the flex
+     layout reinterpret the textarea's row-based intrinsic height. Users can
+     still resize it manually because the global vertical resize remains. */
+  .tk-budget-notes {
+    height: 4rem;
+  }
+
   .tk-update-modal {
     max-width: 31rem;
   }
