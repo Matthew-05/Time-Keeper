@@ -30,6 +30,17 @@
           {% endif %}
         </p>
       </div>
+
+      <div class="tk-summary-client-filter flex items-center gap-2">
+        <label for="summary-client-filter" class="tk-label mb-0">Client</label>
+        <select id="summary-client-filter" class="tk-select">
+          <option value="">All clients</option>
+          {% for client in clients %}
+            <option value="{{ client.id }}">{{ client.name }}</option>
+          {% endfor %}
+        </select>
+        <button id="summary-client-filter-clear" type="button" class="tk-summary-client-clear" hidden>Clear</button>
+      </div>
     </div>
 
     {# One grid, one gap. Two of these cards hide themselves when they have

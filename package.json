@@ -9,7 +9,7 @@
     "watch:css": "tailwindcss -i ./static/css/src/app.css -o ./static/css/app.css --watch",
     "vendor": "node scripts/vendor.mjs",
     "build": "npm run vendor && npm run build:css",
-    "test:js": "node tests/test_add_task_drag.mjs && node tests/test_update_prompt.mjs",
+    "test:js": "node tests/test_add_task_drag.mjs && node tests/test_summary_filter.mjs && node tests/test_update_prompt.mjs",
     "test": "npm run test:js"
   },
   "devDependencies": {

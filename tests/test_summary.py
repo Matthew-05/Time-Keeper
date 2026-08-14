@@ -176,6 +176,14 @@ class ClientRollupTests(unittest.TestCase):
         clients = summary.client_rollup(self.rows)
         self.assertEqual(clients[0]['client_color'], '#123456')
 
+    def test_client_id_is_preserved_in_the_rollup(self):
+        for row in self.rows:
+            for client in row['clients']:
+                if client['client_name'] == 'Acme':
+                    client['client_id'] = 42
+        clients = summary.client_rollup(self.rows)
+        self.assertEqual(clients[0]['client_id'], 42)
+
     def test_average_is_per_day_the_client_was_worked(self):
         self.assertEqual(self.clients[0]['avg_billable_per_day'], 2.0)
 

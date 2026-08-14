@@ -124,6 +124,7 @@ def client_rollup(rows):
         for entry in row['clients']:
             client = totals_by_client.setdefault(entry['client_name'], {
                 'client_name': entry['client_name'],
+                'client_id': entry.get('client_id'),
                 'client_color': entry.get('client_color'),
                 'billable_seconds': 0,
                 'tracked_seconds': 0,

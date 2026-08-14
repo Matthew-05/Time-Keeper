@@ -2011,7 +2011,11 @@ def get_min_time():
 
 @app.route('/summary')
 def summary_page():
-    return render_template('time_summary.html', version=APP_VERSION)
+    return render_template(
+        'time_summary.html',
+        clients=Client.query.order_by(Client.name).all(),
+        version=APP_VERSION,
+    )
 
 
 def task_duration_seconds(task, now=None):
@@ -2047,11 +2051,14 @@ def task_duration_seconds(task, now=None):
     return max(0, int(delta))
 
 
-def tasks_between(start, end):
-    return Task_Item.query.filter(
+def tasks_between(start, end, client_id=None):
+    query = Task_Item.query.filter(
         Task_Item.date >= start,
         Task_Item.date <= end,
-    ).all()
+    )
+    if client_id is not None:
+        query = query.filter(Task_Item.client_id == client_id)
+    return query.all()
 
 
 def _rounding_policy():
@@ -2064,7 +2071,7 @@ def _rounding_policy():
     }
 
 
-def bucket_by_client_and_day(start, end, now=None):
+def bucket_by_client_and_day(start, end, now=None, client_id=None):
     """Tracked seconds keyed by (client name, date).
 
     Rounding has to happen at this granularity — one client, one day — because
@@ -2076,17 +2083,22 @@ def bucket_by_client_and_day(start, end, now=None):
 
     buckets = {}
     running = set()
-    for task in tasks_between(start, end):
+    for task in tasks_between(start, end, client_id):
         key = (task_client_display_name(task), task.date)
         buckets[key] = buckets.get(key, 0) + task_duration_seconds(task, now)
         if task.end_time is None:
             running.add(key)
 
     policy = _rounding_policy()
-    adjustments = ManualAdjustment.query.filter(
+    adjustments_query = ManualAdjustment.query.filter(
         ManualAdjustment.date >= start,
         ManualAdjustment.date <= end,
-    ).all()
+    )
+    if client_id is not None:
+        adjustments_query = adjustments_query.filter(
+            ManualAdjustment.client_id == client_id
+        )
+    adjustments = adjustments_query.all()
     for adjustment in adjustments:
         if adjustment.client is None:
             continue
@@ -2137,7 +2149,7 @@ def _summary_window():
     )
 
 
-def _summary_day_rows(start, end, weekdays=None, now=None):
+def _summary_day_rows(start, end, weekdays=None, now=None, client_id=None):
     """Per-day billable figures for a window, capacity resolved alongside."""
     hours_per_day, work_days, overrides, schedule_history = _work_calendar_settings()
 
@@ -2150,15 +2162,20 @@ def _summary_day_rows(start, end, weekdays=None, now=None):
     rows = summary_report.day_rows(
         start,
         end,
-        bucket_by_client_and_day(start, end, now),
+        bucket_by_client_and_day(start, end, now, client_id),
         capacity_for,
         policy=_rounding_policy(),
         weekdays=weekdays,
     )
-    colors = dict(db.session.query(Client.name, Client.color).all())
+    client_details = {
+        client.name: client
+        for client in Client.query.with_entities(Client.id, Client.name, Client.color).all()
+    }
     for row in rows:
         for client in row['clients']:
-            client['client_color'] = colors.get(client['client_name'])
+            details = client_details.get(client['client_name'])
+            client['client_id'] = details.id if details else None
+            client['client_color'] = details.color if details else None
     return rows
 
 
@@ -2174,7 +2191,11 @@ def api_summary_calendar():
         'rounding': _rounding_policy(),
         'start_date': start.isoformat(),
         'end_date': end.isoformat(),
-        'days': _summary_day_rows(start, end),
+        'days': _summary_day_rows(
+            start,
+            end,
+            client_id=request.args.get('client_id', type=int),
+        ),
     })
 
 
@@ -2189,7 +2210,12 @@ def api_summary_overview():
     if error:
         return jsonify({'error': error}), 400
 
-    selected = _summary_day_rows(start, end, weekdays)
+    selected = _summary_day_rows(
+        start,
+        end,
+        weekdays,
+        client_id=request.args.get('client_id', type=int),
+    )
     # Cut to the elapsed part once, here, and hand the same list to all three.
     # Days that haven't happened have no time on them but plenty of capacity,
     # and counting that capacity makes every mid-week reading look like a

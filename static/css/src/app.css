@@ -3321,6 +3321,42 @@
     @apply flex items-center gap-2;
   }
 
+  .tk-summary-client-filter {
+    max-width: 100%;
+    width: 24rem;
+  }
+
+  .tk-summary-client-filter .choices {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .tk-summary-client-clear {
+    color: var(--accent);
+    cursor: pointer;
+    flex-shrink: 0;
+    font-size: 0.8125rem;
+  }
+
+  .tk-summary-client-clear:hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .tk-summary-client-link {
+    border-radius: 3px;
+    color: inherit;
+    cursor: pointer;
+    min-width: 0;
+    text-align: left;
+  }
+
+  .tk-summary-client-link:hover {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
   .tk-mix-swatch {
     border-radius: 3px;
     display: inline-block;

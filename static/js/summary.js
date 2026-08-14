@@ -147,7 +147,7 @@ const referenceLabelPlugin = {
     },
 }
 
-class SummaryDashboard extends TimeKeeper {
+export class SummaryDashboard extends TimeKeeper {
     constructor() {
         super()
 
@@ -166,10 +166,14 @@ class SummaryDashboard extends TimeKeeper {
         this.showNonWorkingDays = false
         this.refreshToken = 0
         this.retryTimer = null
+        this.clientFilter = document.getElementById('summary-client-filter')
+        this.clientFilterClear = document.getElementById('summary-client-filter-clear')
+        this.clientFilterPicker = null
+        this.clientFilterValue = this.clientFilter.value
 
         this.calendar = new SummaryCalendar({
             fetchWindow: (start, end) => this.fetchFromAPI(
-                `/api/summary/calendar?start=${start}&end=${end}`,
+                `/api/summary/calendar?${this.summaryParams(start, end)}`,
             ),
             onChange: (selection) => this.selectRange(selection),
             formatAmount: (row) => this.amount(row, { compact: true }),
@@ -177,6 +181,7 @@ class SummaryDashboard extends TimeKeeper {
     }
 
     init() {
+        this.initializeClientFilter()
         this.bindEvents()
         /* This week so far — Monday (or Sunday, if that's the preference) up to
            yesterday. On the first day of the week that range is empty, so the
@@ -202,6 +207,14 @@ class SummaryDashboard extends TimeKeeper {
             if (header) this.sortBy(header.dataset.sort)
         })
 
+        document.addEventListener('click', (event) => {
+            const client = event.target.closest('[data-summary-client-id]')
+            if (client) this.selectClient(client.dataset.summaryClientId)
+        })
+
+        this.clientFilter.addEventListener('change', () => this.applyClientFilter())
+        this.clientFilterClear.addEventListener('click', () => this.clearClientFilter())
+
         // aria-checked is the only source of truth for the switch, matching
         // the settings page — there's no hidden input to keep in step with.
         const nonWorking = document.getElementById('summary-show-non-working')
@@ -219,6 +232,50 @@ class SummaryDashboard extends TimeKeeper {
     }
 
     /* ---- Ranges ---- */
+
+    initializeClientFilter() {
+        this.clientFilterPicker = new Choices(this.clientFilter, {
+            searchPlaceholderValue: 'Start typing client name...',
+            searchResultLimit: 10,
+            shouldSort: false,
+            itemSelectText: '',
+            placeholder: true,
+            placeholderValue: 'All clients',
+        })
+    }
+
+    /** Query parameters shared by the range and calendar summary reads. */
+    summaryParams(start, end, weekdays = null) {
+        const params = new URLSearchParams({ start, end })
+        if (weekdays) params.set('weekdays', weekdays.join(','))
+        if (this.clientFilter.value) params.set('client_id', this.clientFilter.value)
+        return params
+    }
+
+    /** Set the picker from a client named elsewhere on the page. */
+    selectClient(clientId) {
+        const value = String(clientId)
+        if (!value || value === this.clientFilter.value) return
+        this.clientFilterPicker.setChoiceByValue(value)
+        this.applyClientFilter()
+    }
+
+    clearClientFilter() {
+        if (!this.clientFilter.value) return
+        this.clientFilterPicker.removeActiveItems()
+        this.clientFilter.value = ''
+        this.applyClientFilter()
+    }
+
+    /** Reload both views which are scoped by the selected client. */
+    applyClientFilter() {
+        const value = this.clientFilter.value
+        this.clientFilterClear.hidden = !value
+        if (value === this.clientFilterValue) return
+        this.clientFilterValue = value
+        this.calendar.load()
+        this.refresh()
+    }
 
     /** `[start, end]` as dates for a preset chip. */
     presetRange(name) {
@@ -332,13 +389,11 @@ class SummaryDashboard extends TimeKeeper {
         const token = ++this.refreshToken
         clearTimeout(this.retryTimer)
 
-        const params = new URLSearchParams({
-            start: this.selection.start,
-            end: this.selection.end,
-        })
-        if (this.selection.weekdays) {
-            params.set('weekdays', this.selection.weekdays.join(','))
-        }
+        const params = this.summaryParams(
+            this.selection.start,
+            this.selection.end,
+            this.selection.weekdays,
+        )
 
         try {
             const [overview, budgets] = await Promise.all([
@@ -417,6 +472,14 @@ class SummaryDashboard extends TimeKeeper {
         const holder = document.createElement('div')
         holder.textContent = value == null ? '' : String(value)
         return holder.innerHTML
+    }
+
+    clientName(client, className = '') {
+        const name = this.escape(client.client_name)
+        if (client.client_id == null) return `<span class="${className}">${name}</span>`
+        return `<button type="button" class="tk-summary-client-link ${className}"`
+            + ` data-summary-client-id="${client.client_id}"`
+            + ` title="Filter by ${escapeAttribute(client.client_name)}">${name}</button>`
     }
 
     /* ---- Rendering ---- */
@@ -565,7 +628,7 @@ class SummaryDashboard extends TimeKeeper {
         setHtml(container, clients.map((client) => `
             <div class="tk-mix-row">
               <span class="tk-mix-swatch" style="background-color: ${clientColor(client.client_name, client.client_color)}"></span>
-              <span class="min-w-0 flex-1 truncate text-xs text-text">${this.escape(client.client_name)}</span>
+              ${this.clientName(client, 'min-w-0 flex-1 truncate text-xs text-text')}
               <span class="tabular flex-shrink-0 text-xs font-semibold text-text">${this.amount(client, { compact: true })}</span>
               <span class="tabular w-9 flex-shrink-0 text-right text-xs text-faint">${percent(client.share_percent)}</span>
             </div>
@@ -615,6 +678,7 @@ class SummaryDashboard extends TimeKeeper {
         const clients = this.overview.clients.filter((client) => client.billable_seconds > 0)
         const groups = clients.slice(0, MIX_SLICES).map((client) => ({
             label: client.client_name,
+            clientId: client.client_id,
             colour: clientColor(client.client_name, client.client_color),
             names: new Set([client.client_name]),
             billable_hours: client.billable_hours,
@@ -710,6 +774,7 @@ class SummaryDashboard extends TimeKeeper {
             // the two reference lines below each need a key of their own.
             stack: 'clients',
             backgroundColor: group.colour,
+            clientId: group.clientId,
             borderWidth: 0,
             borderRadius: 2,
             borderSkipped: false,
@@ -786,6 +851,16 @@ class SummaryDashboard extends TimeKeeper {
                 responsive: true,
                 maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
+                onClick: (event, _elements, chart) => {
+                    const [hit] = chart.getElementsAtEventForMode(
+                        event,
+                        'nearest',
+                        { intersect: true },
+                        true,
+                    )
+                    const clientId = chart.data.datasets[hit?.datasetIndex]?.clientId
+                    if (clientId != null) this.selectClient(clientId)
+                },
                 layout: { padding: { right: gutter } },
                 plugins: {
                     // Off: a chip per client was a wall of them, and the
@@ -1051,6 +1126,10 @@ class SummaryDashboard extends TimeKeeper {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                onClick: (_event, elements, chart) => {
+                    const clientId = groups[elements[0]?.index]?.clientId
+                    if (clientId != null) this.selectClient(clientId)
+                },
                 // The list in the sidebar and the table below are both already
                 // legends for this; a third would crowd out the donut itself.
                 cutout: '62%',
@@ -1141,7 +1220,7 @@ class SummaryDashboard extends TimeKeeper {
               <td>
                 <span class="flex min-w-0 items-center gap-2">
                   <span class="tk-mix-swatch" style="background-color: ${clientColor(client.client_name, client.client_color)}"></span>
-                  <span class="truncate">${this.escape(client.client_name)}</span>
+                  ${this.clientName(client, 'truncate')}
                 </span>
               </td>
               <td class="tk-num text-right font-semibold">${this.amount(client, { compact: true })}</td>
@@ -1166,7 +1245,10 @@ class SummaryDashboard extends TimeKeeper {
         // defined. Order is whatever /api/budgets gave: live by end date, then
         // closed — already the order you'd want to read them in.
         const touching = (this.budgets || []).filter(
-            (budget) => budget.start_date <= end && budget.end_date >= start,
+            (budget) => budget.start_date <= end
+                && budget.end_date >= start
+                && (!this.clientFilter.value
+                    || String(budget.client_id) === this.clientFilter.value),
         )
 
         section.hidden = !touching.length
