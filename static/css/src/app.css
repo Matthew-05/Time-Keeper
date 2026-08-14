@@ -1876,16 +1876,25 @@
     text-align: center;
   }
 
-  /* The dropdown stays exactly where Choices puts it — absolutely positioned
-     inside `.choices`, flipped by the library when it needs to be. The clipping
-     that made this look broken is solved in the markup instead: the client
-     field is the first thing in the modal body, so its list opens downward into
-     the timeline rather than into the panel edge.
+  /* Choices renders its dropdown inside the field. While it is open, let that
+     field escape the modal's scrolling clips and paint above the footer. */
+  #add-task-modal .choices {
+    --choices-z-index: 80;
+  }
 
-     All that's left is a height it can't outgrow. The library caps its inner
-     list at 300px, which plus the search field is taller than the room below
-     the field here; 13rem keeps the whole list inside the dialog and lets it
-     scroll itself. */
+  .tk-add-task-client-field {
+    position: relative;
+  }
+
+  .tk-add-task-client-field:has(.choices.is-open) {
+    z-index: 80;
+  }
+
+  #add-task-panel:has(.choices.is-open),
+  #add-task-panel:has(.choices.is-open) .tk-modal-body {
+    overflow: visible;
+  }
+
   #add-task-modal .choices__list--dropdown .choices__list {
     max-height: 13rem;
   }

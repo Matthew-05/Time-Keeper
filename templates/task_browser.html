@@ -358,13 +358,11 @@
           lights up that client's existing blocks on the timeline below, so the
           question "have I already logged time against them today?" is answered
           before you go looking for a gap. And it is the only control with a
-          popup: at the top of the body its dropdown opens downward into three
-          hundred pixels of timeline, all inside the scroll container, so
-          Choices' own absolute positioning works exactly as the library
-          intends. Sitting last, it opened into the panel edge and was clipped
-          to about two rows.
+          popup: putting it at the top maximizes the room below. The field's
+          scoped styles release the modal's clipping boundary while Choices is
+          open so the menu can also paint cleanly over the footer.
         #}
-        <div>
+        <div class="tk-add-task-client-field">
           <label class="mb-1 block text-xs font-medium text-muted" for="add-task-client">Client</label>
           <select id="add-task-client"></select>
         </div>
