@@ -197,7 +197,6 @@ _update_status = {
     'frozen': not DEV_MODE,
 }
 _update_dir = os.path.join(user_data_dir, 'updates')
-_update_state_path = os.path.join(user_data_dir, 'update-state.json')
 
 
 def _set_update_status(**changes):
@@ -210,9 +209,9 @@ def _get_update_status():
         return dict(_update_status)
 
 
-def _check_for_update_worker(automatic=False):
+def _check_for_update_worker(startup=False):
     global _update_info, _verified_installer
-    print(f'[updater] Starting {"automatic" if automatic else "manual"} update check.')
+    print(f'[updater] Starting {"startup" if startup else "manual"} update check.')
     try:
         result = app_updater.check_for_update(APP_VERSION)
         with _update_lock:
@@ -237,29 +236,19 @@ def _check_for_update_worker(automatic=False):
         print(f'[updater] Unexpected update check failure: {exc}')
         logger.exception('Unexpected update check failure')
         _set_update_status(state='error', progress=None, error='Could not check for updates.')
-    finally:
-        if automatic:
-            try:
-                app_updater.record_automatic_check(_update_state_path)
-                print('[updater] Recorded automatic update-check timestamp.')
-            except OSError as exc:
-                print(f'[updater] Could not record automatic update-check timestamp: {exc}')
-                logger.warning(f'Could not persist update check throttle: {exc}')
-
-
-def _start_update_check(automatic=False):
+def _start_update_check(startup=False):
     with _update_lock:
         if _update_status['state'] in {'checking', 'downloading', 'installing'}:
             print(
-                f"[updater] Ignored {'automatic' if automatic else 'manual'} update check; "
+                f"[updater] Ignored {'startup' if startup else 'manual'} update check; "
                 f"current state is {_update_status['state']}."
             )
             return False
         _update_status.update(state='checking', progress=None, error=None)
-    print(f'[updater] Queued {"automatic" if automatic else "manual"} update check.')
+    print(f'[updater] Queued {"startup" if startup else "manual"} update check.')
     threading.Thread(
         target=_check_for_update_worker,
-        kwargs={'automatic': automatic},
+        kwargs={'startup': startup},
         name='timekeeper-update-check',
         daemon=True,
     ).start()
@@ -287,16 +276,13 @@ def _download_update_worker():
         _set_update_status(state='error', progress=None, error='Could not download the update.')
 
 
-def start_automatic_update_check():
-    """Start at most one daily check, and only from an installed/frozen build."""
+def start_startup_update_check():
+    """Check for updates in the background on every packaged-app launch."""
     if DEV_MODE:
-        print('[updater] Skipped automatic update check in development mode.')
+        print('[updater] Skipped startup update check in development mode.')
         return False
-    if not app_updater.automatic_check_due(_update_state_path):
-        print('[updater] Skipped automatic update check; the daily check is not due yet.')
-        return False
-    print('[updater] Automatic update check is due.')
-    return _start_update_check(automatic=True)
+    print('[updater] Checking for updates on packaged-app startup.')
+    return _start_update_check(startup=True)
 
 # Now initialize the database with the configured app
 db.init_app(app)
@@ -3758,7 +3744,7 @@ if __name__ == '__main__':
     t.start()
 
     start_reminders()
-    start_automatic_update_check()
+    start_startup_update_check()
 
     # Create and start webview window
     window = create_window()

@@ -1,7 +1,5 @@
 import hashlib
-import json
 import unittest
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -9,6 +7,9 @@ from unittest.mock import patch
 import httpx
 
 import updater
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class UpdaterTests(unittest.TestCase):
@@ -261,17 +262,6 @@ class UpdaterTests(unittest.TestCase):
                 updater.download_update(info, directory, client=client)
             self.assertEqual(list(Path(directory).iterdir()), [])
 
-    def test_automatic_check_throttle_is_persisted_atomically(self):
-        now = datetime(2026, 8, 13, 12, tzinfo=timezone.utc)
-        with TemporaryDirectory() as directory:
-            path = Path(directory, "update-state.json")
-            self.assertTrue(updater.automatic_check_due(path, now))
-            updater.record_automatic_check(path, now)
-            self.assertFalse(updater.automatic_check_due(path, now + timedelta(hours=23)))
-            self.assertTrue(updater.automatic_check_due(path, now + timedelta(days=1)))
-            saved = json.loads(path.read_text())
-            self.assertEqual(saved["last_checked_at"], now.isoformat())
-
     def test_launch_uses_argument_list_without_shell(self):
         with TemporaryDirectory() as directory:
             path = Path(directory, "Time-Keeper-Setup-1.3.0.exe")
@@ -294,6 +284,13 @@ class UpdaterTests(unittest.TestCase):
                 with self.assertRaisesRegex(updater.UpdateError, "changed"):
                     updater.launch_installer(verified)
             popen.assert_not_called()
+
+    def test_packaged_app_checks_for_updates_on_every_start(self):
+        main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+        self.assertIn("def start_startup_update_check():", main_source)
+        self.assertIn("return _start_update_check(startup=True)", main_source)
+        self.assertIn("\n    start_startup_update_check()\n", main_source)
+        self.assertNotIn("automatic_check_due", main_source)
 
 
 if __name__ == "__main__":

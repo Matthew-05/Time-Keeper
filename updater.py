@@ -8,14 +8,12 @@ installer path only after both its size and SHA-256 have been verified.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import subprocess
 import tempfile
 from urllib.parse import urlparse
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -28,7 +26,6 @@ RELEASES_URL = f"https://api.github.com/repos/{REPOSITORY}/releases"
 RELEASE_ASSET_PREFIX = f"https://github.com/{REPOSITORY}/releases/download/"
 RELEASE_PAGE_PREFIX = f"https://github.com/{REPOSITORY}/releases/"
 USER_AGENT = "Time-Keeper-Updater"
-CHECK_INTERVAL = timedelta(days=1)
 TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=15.0, pool=5.0)
 MAX_SIDECAR_BYTES = 4096
 MAX_INSTALLER_BYTES = 512 * 1024 * 1024
@@ -379,37 +376,3 @@ def launch_installer(verified: VerifiedInstaller) -> subprocess.Popen:
     if digest.hexdigest().lower() != verified.sha256:
         raise UpdateError("Verified installer changed before launch.")
     return subprocess.Popen([str(installer)], shell=False, close_fds=True)
-
-
-def automatic_check_due(state_path: str | os.PathLike, now: datetime | None = None) -> bool:
-    """Return whether the persisted successful/attempted check is at least one day old."""
-    now = now or datetime.now(timezone.utc)
-    try:
-        data = json.loads(Path(state_path).read_text(encoding="utf-8"))
-        checked = datetime.fromisoformat(data["last_checked_at"])
-        if checked.tzinfo is None:
-            checked = checked.replace(tzinfo=timezone.utc)
-        return now - checked.astimezone(timezone.utc) >= CHECK_INTERVAL
-    except (FileNotFoundError, OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
-        return True
-
-
-def record_automatic_check(state_path: str | os.PathLike, now: datetime | None = None) -> None:
-    """Atomically persist an automatic-check attempt to prevent startup request storms."""
-    now = now or datetime.now(timezone.utc)
-    path = Path(state_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    handle, temp_name = tempfile.mkstemp(prefix=".update-state-", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8") as output:
-            json.dump({"last_checked_at": now.astimezone(timezone.utc).isoformat()}, output)
-            output.write("\n")
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(temp_name, path)
-    except BaseException:
-        try:
-            os.unlink(temp_name)
-        except OSError:
-            pass
-        raise
