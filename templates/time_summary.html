@@ -32,24 +32,11 @@
       </div>
     </div>
 
-    {# The controls that change what the dashboard is showing stay available
-       while the results scroll beneath them. Keep their existing IDs: the
-       summary controller and calendar both own their behaviour. #}
+    {# The filters that change what the dashboard is showing stay available
+       while the results scroll beneath them. #}
     <div class="tk-summary-view-sentinel" aria-hidden="true"></div>
     <section class="tk-card tk-summary-view" aria-label="Summary view controls">
       <div class="tk-summary-view-controls">
-        <div class="tk-calendar-header tk-summary-view-calendar">
-          <div class="tk-summary-view-period">
-            <h2 id="summary-calendar-month" class="tk-calendar-month" aria-live="polite"></h2>
-            <p id="summary-calendar-month-total" class="tk-calendar-month-capacity"></p>
-          </div>
-          <div class="tk-calendar-nav">
-            <button id="summary-calendar-previous" type="button" class="tk-calendar-nav-arrow" aria-label="Previous month">&larr;</button>
-            <button id="summary-calendar-today" type="button" class="tk-calendar-nav-today">Today</button>
-            <button id="summary-calendar-next" type="button" class="tk-calendar-nav-arrow" aria-label="Next month">&rarr;</button>
-          </div>
-        </div>
-
         <input
           type="text"
           id="summary-date-range"
@@ -128,6 +115,18 @@
       <div class="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_23rem]">
         <section class="tk-card overflow-hidden">
           <div class="p-3 sm:p-5">
+            <div class="tk-calendar-header tk-summary-view-calendar">
+              <div class="tk-summary-view-period">
+                <h2 id="summary-calendar-month" class="tk-calendar-month" aria-live="polite"></h2>
+                <p id="summary-calendar-month-total" class="tk-calendar-month-capacity"></p>
+              </div>
+              <div class="tk-calendar-nav">
+                <button id="summary-calendar-previous" type="button" class="tk-calendar-nav-arrow" aria-label="Previous month">&larr;</button>
+                <button id="summary-calendar-today" type="button" class="tk-calendar-nav-today">Today</button>
+                <button id="summary-calendar-next" type="button" class="tk-calendar-nav-arrow" aria-label="Next month">&rarr;</button>
+              </div>
+            </div>
+
             {#
               The chips set the calendar's selection rather than being a second
               control beside it, so they belong in the same card as the grid

@@ -3389,7 +3389,8 @@
     align-items: center;
     display: grid;
     gap: 1rem 1.5rem;
-    grid-template-columns: minmax(24rem, 1fr) minmax(13rem, 18rem) minmax(16rem, 24rem);
+    grid-template-columns: minmax(13rem, 18rem) minmax(16rem, 24rem);
+    justify-content: space-between;
     padding: 0.75rem 1rem;
     transform: translateY(0);
     transition: transform 0.18s ease-out;
@@ -3414,13 +3415,14 @@
     min-width: 0;
   }
 
-  /* The general calendar header is a three-column card header. In the sticky
-     toolbar it becomes a compact month value followed by its controls. */
+  /* The Summary groups its month and total together opposite navigation so
+     the calendar context reads as one heading above its preset shortcuts. */
   .tk-summary-view-calendar {
     align-items: center;
     display: grid;
     gap: 0.75rem;
     grid-template-columns: minmax(0, 1fr) auto;
+    margin-bottom: 0.75rem;
     min-width: 0;
   }
 
@@ -3433,7 +3435,7 @@
   }
 
   .tk-summary-view-calendar .tk-calendar-month {
-    font-size: 1rem;
+    font-size: 1.25rem;
     text-align: left;
     white-space: nowrap;
   }
@@ -3470,10 +3472,6 @@
       grid-template-columns: minmax(13rem, 1fr) minmax(16rem, 24rem);
     }
 
-    .tk-summary-view-calendar {
-      grid-column: 1 / -1;
-    }
-
     .tk-summary-client-filter {
       width: 100%;
     }
@@ -3487,8 +3485,8 @@
     }
 
     .tk-summary-view-calendar {
-      grid-column: auto;
       grid-template-columns: minmax(0, 1fr) auto;
+      justify-items: stretch;
     }
 
     .tk-summary-view-calendar .tk-calendar-nav {
