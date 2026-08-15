@@ -2532,6 +2532,182 @@
      by the fill, the badge and the projection marker, so a card can never show
      an amber bar above a green label. */
 
+  .tk-budget-workspace-nav {
+    @apply mb-5 grid gap-3 sm:grid-cols-2;
+  }
+
+  .tk-budget-workspace-tab {
+    @apply flex min-w-0 cursor-pointer items-center gap-3 rounded-xl p-4 text-left transition-all;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .tk-budget-workspace-tab:hover {
+    background: var(--surface-2);
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
+  }
+
+  .tk-budget-workspace-tab.active {
+    background: linear-gradient(135deg, var(--accent-soft), var(--surface));
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm);
+    color: var(--text);
+  }
+
+  .tk-budget-workspace-icon {
+    @apply flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg;
+    background: var(--surface-3);
+    color: var(--muted);
+  }
+
+  .tk-budget-workspace-tab.active .tk-budget-workspace-icon {
+    background: var(--accent);
+    color: var(--accent-fg);
+  }
+
+  .tk-budget-workspace-icon svg {
+    @apply h-6 w-6;
+  }
+
+  .tk-budget-workspace-tab > span:nth-child(2) {
+    @apply min-w-0 flex-1;
+  }
+
+  .tk-budget-workspace-tab strong,
+  .tk-budget-workspace-tab small {
+    @apply block;
+  }
+
+  .tk-budget-workspace-tab strong {
+    @apply text-sm font-semibold text-text;
+  }
+
+  .tk-budget-workspace-tab small {
+    @apply mt-1 text-xs leading-relaxed;
+    color: var(--muted);
+  }
+
+  .tk-budget-workspace-arrow {
+    @apply h-5 w-5 flex-shrink-0 opacity-40;
+  }
+
+  .tk-budget-workspace-tab.active .tk-budget-workspace-arrow {
+    color: var(--accent);
+    opacity: 1;
+    transform: rotate(90deg);
+  }
+
+  .tk-budget-workspace-panel {
+    @apply rounded-2xl p-4 sm:p-5;
+    background: color-mix(in srgb, var(--surface-2) 65%, transparent);
+    border: 1px solid var(--border);
+  }
+
+  .tk-budget-workspace-header {
+    @apply mb-5 flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-center sm:justify-between;
+  }
+
+  .tk-budget-workspace-header h2 {
+    @apply text-xl font-semibold text-text;
+  }
+
+  .tk-budget-workspace-header > div > p:last-child {
+    @apply mt-1 max-w-2xl text-sm text-muted;
+  }
+
+  .tk-budget-workspace-eyebrow {
+    @apply mb-1 text-xs font-semibold uppercase tracking-wider;
+    color: var(--accent-text);
+  }
+
+  .tk-team-budget-start {
+    @apply flex flex-col items-start gap-3 rounded-xl p-4 sm:flex-row sm:items-center;
+    background: linear-gradient(135deg, var(--accent-soft), var(--surface-2));
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  }
+
+  .tk-team-budget-start-icon {
+    @apply flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg;
+    background: var(--accent);
+    color: var(--accent-fg);
+  }
+
+  .tk-team-budget-start-icon svg {
+    @apply h-5 w-5;
+  }
+
+  .tk-team-budget-start h3 {
+    @apply text-sm font-semibold text-text;
+  }
+
+  .tk-team-budget-start h3 span {
+    @apply font-normal text-muted;
+  }
+
+  .tk-team-budget-start p {
+    @apply mt-1 text-xs leading-relaxed text-muted;
+  }
+
+  .tk-team-budget-start-summary {
+    @apply mt-2 rounded-md px-2.5 py-2 text-xs font-medium;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+
+  .tk-team-import-user-table-wrap {
+    max-height: 22rem;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+  }
+
+  .tk-team-import-user-table {
+    min-width: 46rem;
+  }
+
+  .tk-team-import-user-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
+  .tk-team-import-user-table th:nth-child(1) {
+    width: 24%;
+  }
+
+  .tk-team-import-user-table th:nth-child(2) {
+    width: 31%;
+  }
+
+  .tk-team-import-user-table th:nth-child(3) {
+    width: 27%;
+  }
+
+  .tk-team-import-user-table th:nth-child(4) {
+    width: 18%;
+  }
+
+  .tk-team-import-user-table tbody td {
+    background-color: var(--surface);
+    padding: 0.625rem;
+  }
+
+  .tk-team-import-source-id {
+    @apply block break-all text-sm font-semibold text-text;
+  }
+
+  .tk-team-import-member-cell {
+    transition: opacity 0.15s ease;
+  }
+
+  .tk-team-import-member-cell.is-inactive {
+    opacity: 0.42;
+  }
+
   /* ---- Status colour scope ----
      Four things carry a budget's status colour now — the Budgets cards, the
      Today strip, the Summary page's budget rows and its capacity meter — and

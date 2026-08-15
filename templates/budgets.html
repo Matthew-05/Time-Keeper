@@ -5,28 +5,40 @@
     <div>
       <h1 class="tk-title">Budgets</h1>
       <p class="tk-subtitle" id="budgets-subtitle">
-        Hours budgeted, hours spent.
+        Choose the workspace that matches how the time is collected.
       </p>
     </div>
+  </div>
 
-    <button
-      type="button"
-      id="new-budget"
-      class="tk-btn tk-btn-primary flex-shrink-0"
-    >
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      >
-        <path d="M12 5v14M5 12h14" />
-      </svg>
-      New budget
+  <div id="budget-kind-tabs" class="tk-budget-workspace-nav" role="tablist" aria-label="Budget workspace">
+    <button type="button" id="personal-budgets-tab" class="tk-budget-workspace-tab active" role="tab" aria-selected="true" aria-controls="personal-budgets-view" data-budget-view="personal">
+      <span class="tk-budget-workspace-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3"/><path d="M6 20c.5-4 2.5-6 6-6s5.5 2 6 6"/></svg>
+      </span>
+      <span><strong>Personal budgets</strong><small>Your own Time Keeper entries and working calendar</small></span>
+      <svg class="tk-budget-workspace-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+    </button>
+    <button type="button" id="team-budgets-tab" class="tk-budget-workspace-tab" role="tab" aria-selected="false" aria-controls="team-budgets-view" data-budget-view="team">
+      <span class="tk-budget-workspace-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="10" r="2"/><path d="M3 20c.5-4 2.5-6 6-6s5.5 2 6 6M15 15c3 0 4.5 1.5 5 4"/></svg>
+      </span>
+      <span><strong>Team budgets</strong><small>Separate engagement history imported from XLSX</small></span>
+      <svg class="tk-budget-workspace-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
     </button>
   </div>
+
+  <section id="personal-budgets-view" role="tabpanel" aria-labelledby="personal-budgets-tab" class="tk-budget-workspace-panel">
+    <div class="tk-budget-workspace-header">
+      <div>
+        <p class="tk-budget-workspace-eyebrow">Personal workspace</p>
+        <h2>Personal budgets</h2>
+        <p>Planned against time you track in Time Keeper and your personal working schedule.</p>
+      </div>
+      <button type="button" id="new-budget" class="tk-btn tk-btn-primary flex-shrink-0">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14" /></svg>
+        New personal budget
+      </button>
+    </div>
 
   <!-- Portfolio line. Rendered from the same summaries as the cards below,
          so the totals can't drift from what they're totalling. -->
@@ -235,6 +247,42 @@ Budgets already over are counted separately, under Over budget."
   <div id="budget-list" class="grid gap-3">
     <div class="tk-card tk-empty py-10">Loading budgets…</div>
   </div>
+  </section>
+
+  <section id="team-budgets-view" role="tabpanel" aria-labelledby="team-budgets-tab" class="tk-budget-workspace-panel hidden">
+    <div class="tk-budget-workspace-header">
+      <div>
+        <p class="tk-budget-workspace-eyebrow">Team workspace · XLSX history</p>
+        <h2>Team budgets</h2>
+        <p>Engagement reporting for multiple people. Imported time stays completely separate from your locally tracked time.</p>
+      </div>
+      <button type="button" id="new-team-budget" class="tk-btn tk-btn-primary flex-shrink-0">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+        New team budget
+      </button>
+    </div>
+    <section id="team-budgets-overview" class="tk-card mb-4 hidden">
+      <div class="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border sm:grid-cols-4">
+        <div class="bg-surface px-4 py-3"><div class="tk-stat-label">Active engagements</div><div id="team-overview-count" class="tabular mt-1 text-xl font-semibold text-text">—</div></div>
+        <div class="bg-surface px-4 py-3"><div class="tk-stat-label">Team hours budgeted</div><div id="team-overview-budgeted" class="tabular mt-1 text-xl font-semibold text-text">—</div></div>
+        <div class="bg-surface px-4 py-3"><div class="tk-stat-label">Imported hours</div><div id="team-overview-used" class="tabular mt-1 text-xl font-semibold text-text">—</div></div>
+        <div class="bg-surface px-4 py-3"><div class="tk-stat-label">Needs attention</div><div id="team-overview-risk" class="tabular mt-1 text-xl font-semibold text-text">—</div></div>
+      </div>
+    </section>
+
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <label class="tk-budget-client-filter flex items-center gap-2">
+        <span class="tk-label mb-0">Client</span>
+        <select id="team-client-filter" class="tk-select">
+          <option value="">All clients</option>
+          {% for client in clients %}<option value="{{ client.id }}">{{ client.name }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <div id="team-budget-list" class="grid gap-3">
+      <div class="tk-card tk-empty py-10">Loading team budgets…</div>
+    </div>
+  </section>
 </div>
 
 <!-- Create / edit. Never shown stacked on the detail view — Edit closes
@@ -456,10 +504,158 @@ Budgets already over are counted separately, under Over budget."
     </div>
   </div>
 </div>
+
+<!-- Team budget create / edit -->
+<div id="team-budget-form-modal" class="tk-modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="team-budget-form-title">
+  <div class="tk-modal tk-modal-wide">
+    <div class="tk-modal-header">
+      <h2 class="tk-card-title" id="team-budget-form-title">New team budget</h2>
+      <button type="button" class="tk-btn-icon tk-btn-icon-sm" data-close-team-modal aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12" /></svg></button>
+    </div>
+    <form id="team-budget-form" class="flex min-h-0 flex-1 flex-col">
+      <div class="tk-modal-body space-y-4">
+        <section id="team-budget-xlsx-start" class="tk-team-budget-start">
+          <div class="tk-team-budget-start-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13l8 6M16 13l-8 6"/></svg>
+          </div>
+          <div class="min-w-0 flex-1">
+            <h3>Start with an XLSX workbook <span>(optional)</span></h3>
+            <p>Detect team member IDs and the engagement period from historical time, then add each person’s budgeted hours.</p>
+            <div id="team-budget-start-file-summary" class="tk-team-budget-start-summary hidden"></div>
+          </div>
+          <button type="button" id="team-budget-start-xlsx" class="tk-btn tk-btn-secondary flex-shrink-0">Choose XLSX</button>
+        </section>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="tk-required-field" data-required-auto>
+            <label class="tk-label tk-field-heading" for="team-budget-name"><span>Name</span><span class="tk-required-cue">Required</span></label>
+            <input id="team-budget-name" class="tk-input" required maxlength="120" autocomplete="off" placeholder="Audit engagement" />
+          </div>
+          <div class="tk-required-field" data-required-auto>
+            <label class="tk-label tk-field-heading" for="team-budget-client"><span>Client</span><span class="tk-required-cue">Required</span></label>
+            <select id="team-budget-client" class="tk-select" required>
+              <option value="">Choose a client…</option>
+              {% for client in clients %}<option value="{{ client.id }}">{{ client.name }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="tk-required-field" data-required-auto>
+          <label class="tk-label tk-field-heading" for="team-budget-range"><span>Dates</span><span class="tk-required-cue">Required</span></label>
+          <input id="team-budget-range" class="tk-input tabular cursor-pointer" required readonly placeholder="Select date range…" />
+        </div>
+        <div>
+          <label class="tk-label" for="team-budget-notes">Notes <span class="normal-case tracking-normal text-faint">(optional)</span></label>
+          <textarea id="team-budget-notes" class="tk-input tk-budget-notes" rows="2" maxlength="2000"></textarea>
+        </div>
+
+        <div class="border-t border-border pt-4">
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <div><h3 class="text-sm font-semibold text-text">Team members</h3><p class="mt-0.5 text-xs text-muted">The imported user ID must match the workbook. Display name is optional.</p></div>
+            <button type="button" id="team-member-add" class="tk-btn tk-btn-secondary tk-btn-sm">Add member</button>
+          </div>
+          <div id="team-member-rows" class="space-y-2"></div>
+        </div>
+      </div>
+      <div class="tk-modal-footer flex items-center justify-between gap-3">
+        <button type="button" id="team-budget-delete" class="tk-btn tk-btn-danger tk-btn-sm hidden">Delete</button>
+        <div class="ml-auto flex gap-2">
+          <button type="button" class="tk-btn tk-btn-secondary" data-close-team-modal>Cancel</button>
+          <button type="submit" id="team-budget-save" class="tk-btn tk-btn-primary">Create team budget</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Team budget detail -->
+<div id="team-budget-detail-modal" class="tk-modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="team-budget-detail-title">
+  <div class="tk-modal tk-modal-wide">
+    <div class="tk-modal-header">
+      <div class="min-w-0"><h2 id="team-budget-detail-title" class="tk-card-title truncate">Team budget</h2><p id="team-budget-detail-range" class="tabular mt-0.5 text-xs text-faint"></p></div>
+      <div class="flex flex-shrink-0 items-center gap-1.5">
+        <button type="button" id="team-budget-import" class="tk-btn tk-btn-primary tk-btn-sm">Import XLSX</button>
+        <button type="button" id="team-budget-edit" class="tk-btn tk-btn-secondary tk-btn-sm">Edit</button>
+        <button type="button" class="tk-btn-icon tk-btn-icon-sm" data-close-team-modal aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12" /></svg></button>
+      </div>
+    </div>
+    <div id="team-budget-detail-body" class="tk-modal-body"><div class="tk-empty py-10">Loading…</div></div>
+  </div>
+</div>
+
+<!-- Team workbook import. Detail closes before this opens, so dialogs never stack. -->
+<div id="team-import-modal" class="tk-modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="team-import-title">
+  <div class="tk-modal tk-modal-wide">
+    <div class="tk-modal-header">
+      <div><h2 id="team-import-title" class="tk-card-title">Import team time</h2><p id="team-import-subtitle" class="mt-0.5 text-xs text-faint">A confirmed import completely replaces the previous imported rows.</p></div>
+      <button type="button" class="tk-btn-icon tk-btn-icon-sm" data-close-team-modal aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12" /></svg></button>
+    </div>
+    <form id="team-import-form" class="flex min-h-0 flex-1 flex-col">
+      <div class="tk-modal-body space-y-4">
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="tk-required-field" data-required-auto>
+            <label class="tk-label tk-field-heading" for="team-import-file"><span>Workbook</span><span class="tk-required-cue">Required</span></label>
+            <input type="file" id="team-import-file" class="tk-input" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
+          </div>
+          <div>
+            <label class="tk-label" for="team-import-time-format">Time values mean</label>
+            <select id="team-import-time-format" class="tk-select">
+              <option value="decimal_hours">Decimal hours (2.5)</option>
+              <option value="clock_duration">Excel/clock duration (2:30)</option>
+              <option value="minutes">Minutes (150)</option>
+            </select>
+          </div>
+        </div>
+
+        <section id="team-import-columns" class="hidden rounded-lg border border-border bg-surface-2 p-3">
+          <h3 class="text-sm font-semibold text-text">Map workbook columns</h3>
+          <div class="mt-3 grid gap-3 sm:grid-cols-4">
+            <label class="text-xs text-muted">Sheet<select id="team-import-sheet" class="tk-select mt-1"></select></label>
+            <label class="text-xs text-muted">Date<select id="team-import-date-column" class="tk-select mt-1"></select></label>
+            <label class="text-xs text-muted">User ID<select id="team-import-user-column" class="tk-select mt-1"></select></label>
+            <label class="text-xs text-muted">Time<select id="team-import-time-column" class="tk-select mt-1"></select></label>
+          </div>
+        </section>
+
+        <section id="team-import-preview" class="hidden space-y-4">
+          <div id="team-import-summary" class="rounded-lg border border-border bg-surface-2 p-3 text-sm text-text"></div>
+          <div id="team-import-errors" class="hidden rounded-lg border border-danger bg-danger-soft p-3 text-sm text-danger"></div>
+          <div id="team-import-users" class="hidden">
+            <h3 class="text-sm font-semibold text-text">Map new user IDs</h3>
+            <p id="team-import-users-help" class="mt-1 text-xs text-muted">Mappings are saved for future reimports.</p>
+            <div class="tk-team-import-user-table-wrap mt-3">
+              <table class="tk-table tk-team-import-user-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Imported user ID</th>
+                    <th scope="col">Map as</th>
+                    <th scope="col">Display name <span class="normal-case tracking-normal">(optional)</span></th>
+                    <th scope="col">Budgeted hours</th>
+                  </tr>
+                </thead>
+                <tbody id="team-import-user-rows"></tbody>
+              </table>
+            </div>
+          </div>
+          <fieldset id="team-import-range-choice" class="hidden rounded-lg border border-warn bg-warn-soft p-3">
+            <legend class="px-1 text-sm font-semibold text-text">Dates outside the budget period</legend>
+            <div id="team-import-outside-dates" class="mt-1 text-xs text-muted"></div>
+            <label class="mt-3 flex items-start gap-2 text-sm text-text"><input type="radio" name="team-import-range-action" value="adjust" checked /> <span>Adjust the budget period to include every imported date</span></label>
+            <label class="mt-2 flex items-start gap-2 text-sm text-text"><input type="radio" name="team-import-range-action" value="skip" /> <span>Keep the current period and skip those rows</span></label>
+          </fieldset>
+        </section>
+      </div>
+      <div class="tk-modal-footer flex justify-end gap-2">
+        <button type="button" class="tk-btn tk-btn-secondary" data-close-team-modal>Cancel</button>
+        <button type="button" id="team-import-preview-button" class="tk-btn tk-btn-secondary">Preview import</button>
+        <button type="submit" id="team-import-confirm" class="tk-btn tk-btn-primary hidden">Replace imported data</button>
+      </div>
+    </form>
+  </div>
+</div>
 {% endblock %} {% block page_scripts %}
 <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.min.js') }}"></script>
 <script
   src="{{ url_for('static', filename='js/budgets.js') }}"
   type="module"
 ></script>
+<script src="{{ url_for('static', filename='js/team_budgets.js') }}" type="module"></script>
 {% endblock %}

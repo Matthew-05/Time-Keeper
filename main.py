@@ -2,6 +2,8 @@ import sys
 import os
 from pathlib import Path
 import re
+import hashlib
+import json
 from app_version import APP_VERSION
 
 # True when running from source, False inside the PyInstaller bundle.
@@ -53,13 +55,15 @@ if not DEV_MODE:
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from models import (
     db, Client, Task_Item, TimeTracking, BreakTracking, Work, Budget, BudgetHold,
-    ManualAdjustment,
+    ManualAdjustment, TeamBudget, TeamBudgetMember, TeamBudgetMemberAlias,
+    TeamBudgetEntry,
 )
 import settings as user_settings
 # Aliased: `budgets` is also the name of the page's view function and of half
 # the local variables in this file, and shadowing the module was a real bug
 # waiting to happen.
 import budgets as budget_allocation
+import team_budgets as team_budget_reporting
 import summary as summary_report
 import day_close
 import day_bounds
@@ -171,6 +175,7 @@ else:
     app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_secret_key_here'
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
+app.config['MAX_CONTENT_LENGTH'] = 12 * 1024 * 1024
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 if DEV_MODE:
@@ -1107,6 +1112,11 @@ def delete_client(id):
             synchronize_session=False
         )
         Budget.query.filter(Budget.client_id == id).delete(synchronize_session=False)
+    # Team budgets own imported entries and member mappings. Delete through the
+    # ORM rather than a bulk query so their delete-orphan cascades still run on
+    # SQLite, where ON DELETE CASCADE is documentation rather than enforcement.
+    for team_budget in TeamBudget.query.filter(TeamBudget.client_id == id).all():
+        db.session.delete(team_budget)
     db.session.delete(client)
     db.session.commit()
     return jsonify({'success': True})
@@ -2952,6 +2962,761 @@ def api_unbudgeted_hours(client_id):
         client_id, every_task=True
     )
     return jsonify({'client_id': client_id, 'unbudgeted_hours': round(unbudgeted, 2)})
+
+
+# --------------------------------------------------------------------------
+# Team budgets
+#
+# These engagements are fed only by imported XLSX rows. They intentionally do
+# not call the personal allocator, read Task_Item, or inherit local rounding
+# and calendar settings.
+# --------------------------------------------------------------------------
+
+
+TEAM_IMPORT_MAX_BYTES = 10 * 1024 * 1024
+
+
+def _team_budget_or_404(team_budget_id):
+    return db.session.get(TeamBudget, team_budget_id)
+
+
+def _team_member_record(member):
+    return {
+        'id': member.id,
+        'source_user_id': member.source_user_id,
+        'display_name': member.display_name,
+        'name': member.name,
+        'budgeted_hours': float(member.budgeted_hours),
+        'aliases': [alias.source_user_id for alias in member.aliases],
+    }
+
+
+def _team_budget_json(team_budget, detail=False, today=None):
+    today = today or date.today()
+    member_records = [_team_member_record(member) for member in team_budget.members]
+    entry_count = db.session.query(func.count(TeamBudgetEntry.id)).filter(
+        TeamBudgetEntry.team_budget_id == team_budget.id
+    ).scalar() or 0
+    if detail:
+        aggregates = db.session.query(
+            TeamBudgetEntry.member_id,
+            TeamBudgetEntry.work_date,
+            func.sum(TeamBudgetEntry.time_seconds),
+        ).filter(
+            TeamBudgetEntry.team_budget_id == team_budget.id
+        ).group_by(
+            TeamBudgetEntry.member_id, TeamBudgetEntry.work_date
+        ).all()
+        entry_records = [
+            {'member_id': member_id, 'date': work_date, 'seconds': seconds}
+            for member_id, work_date, seconds in aggregates
+        ]
+    else:
+        latest_date = db.session.query(func.max(TeamBudgetEntry.work_date)).filter(
+            TeamBudgetEntry.team_budget_id == team_budget.id
+        ).scalar()
+        aggregates = db.session.query(
+            TeamBudgetEntry.member_id,
+            func.sum(TeamBudgetEntry.time_seconds),
+        ).filter(
+            TeamBudgetEntry.team_budget_id == team_budget.id
+        ).group_by(TeamBudgetEntry.member_id).all()
+        entry_records = [
+            {'member_id': member_id, 'date': latest_date, 'seconds': seconds}
+            for member_id, seconds in aggregates
+        ] if latest_date else []
+    summary = team_budget_reporting.summarise_team_budget(
+        team_budget.start_date,
+        team_budget.end_date,
+        member_records,
+        entry_records,
+        today=today,
+    )
+    if not detail:
+        summary.pop('burn', None)
+        summary.pop('weekly', None)
+
+    return {
+        'id': team_budget.id,
+        'name': team_budget.name,
+        'client_id': team_budget.client_id,
+        'client_name': team_budget.client.name if team_budget.client else None,
+        'client_color': team_budget.client.color if team_budget.client else None,
+        'start_date': team_budget.start_date.isoformat(),
+        'end_date': team_budget.end_date.isoformat(),
+        'notes': team_budget.notes,
+        'started': today >= team_budget.start_date,
+        'entry_count': entry_count,
+        'imported_at': (
+            team_budget.imported_at.isoformat() if team_budget.imported_at else None
+        ),
+        'import_filename': team_budget.import_filename,
+        'import_sha256': team_budget.import_sha256,
+        'import_row_count': team_budget.import_row_count,
+        'import_skipped_count': team_budget.import_skipped_count,
+        **summary,
+    }
+
+
+def _parse_team_members(raw_members):
+    if not isinstance(raw_members, list) or not raw_members:
+        return None, 'Add at least one team member.'
+
+    members = []
+    seen = set()
+    for index, raw in enumerate(raw_members, start=1):
+        if not isinstance(raw, dict):
+            return None, f'Team member {index} is invalid.'
+        source_user_id = str(raw.get('source_user_id') or '').strip()
+        if not source_user_id:
+            return None, f'Team member {index} needs an imported user ID.'
+        if len(source_user_id) > 200:
+            return None, f'Team member {index} has a user ID over 200 characters.'
+        key = source_user_id.casefold()
+        if key in seen:
+            return None, f'The user ID {source_user_id!r} is listed more than once.'
+        seen.add(key)
+
+        display_name = str(raw.get('display_name') or '').strip()
+        if len(display_name) > 120:
+            return None, f'Team member {index} has a name over 120 characters.'
+        try:
+            if isinstance(raw.get('budgeted_hours'), bool):
+                raise ValueError
+            budgeted_hours = float(raw.get('budgeted_hours'))
+        except (TypeError, ValueError):
+            return None, f'Team member {index} needs numeric budgeted hours.'
+        if not math.isfinite(budgeted_hours) or budgeted_hours <= 0:
+            return None, f'Team member {index} needs budgeted hours above zero.'
+        if budgeted_hours > 100000:
+            return None, f'Team member {index} has too many budgeted hours.'
+
+        member_id = raw.get('id')
+        if member_id is not None:
+            try:
+                member_id = int(member_id)
+            except (TypeError, ValueError):
+                return None, f'Team member {index} has an invalid ID.'
+        members.append({
+            'id': member_id,
+            'source_user_id': source_user_id,
+            'display_name': display_name or None,
+            'budgeted_hours': round(budgeted_hours, 2),
+        })
+    return members, None
+
+
+def _parse_team_budget_payload(data, partial=False):
+    if not isinstance(data, dict):
+        return None, None, 'JSON object required.'
+    fields = {}
+    members = None
+
+    if not partial or 'name' in data:
+        name = str(data.get('name') or '').strip()
+        if not name:
+            return None, None, 'A team budget needs a name.'
+        if len(name) > 120:
+            return None, None, 'That name is too long (120 characters max).'
+        fields['name'] = name
+
+    if not partial or 'client_id' in data:
+        try:
+            client_id = int(data.get('client_id'))
+        except (TypeError, ValueError):
+            return None, None, 'Choose a client for this team budget.'
+        if db.session.get(Client, client_id) is None:
+            return None, None, 'That client no longer exists.'
+        fields['client_id'] = client_id
+
+    for key in ('start_date', 'end_date'):
+        if not partial or key in data:
+            try:
+                fields[key] = date.fromisoformat(str(data.get(key) or ''))
+            except ValueError:
+                return None, None, 'Dates must be YYYY-MM-DD.'
+
+    if 'notes' in data:
+        notes = str(data.get('notes') or '').strip()
+        if len(notes) > 2000:
+            return None, None, 'Notes are limited to 2,000 characters.'
+        fields['notes'] = notes or None
+
+    if not partial or 'members' in data:
+        members, error = _parse_team_members(data.get('members'))
+        if error:
+            return None, None, error
+
+    return fields, members, None
+
+
+def _apply_team_members(team_budget, member_fields):
+    """Apply a complete member list, preserving import-bearing members."""
+    existing = {member.id: member for member in team_budget.members}
+    retained_ids = set()
+    targets = []
+    for fields in member_fields:
+        member_id = fields['id']
+        if member_id is None:
+            member = TeamBudgetMember(team_budget=team_budget)
+        else:
+            member = existing.get(member_id)
+            if member is None:
+                return 'A team member no longer belongs to this budget.'
+            if member_id in retained_ids:
+                return 'A team member was submitted more than once.'
+            retained_ids.add(member_id)
+        targets.append((member, fields))
+
+    removed = [member for member_id, member in existing.items() if member_id not in retained_ids]
+    for member in removed:
+        if TeamBudgetEntry.query.filter_by(member_id=member.id).first() is not None:
+            return (
+                f'{member.name} has imported time and cannot be removed. '
+                'Import a replacement workbook without that person first.'
+            )
+
+    primary_owners = {
+        fields['source_user_id'].casefold(): member
+        for member, fields in targets
+    }
+    aliases_to_remove = []
+    for member, _fields in targets:
+        if member.id is None:
+            continue
+        for alias in member.aliases:
+            owner = primary_owners.get(alias.source_user_id.casefold())
+            if owner is not None and owner is not member:
+                return f'The imported user ID {alias.source_user_id!r} is already mapped.'
+            if owner is member:
+                aliases_to_remove.append(alias)
+
+    for alias in aliases_to_remove:
+        db.session.delete(alias)
+    for member in removed:
+        db.session.delete(member)
+    for member, fields in targets:
+        old_source_id = member.source_user_id
+        if (
+            member.id is not None
+            and old_source_id.casefold() != fields['source_user_id'].casefold()
+            and old_source_id.casefold() not in primary_owners
+            and TeamBudgetEntry.query.filter_by(member_id=member.id).first() is not None
+        ):
+            db.session.add(TeamBudgetMemberAlias(
+                team_budget_id=team_budget.id,
+                member=member,
+                source_user_id=old_source_id,
+            ))
+        member.source_user_id = fields['source_user_id']
+        member.display_name = fields['display_name']
+        member.budgeted_hours = fields['budgeted_hours']
+        if member.id is None:
+            db.session.add(member)
+    return None
+
+
+@app.route('/api/team-budgets', methods=['GET'])
+def api_list_team_budgets():
+    client_id = request.args.get('client_id', type=int)
+    query = TeamBudget.query
+    if client_id is not None:
+        query = query.filter(TeamBudget.client_id == client_id)
+    budgets = [_team_budget_json(item) for item in query.all()]
+    budgets.sort(key=lambda item: (
+        item['status'] == 'closed',
+        item['status'] == 'upcoming',
+        item['end_date'],
+        item['name'].casefold(),
+    ))
+    return jsonify(budgets)
+
+
+@app.route('/api/team-budgets/<int:team_budget_id>', methods=['GET'])
+def api_get_team_budget(team_budget_id):
+    team_budget = _team_budget_or_404(team_budget_id)
+    if team_budget is None:
+        return jsonify({'error': 'Team budget not found'}), 404
+    return jsonify(_team_budget_json(team_budget, detail=True))
+
+
+@app.route('/api/team-budgets', methods=['POST'])
+def api_create_team_budget():
+    fields, members, error = _parse_team_budget_payload(request.get_json(silent=True))
+    if error:
+        return jsonify({'error': error}), 400
+    if fields['end_date'] < fields['start_date']:
+        return jsonify({'error': 'The end date falls before the start date.'}), 400
+
+    team_budget = TeamBudget(**fields)
+    db.session.add(team_budget)
+    for member in members:
+        member.pop('id', None)
+        team_budget.members.append(TeamBudgetMember(**member))
+    db.session.commit()
+    return jsonify(_team_budget_json(team_budget)), 201
+
+
+@app.route('/api/team-budgets/<int:team_budget_id>', methods=['PUT'])
+def api_update_team_budget(team_budget_id):
+    team_budget = _team_budget_or_404(team_budget_id)
+    if team_budget is None:
+        return jsonify({'error': 'Team budget not found'}), 404
+    fields, members, error = _parse_team_budget_payload(
+        request.get_json(silent=True), partial=True
+    )
+    if error:
+        return jsonify({'error': error}), 400
+    start = fields.get('start_date', team_budget.start_date)
+    end = fields.get('end_date', team_budget.end_date)
+    if end < start:
+        return jsonify({'error': 'The end date falls before the start date.'}), 400
+    outside_entry = TeamBudgetEntry.query.filter(
+        TeamBudgetEntry.team_budget_id == team_budget.id,
+        or_(TeamBudgetEntry.work_date < start, TeamBudgetEntry.work_date > end),
+    ).first()
+    if outside_entry is not None:
+        return jsonify({
+            'error': (
+                'That period would exclude imported time. Reimport with Skip outside '
+                'dates, or keep a period covering every imported row.'
+            )
+        }), 409
+    if members is not None:
+        error = _apply_team_members(team_budget, members)
+        if error:
+            db.session.rollback()
+            return jsonify({'error': error}), 409
+    for key, value in fields.items():
+        setattr(team_budget, key, value)
+    db.session.commit()
+    return jsonify(_team_budget_json(team_budget))
+
+
+@app.route('/api/team-budgets/<int:team_budget_id>', methods=['DELETE'])
+def api_delete_team_budget(team_budget_id):
+    team_budget = _team_budget_or_404(team_budget_id)
+    if team_budget is None:
+        return jsonify({'error': 'Team budget not found'}), 404
+    db.session.delete(team_budget)
+    db.session.commit()
+    return jsonify({'success': True})
+
+
+def _read_team_workbook_upload():
+    upload = request.files.get('file')
+    if upload is None or not upload.filename:
+        raise ValueError('Choose an .xlsx workbook.')
+    filename = Path(upload.filename).name
+    if Path(filename).suffix.casefold() != '.xlsx':
+        raise ValueError('Only .xlsx workbooks can be imported.')
+    data = upload.stream.read(TEAM_IMPORT_MAX_BYTES + 1)
+    if len(data) > TEAM_IMPORT_MAX_BYTES:
+        raise ValueError('Workbooks are limited to 10 MB.')
+    if not data:
+        raise ValueError('That workbook is empty.')
+    return data, filename, hashlib.sha256(data).hexdigest()
+
+
+def _team_form_json(name, default):
+    raw = request.form.get(name)
+    if raw in (None, ''):
+        return default
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f'{name} must be valid JSON.') from exc
+    return value
+
+
+def _team_source_map(team_budget):
+    result = {}
+    for member in team_budget.members:
+        result[member.source_user_id.casefold()] = member
+        for alias in member.aliases:
+            result[alias.source_user_id.casefold()] = member
+    return result
+
+
+def _parse_team_upload(data):
+    time_format = request.form.get('time_format', 'decimal_hours')
+    sheet_name = request.form.get('sheet') or None
+    mapping = _team_form_json('column_mapping', None)
+    if mapping is not None and not isinstance(mapping, dict):
+        raise ValueError('column_mapping must be an object.')
+    parsed = team_budget_reporting.parse_xlsx(
+        data,
+        time_format=time_format,
+        column_mapping=mapping,
+        sheet_name=sheet_name,
+    )
+    return parsed, time_format
+
+
+@app.route('/api/team-budgets/imports/preview', methods=['POST'])
+def api_preview_new_team_budget_import():
+    """Inspect a workbook before a team budget exists."""
+    try:
+        data, filename, sha256 = _read_team_workbook_upload()
+        sheet_name = request.form.get('sheet') or None
+        mapping = _team_form_json('column_mapping', None)
+        inspection = team_budget_reporting.inspect_xlsx(data, sheet_name=sheet_name)
+        if mapping is None and inspection['mapping_required']:
+            return jsonify({
+                **inspection,
+                'filename': filename,
+                'sha256': sha256,
+                'replaces_rows': 0,
+            })
+        parsed, time_format = _parse_team_upload(data)
+    except (ValueError, team_budget_reporting.XlsxImportError) as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    dates = [row['date'] for row in parsed['rows']]
+    preview_start = min(dates) if dates else date.today()
+    preview_end = max(dates) if dates else preview_start
+    preview = team_budget_reporting.import_preview(
+        parsed, preview_start, preview_end, set()
+    )
+    return jsonify({
+        'mapping_required': False,
+        'sheets': parsed['sheets'],
+        'sheet': parsed['sheet'],
+        'headers': parsed['headers'],
+        'column_mapping': parsed['column_mapping'],
+        'time_format': time_format,
+        'filename': filename,
+        'sha256': sha256,
+        'replaces_rows': 0,
+        **preview,
+    })
+
+
+@app.route('/api/team-budgets/from-import', methods=['POST'])
+def api_create_team_budget_from_import():
+    """Create a team budget and its first import as one atomic operation."""
+    try:
+        data, filename, sha256 = _read_team_workbook_upload()
+        raw_budget = _team_form_json('budget', None)
+        parsed, _time_format = _parse_team_upload(data)
+    except (ValueError, team_budget_reporting.XlsxImportError) as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    fields, members, error = _parse_team_budget_payload(raw_budget)
+    if error:
+        return jsonify({'error': error}), 400
+    if fields['end_date'] < fields['start_date']:
+        return jsonify({'error': 'The end date falls before the start date.'}), 400
+    if parsed['errors']:
+        first = parsed['errors'][0]
+        return jsonify({
+            'error': (
+                f"Row {first['row']}: {first['error']} "
+                f"({len(parsed['errors'])} invalid row(s))."
+            ),
+            'validation_errors': parsed['errors'][:50],
+        }), 400
+    if not parsed['rows']:
+        return jsonify({'error': 'The workbook does not contain any importable rows.'}), 400
+
+    member_fields = {
+        member['source_user_id'].casefold(): member for member in members
+    }
+    missing_source_ids = sorted({
+        row['source_user_id']
+        for row in parsed['rows']
+        if row['source_user_id'].casefold() not in member_fields
+    }, key=str.casefold)
+    if missing_source_ids:
+        return jsonify({
+            'error': (
+                'Add every imported user before creating the budget: '
+                + ', '.join(missing_source_ids)
+            )
+        }), 400
+
+    workbook_dates = [row['date'] for row in parsed['rows']]
+    fields['start_date'] = min(fields['start_date'], min(workbook_dates))
+    fields['end_date'] = max(fields['end_date'], max(workbook_dates))
+    team_budget = TeamBudget(
+        **fields,
+        imported_at=datetime.now(),
+        import_filename=filename,
+        import_sha256=sha256,
+        import_row_count=len(parsed['rows']),
+        import_skipped_count=0,
+    )
+    source_map = {}
+    for values in members:
+        values = dict(values)
+        values.pop('id', None)
+        member = TeamBudgetMember(**values)
+        team_budget.members.append(member)
+        source_map[member.source_user_id.casefold()] = member
+
+    try:
+        db.session.add(team_budget)
+        db.session.flush()
+        db.session.add_all([
+            TeamBudgetEntry(
+                team_budget=team_budget,
+                member=source_map[row['source_user_id'].casefold()],
+                work_date=row['date'],
+                time_seconds=row['seconds'],
+                source_user_id=row['source_user_id'],
+                source_row=row['row'],
+            )
+            for row in parsed['rows']
+        ])
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    return jsonify(_team_budget_json(team_budget)), 201
+
+
+@app.route('/api/team-budgets/<int:team_budget_id>/imports/preview', methods=['POST'])
+def api_preview_team_budget_import(team_budget_id):
+    team_budget = _team_budget_or_404(team_budget_id)
+    if team_budget is None:
+        return jsonify({'error': 'Team budget not found'}), 404
+    try:
+        data, filename, sha256 = _read_team_workbook_upload()
+        sheet_name = request.form.get('sheet') or None
+        mapping = _team_form_json('column_mapping', None)
+        inspection = team_budget_reporting.inspect_xlsx(data, sheet_name=sheet_name)
+        if mapping is None and inspection['mapping_required']:
+            return jsonify({
+                **inspection,
+                'filename': filename,
+                'sha256': sha256,
+                'replaces_rows': team_budget.import_row_count,
+            })
+        parsed, time_format = _parse_team_upload(data)
+    except (ValueError, team_budget_reporting.XlsxImportError) as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    preview = team_budget_reporting.import_preview(
+        parsed,
+        team_budget.start_date,
+        team_budget.end_date,
+        _team_source_map(team_budget),
+    )
+    return jsonify({
+        'mapping_required': False,
+        'sheets': parsed['sheets'],
+        'sheet': parsed['sheet'],
+        'headers': parsed['headers'],
+        'column_mapping': parsed['column_mapping'],
+        'time_format': time_format,
+        'filename': filename,
+        'sha256': sha256,
+        'replaces_rows': team_budget.import_row_count,
+        **preview,
+    })
+
+
+def _validate_import_member_mappings(team_budget, unknown_ids, mappings):
+    if not isinstance(mappings, dict):
+        return None, 'user_mapping must be an object.'
+    existing = {member.id: member for member in team_budget.members}
+    plans = {}
+    for source_id in unknown_ids:
+        raw = mappings.get(source_id)
+        if not isinstance(raw, dict):
+            return None, f'Choose where imported user {source_id!r} belongs.'
+        action = raw.get('action')
+        if action == 'existing':
+            try:
+                member_id = int(raw.get('member_id'))
+            except (TypeError, ValueError):
+                return None, f'Choose a member for imported user {source_id!r}.'
+            member = existing.get(member_id)
+            if member is None:
+                return None, f'The selected member for {source_id!r} no longer exists.'
+            plans[source_id.casefold()] = {'action': 'existing', 'member': member}
+        elif action == 'new':
+            display_name = str(raw.get('display_name') or '').strip()
+            if len(display_name) > 120:
+                return None, f'The name for {source_id!r} is too long.'
+            try:
+                if isinstance(raw.get('budgeted_hours'), bool):
+                    raise ValueError
+                hours = float(raw.get('budgeted_hours'))
+            except (TypeError, ValueError):
+                return None, f'Enter budgeted hours for {source_id!r}.'
+            if not math.isfinite(hours) or hours <= 0 or hours > 100000:
+                return None, f'Enter valid budgeted hours for {source_id!r}.'
+            plans[source_id.casefold()] = {
+                'action': 'new',
+                'display_name': display_name or None,
+                'budgeted_hours': round(hours, 2),
+                'source_user_id': source_id,
+            }
+        else:
+            return None, f'Choose whether {source_id!r} is new or existing.'
+    return plans, None
+
+
+@app.route('/api/team-budgets/<int:team_budget_id>/imports', methods=['POST'])
+def api_confirm_team_budget_import(team_budget_id):
+    team_budget = _team_budget_or_404(team_budget_id)
+    if team_budget is None:
+        return jsonify({'error': 'Team budget not found'}), 404
+    try:
+        data, filename, sha256 = _read_team_workbook_upload()
+        parsed, time_format = _parse_team_upload(data)
+        mappings = _team_form_json('user_mapping', {})
+    except (ValueError, team_budget_reporting.XlsxImportError) as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    preview = team_budget_reporting.import_preview(
+        parsed,
+        team_budget.start_date,
+        team_budget.end_date,
+        _team_source_map(team_budget),
+    )
+    if preview['validation_error_count']:
+        first = preview['validation_errors'][0]
+        return jsonify({
+            'error': (
+                f"Row {first['row']}: {first['error']} "
+                f"({preview['validation_error_count']} invalid row(s))."
+            ),
+            'validation_errors': preview['validation_errors'],
+        }), 400
+    if not parsed['rows']:
+        return jsonify({'error': 'The workbook does not contain any importable rows.'}), 400
+
+    plans, error = _validate_import_member_mappings(
+        team_budget, preview['unknown_user_ids'], mappings
+    )
+    if error:
+        return jsonify({'error': error}), 400
+
+    range_action = request.form.get('out_of_range_action', 'skip')
+    if range_action not in {'adjust', 'skip'}:
+        return jsonify({'error': 'Choose to adjust the period or skip outside dates.'}), 400
+
+    kept_rows = list(parsed['rows'])
+    skipped_count = 0
+    if preview['out_of_range_row_count']:
+        if range_action == 'adjust':
+            dates = [row['date'] for row in kept_rows]
+            team_budget.start_date = min(team_budget.start_date, min(dates))
+            team_budget.end_date = max(team_budget.end_date, max(dates))
+        else:
+            original_count = len(kept_rows)
+            kept_rows = [
+                row for row in kept_rows
+                if team_budget.start_date <= row['date'] <= team_budget.end_date
+            ]
+            skipped_count = original_count - len(kept_rows)
+    if not kept_rows:
+        db.session.rollback()
+        return jsonify({'error': 'No rows remain inside the team budget period.'}), 400
+
+    source_map = _team_source_map(team_budget)
+    try:
+        for source_key, plan in plans.items():
+            if plan['action'] == 'existing':
+                member = plan['member']
+                alias = TeamBudgetMemberAlias(
+                    team_budget_id=team_budget.id,
+                    member=member,
+                    source_user_id=next(
+                        value for value in preview['unknown_user_ids']
+                        if value.casefold() == source_key
+                    ),
+                )
+                db.session.add(alias)
+            else:
+                member = TeamBudgetMember(
+                    team_budget=team_budget,
+                    source_user_id=plan['source_user_id'],
+                    display_name=plan['display_name'],
+                    budgeted_hours=plan['budgeted_hours'],
+                )
+                db.session.add(member)
+            source_map[source_key] = member
+
+        TeamBudgetEntry.query.filter_by(team_budget_id=team_budget.id).delete(
+            synchronize_session=False
+        )
+        db.session.flush()
+        db.session.add_all([
+            TeamBudgetEntry(
+                team_budget_id=team_budget.id,
+                member_id=source_map[row['source_user_id'].casefold()].id,
+                work_date=row['date'],
+                time_seconds=row['seconds'],
+                source_user_id=row['source_user_id'],
+                source_row=row['row'],
+            )
+            for row in kept_rows
+        ])
+        team_budget.imported_at = datetime.now()
+        team_budget.import_filename = filename
+        team_budget.import_sha256 = sha256
+        team_budget.import_row_count = len(kept_rows)
+        team_budget.import_skipped_count = skipped_count
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    return jsonify({
+        'success': True,
+        'imported_rows': len(kept_rows),
+        'skipped_rows': skipped_count,
+        'time_format': time_format,
+        'budget': _team_budget_json(team_budget, detail=True),
+    })
+
+
+@app.route('/api/team-budgets/<int:team_budget_id>/entries', methods=['GET'])
+def api_team_budget_entries(team_budget_id):
+    team_budget = _team_budget_or_404(team_budget_id)
+    if team_budget is None:
+        return jsonify({'error': 'Team budget not found'}), 404
+    page = max(1, request.args.get('page', 1, type=int))
+    per_page = min(200, max(10, request.args.get('per_page', 50, type=int)))
+    member_id = request.args.get('member_id', type=int)
+    search = (request.args.get('q') or '').strip()
+
+    query = TeamBudgetEntry.query.join(TeamBudgetMember).filter(
+        TeamBudgetEntry.team_budget_id == team_budget.id
+    )
+    if member_id is not None:
+        query = query.filter(TeamBudgetEntry.member_id == member_id)
+    if search:
+        pattern = f'%{search}%'
+        query = query.filter(or_(
+            TeamBudgetEntry.source_user_id.ilike(pattern),
+            TeamBudgetMember.display_name.ilike(pattern),
+        ))
+    pagination = query.order_by(
+        TeamBudgetEntry.work_date.desc(), TeamBudgetEntry.source_row.desc()
+    ).paginate(page=page, per_page=per_page, error_out=False)
+    return jsonify({
+        'page': page,
+        'pages': pagination.pages,
+        'total': pagination.total,
+        'entries': [
+            {
+                'id': entry.id,
+                'date': entry.work_date.isoformat(),
+                'member_id': entry.member_id,
+                'member_name': entry.member.name,
+                'source_user_id': entry.source_user_id,
+                'source_row': entry.source_row,
+                'seconds': entry.time_seconds,
+                'hours': round(entry.time_seconds / 3600, 4),
+            }
+            for entry in pagination.items
+        ],
+    })
 
 
 def _conflicting_task(date_obj, start, end, ignore_id=None):

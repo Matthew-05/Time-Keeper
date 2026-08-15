@@ -186,6 +186,148 @@ class BudgetHold(db.Model):
         return f'<BudgetHold budget={self.budget_id} {self.start_date}..{end}>'
 
 
+class TeamBudget(db.Model):
+    """An imported team engagement, intentionally separate from local time."""
+    __tablename__ = 'team_budget'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    client_id = db.Column(
+        db.Integer,
+        db.ForeignKey('client.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    client = db.relationship(
+        'Client',
+        backref=db.backref('team_budgets', lazy=True, passive_deletes=True),
+    )
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    notes = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    imported_at = db.Column(db.DateTime, nullable=True)
+    import_filename = db.Column(db.String(255), nullable=True)
+    import_sha256 = db.Column(db.String(64), nullable=True)
+    import_row_count = db.Column(db.Integer, nullable=False, default=0)
+    import_skipped_count = db.Column(db.Integer, nullable=False, default=0)
+
+    members = db.relationship(
+        'TeamBudgetMember',
+        back_populates='team_budget',
+        cascade='all, delete-orphan',
+        order_by='TeamBudgetMember.id',
+    )
+    entries = db.relationship(
+        'TeamBudgetEntry',
+        back_populates='team_budget',
+        cascade='all, delete-orphan',
+    )
+
+    __table_args__ = (
+        db.Index('ix_team_budget_client_dates', 'client_id', 'start_date', 'end_date'),
+        db.CheckConstraint('end_date >= start_date', name='ck_team_budget_dates_ordered'),
+    )
+
+
+class TeamBudgetMember(db.Model):
+    """One person's commitment inside a team engagement."""
+    __tablename__ = 'team_budget_member'
+
+    id = db.Column(db.Integer, primary_key=True)
+    team_budget_id = db.Column(
+        db.Integer,
+        db.ForeignKey('team_budget.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    team_budget = db.relationship('TeamBudget', back_populates='members')
+    source_user_id = db.Column(db.String(200), nullable=False)
+    display_name = db.Column(db.String(120), nullable=True)
+    budgeted_hours = db.Column(db.Float, nullable=False)
+
+    aliases = db.relationship(
+        'TeamBudgetMemberAlias',
+        back_populates='member',
+        cascade='all, delete-orphan',
+    )
+    entries = db.relationship(
+        'TeamBudgetEntry', back_populates='member', passive_deletes=True
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            'team_budget_id', 'source_user_id',
+            name='uq_team_budget_member_source_id',
+        ),
+        db.CheckConstraint(
+            'budgeted_hours > 0', name='ck_team_budget_member_hours_positive'
+        ),
+        db.Index('ix_team_budget_member_budget', 'team_budget_id'),
+    )
+
+    @property
+    def name(self):
+        return self.display_name or self.source_user_id
+
+
+class TeamBudgetMemberAlias(db.Model):
+    """An additional imported user ID persistently mapped to a team member."""
+    __tablename__ = 'team_budget_member_alias'
+
+    id = db.Column(db.Integer, primary_key=True)
+    team_budget_id = db.Column(
+        db.Integer,
+        db.ForeignKey('team_budget.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    member_id = db.Column(
+        db.Integer,
+        db.ForeignKey('team_budget_member.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    source_user_id = db.Column(db.String(200), nullable=False)
+    member = db.relationship('TeamBudgetMember', back_populates='aliases')
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            'team_budget_id', 'source_user_id',
+            name='uq_team_budget_alias_source_id',
+        ),
+        db.Index('ix_team_budget_alias_member', 'member_id'),
+    )
+
+
+class TeamBudgetEntry(db.Model):
+    """One normalized historical row from the latest imported workbook."""
+    __tablename__ = 'team_budget_entry'
+
+    id = db.Column(db.Integer, primary_key=True)
+    team_budget_id = db.Column(
+        db.Integer,
+        db.ForeignKey('team_budget.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    member_id = db.Column(
+        db.Integer,
+        db.ForeignKey('team_budget_member.id', ondelete='RESTRICT'),
+        nullable=False,
+    )
+    work_date = db.Column(db.Date, nullable=False)
+    time_seconds = db.Column(db.Integer, nullable=False)
+    source_user_id = db.Column(db.String(200), nullable=False)
+    source_row = db.Column(db.Integer, nullable=False)
+
+    team_budget = db.relationship('TeamBudget', back_populates='entries')
+    member = db.relationship('TeamBudgetMember', back_populates='entries')
+
+    __table_args__ = (
+        db.CheckConstraint(
+            'time_seconds > 0', name='ck_team_budget_entry_seconds_positive'
+        ),
+        db.Index('ix_team_budget_entry_budget_date', 'team_budget_id', 'work_date'),
+        db.Index('ix_team_budget_entry_member_date', 'member_id', 'work_date'),
+    )
+
+
 class Task_Item(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     date = db.Column(db.Date, nullable=False)  # Start date is required

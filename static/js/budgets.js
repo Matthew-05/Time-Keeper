@@ -136,6 +136,9 @@ class Budgets extends TimeKeeper {
         document.addEventListener('timeFormatChanged', () => {
             if (this.detailId && this.detail) this.renderDetail(this.detail)
         })
+        document.addEventListener('budgetViewChanged', (event) => {
+            if (event.detail?.view === 'personal') this.renderOverview()
+        })
         await this.load()
         await this.openLinkedBudget()
     }
@@ -217,7 +220,9 @@ class Budgets extends TimeKeeper {
 
         if (!this.budgets.length) {
             this.overview.classList.add('hidden')
-            this.subtitle.textContent = 'Hours budgeted, hours spent.'
+            if (!this.list.closest('#personal-budgets-view')?.classList.contains('hidden')) {
+                this.subtitle.textContent = 'Hours budgeted, hours spent.'
+            }
             return
         }
 
@@ -253,9 +258,11 @@ class Budgets extends TimeKeeper {
         riskEl.classList.toggle('text-text', overBudget.length === 0)
 
         this.overview.classList.remove('hidden')
-        this.subtitle.textContent =
-            `${this.budgets.length} budget${this.budgets.length === 1 ? '' : 's'}`
-            + ` · ${active.length} running now`
+        if (!this.list.closest('#personal-budgets-view')?.classList.contains('hidden')) {
+            this.subtitle.textContent =
+                `${this.budgets.length} budget${this.budgets.length === 1 ? '' : 's'}`
+                + ` · ${active.length} running now`
+        }
     }
 
     renderList() {
