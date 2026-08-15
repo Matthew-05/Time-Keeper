@@ -3611,6 +3611,7 @@ class WebviewAPI:
             import System.Windows.Forms as WinForms
 
             native = webview.windows[0].native
+            self._enable_native_snap(native)
 
             def enable_non_client_regions(sender, args):
                 if args.IsSuccess:
@@ -3633,6 +3634,78 @@ class WebviewAPI:
             # The app remains usable with pywebview's basic frameless behavior
             # if a future backend no longer exposes these WebView2 APIs.
             logger.warning(f'Could not configure native Windows chrome: {exc}')
+
+    @staticmethod
+    def _enable_native_snap(native):
+        """Restore the Win32 styles Aero Snap requires on a frameless form.
+
+        WinForms removes its sizing frame when ``FormBorderStyle`` becomes
+        ``None``. WebView2 can still initiate a native caption drag through an
+        ``app-region``, but Windows will only preview the maximize target; it
+        will not commit the snap unless the host advertises a sizing frame and
+        maximize support. These flags describe capability only—the visible
+        chrome remains the HTML title bar.
+        """
+        import ctypes
+        from ctypes import wintypes
+
+        gwl_style = -16
+        ws_maximizebox = 0x00010000
+        ws_minimizebox = 0x00020000
+        ws_thickframe = 0x00040000
+        ws_sysmenu = 0x00080000
+        swp_nomove = 0x0002
+        swp_nosize = 0x0001
+        swp_nozorder = 0x0004
+        swp_noactivate = 0x0010
+        swp_framechanged = 0x0020
+
+        user32 = ctypes.WinDLL('user32', use_last_error=True)
+        user32.GetWindowLongW.argtypes = (wintypes.HWND, ctypes.c_int)
+        user32.GetWindowLongW.restype = ctypes.c_long
+        user32.SetWindowLongW.argtypes = (
+            wintypes.HWND,
+            ctypes.c_int,
+            ctypes.c_long,
+        )
+        user32.SetWindowLongW.restype = ctypes.c_long
+        user32.SetWindowPos.argtypes = (
+            wintypes.HWND,
+            wintypes.HWND,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            wintypes.UINT,
+        )
+        user32.SetWindowPos.restype = wintypes.BOOL
+
+        hwnd = wintypes.HWND(native.Handle.ToInt64())
+        style = user32.GetWindowLongW(hwnd, gwl_style)
+        snap_style = (
+            style
+            | ws_thickframe
+            | ws_maximizebox
+            | ws_minimizebox
+            | ws_sysmenu
+        )
+        if snap_style == style:
+            return
+
+        ctypes.set_last_error(0)
+        previous = user32.SetWindowLongW(hwnd, gwl_style, snap_style)
+        if previous == 0 and ctypes.get_last_error():
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        frame_flags = (
+            swp_nomove
+            | swp_nosize
+            | swp_nozorder
+            | swp_noactivate
+            | swp_framechanged
+        )
+        if not user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, frame_flags):
+            raise ctypes.WinError(ctypes.get_last_error())
 
     def navigate(self, url):
         webview.windows[0].evaluate_js(f'window.location.href = "{url}"')
@@ -3677,16 +3750,24 @@ class WebviewAPI:
         WinForms treats ``MaximizedBounds.X/Y`` as offsets from the current
         monitor, rather than virtual-desktop coordinates. Supplying
         ``WorkingArea`` directly therefore applies a negative monitor position
-        twice and can move the window entirely off-screen.
+        twice and can move the window entirely off-screen. The snap-enabling
+        sizing frame must also sit just outside that work area; otherwise its
+        non-client pixels become a visible border around the maximized client.
         """
         screen = winforms.Screen.FromHandle(native.Handle)
         work_area = screen.WorkingArea
         screen_bounds = screen.Bounds
+        window_bounds = native.Bounds
+        client_bounds = native.RectangleToScreen(native.ClientRectangle)
+        frame_left = max(0, client_bounds.Left - window_bounds.Left)
+        frame_top = max(0, client_bounds.Top - window_bounds.Top)
+        frame_right = max(0, window_bounds.Right - client_bounds.Right)
+        frame_bottom = max(0, window_bounds.Bottom - client_bounds.Bottom)
         native.MaximizedBounds = drawing.Rectangle(
-            work_area.X - screen_bounds.X,
-            work_area.Y - screen_bounds.Y,
-            work_area.Width,
-            work_area.Height,
+            work_area.X - screen_bounds.X - frame_left,
+            work_area.Y - screen_bounds.Y - frame_top,
+            work_area.Width + frame_left + frame_right,
+            work_area.Height + frame_top + frame_bottom,
         )
 
     def resize_window(self, width, height, direction):
