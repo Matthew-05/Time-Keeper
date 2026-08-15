@@ -2064,6 +2064,15 @@ export class TaskBrowser extends TimeKeeper {
                 this.copyWorks(current);
                 return;
             }
+            if (e.target.closest('.tk-adjustment-jump')) {
+                e.stopPropagation();
+                if (current.adjustment) {
+                    this.manualAdjustmentManager.open({
+                        adjustmentId: current.adjustment.id,
+                    });
+                }
+                return;
+            }
             this.toggleDetailTable(current.detailKey);
         });
 
@@ -2093,7 +2102,7 @@ export class TaskBrowser extends TimeKeeper {
             `${this.formatDurationMinutes(totalMinutes)}`
             + (adjustmentMinutes == null
                 ? ''
-                : ` <span class="ml-1 text-xs font-medium text-accent" title="Manual adjustment">${adjustmentMinutes > 0 ? '+' : adjustmentMinutes < 0 ? '−' : ''}${Math.abs(adjustmentMinutes)}m adj.</span>`)
+                : ` <button type="button" class="tk-adjustment-jump" title="Edit manual adjustment" aria-label="Edit manual adjustment">${adjustmentMinutes > 0 ? '+' : adjustmentMinutes < 0 ? '−' : ''}${Math.abs(adjustmentMinutes)}m adj.</button>`)
         );
 
         const hoursCell = summaryRow.querySelector('[data-cell="hours"]');

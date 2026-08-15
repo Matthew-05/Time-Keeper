@@ -113,7 +113,7 @@ export class ManualAdjustmentManager {
         return Boolean(this.modal && !this.modal.classList.contains('hidden'));
     }
 
-    async open() {
+    async open({ adjustmentId = null } = {}) {
         const date = this.owner.selectedDate.value;
         setText(this.subtitle, this.owner.formatDateLong(date));
         this.clearError();
@@ -139,7 +139,11 @@ export class ManualAdjustmentManager {
         this.resetForm();
         this.modal.classList.remove('hidden');
         lockBodyScroll();
-        this.panel?.focus();
+        const requested = adjustmentId == null
+            ? null
+            : this.adjustments.find(row => row.id === Number(adjustmentId));
+        if (requested) this.edit(requested);
+        else this.panel?.focus();
     }
 
     close() {
@@ -416,10 +420,27 @@ export class ManualAdjustmentManager {
 
         const sync = () => this.syncFromAuthorValue();
         const commit = () => this.syncFromAuthorValue(true);
-        hours.addEventListener('input', sync);
-        minutes.addEventListener('input', sync);
-        hours.addEventListener('change', commit);
-        minutes.addEventListener('change', commit);
+        const bindSegment = (input, max) => {
+            let lastValid = input.value;
+            input.addEventListener('input', () => {
+                const numeric = Number(input.value);
+                if (input.value === '' || (/^\d{1,2}$/.test(input.value) && numeric <= max)) {
+                    lastValid = input.value;
+                } else if (numeric === max + 1) {
+                    input.value = '00';
+                    lastValid = input.value;
+                } else if (numeric === -1) {
+                    input.value = String(max);
+                    lastValid = input.value;
+                } else {
+                    input.value = lastValid;
+                }
+                sync();
+            });
+            input.addEventListener('change', commit);
+        };
+        bindSegment(hours, 99);
+        bindSegment(minutes, 59);
 
         // The package advances from minutes into its seconds field. Seconds are
         // intentionally hidden here, so keep right-arrow and two-digit entry in

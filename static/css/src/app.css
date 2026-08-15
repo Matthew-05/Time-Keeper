@@ -1440,6 +1440,32 @@
     @apply cursor-pointer transition-colors;
   }
 
+  /* The adjustment amount is both useful context and the shortest route back
+     to the adjustment that produced it. It remains text-like until hovered so
+     it does not compete with the row's primary client/duration figures. */
+  .tk-adjustment-jump {
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    color: var(--accent-text);
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 0.25rem;
+    padding: 0.15rem 0.25rem;
+  }
+
+  .tk-adjustment-jump:hover {
+    background-color: var(--accent-soft);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .tk-adjustment-jump:focus-visible {
+    box-shadow: 0 0 0 3px var(--ring);
+    outline: none;
+  }
+
   .detail-row > td {
     background-color: var(--history-detail-shell);
     padding: 0 !important;

@@ -502,5 +502,59 @@ console.log('\nManual adjustments require a non-zero delta and use hours/minutes
         manager.normalizedBaseMinutes(65.98, true), 65);
 }
 
+console.log('\nManual adjustment shortcuts reopen the matching adjustment');
+{
+    const history = Object.create(TaskBrowser.prototype);
+    history.roundingEnabled = false;
+    history.summaryFigures = () => ({
+        totalMinutes: 135,
+        fractionalHours: 2.25,
+        roundingDiff: 0,
+        adjustmentMinutes: 15,
+    });
+    history.formatDurationMinutes = (minutes) => `${minutes}m`;
+    const nameCell = { textContent: '' };
+    const minutesCell = { innerHTML: '' };
+    const summaryRow = {
+        querySelector: (selector) => ({
+            '[data-cell="name"]': nameCell,
+            '[data-cell="minutes"]': minutesCell,
+        })[selector] ?? null,
+    };
+    history.updateSummaryRow(summaryRow, {
+        name: 'Acme',
+        adjustment: { id: 17, adjustment_minutes: 15 },
+    });
+    check('the summary adjustment is rendered as an edit button', [
+        minutesCell.innerHTML.includes('tk-adjustment-jump'),
+        minutesCell.innerHTML.includes('+15m adj.'),
+        minutesCell.innerHTML.includes('Edit manual adjustment'),
+    ], [true, true, true]);
+
+    const requested = { id: 17, client_id: 4 };
+    const manager = Object.create(ManualAdjustmentManager.prototype);
+    manager.owner = {
+        selectedDate: { value: '2026-08-15' },
+        formatDateLong: () => 'August 15, 2026',
+        fetchFromAPI: async (url) => url === '/clients' ? [] : [requested],
+        clients: [],
+        manualAdjustments: [],
+    };
+    manager.subtitle = { textContent: '' };
+    manager.modal = stubElement();
+    let panelFocuses = 0;
+    manager.panel = { focus: () => { panelFocuses++; } };
+    manager.clearError = () => {};
+    manager.initializeClientPicker = () => {};
+    manager.renderList = () => {};
+    manager.resetForm = () => {};
+    let edited = null;
+    manager.edit = (adjustment) => { edited = adjustment; };
+
+    await manager.open({ adjustmentId: 17 });
+    check('opening from the table selects the requested adjustment', edited, requested);
+    check('focus goes to the editor instead of the modal shell', panelFocuses, 0);
+}
+
 console.log(failures ? `\n${failures} failure(s)` : '\nall checks passed');
 process.exit(failures ? 1 : 0);
