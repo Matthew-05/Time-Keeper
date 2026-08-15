@@ -3871,6 +3871,19 @@ span.flatpickr-weekday {
   background: linear-gradient(var(--hover-tint), var(--hover-tint));
 }
 
+/* Flatpickr leaves native month options transparent. On Windows that makes
+   the dark-theme popup inherit the system's light menu surface while keeping
+   the app's light text. Give both the native widget and its options an
+   explicit dark palette. */
+.dark .flatpickr-current-month .flatpickr-monthDropdown-months {
+  color-scheme: dark;
+}
+
+.dark .flatpickr-current-month .flatpickr-monthDropdown-months .flatpickr-monthDropdown-month {
+  background-color: var(--field);
+  color: var(--text);
+}
+
 span.flatpickr-weekday {
   font-size: 0.6875rem;
   letter-spacing: 0.045em;
