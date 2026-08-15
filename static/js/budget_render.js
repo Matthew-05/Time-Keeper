@@ -275,6 +275,20 @@ export function dateRange(budget) {
     return `${shortDate(budget.start_date)} – ${shortDate(budget.end_date)}`
 }
 
+/** Modal-header range with an explicit year on both dates. */
+export function detailDateRange(budget) {
+    const format = (iso) => {
+        if (!iso) return '—'
+        const [year, month, day] = iso.split('-').map(Number)
+        return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+        })
+    }
+    return `${format(budget.start_date)} – ${format(budget.end_date)}`
+}
+
 /**
  * The one-line headline: what this budget most needs you to know.
  *

@@ -136,13 +136,32 @@ class WorkbookImportTests(unittest.TestCase):
             ('2026-09-01', 'new', 3),
         ]))
         preview = team_budgets.import_preview(
-            parsed, date(2026, 8, 1), date(2026, 8, 31), {'known'}
+            parsed, date(2026, 8, 1), date(2026, 8, 31), {'known'},
+            today=date(2026, 9, 30),
         )
         self.assertEqual(preview['unknown_user_ids'], ['New'])
         self.assertEqual(preview['out_of_range_row_count'], 2)
         self.assertEqual(
             [item['date'] for item in preview['out_of_range_dates']],
             ['2026-07-31', '2026-09-01'],
+        )
+
+    def test_preview_excludes_future_rows_from_users_dates_and_range(self):
+        parsed = team_budgets.parse_xlsx(workbook_bytes([
+            ('2026-08-10', 'Historical', 1),
+            ('2026-08-16', 'Future', 2),
+        ]))
+        preview = team_budgets.import_preview(
+            parsed, date(2026, 8, 1), date(2026, 8, 31), set(),
+            today=date(2026, 8, 15),
+        )
+        self.assertEqual(preview['row_count'], 1)
+        self.assertEqual(preview['source_user_ids'], ['Historical'])
+        self.assertEqual(preview['date_max'], '2026-08-10')
+        self.assertEqual(preview['future_row_count'], 1)
+        self.assertEqual(
+            preview['future_dates'],
+            [{'date': '2026-08-16', 'row_count': 1}],
         )
 
 
@@ -167,9 +186,24 @@ class TeamBudgetSummaryTests(unittest.TestCase):
         self.assertEqual(summary['projection_as_of'], '2026-08-05')
         self.assertEqual(summary['members'][0]['used_hours'], 5)
         self.assertEqual(summary['members'][1]['used_hours'], 10)
+        self.assertEqual(summary['members'][0]['projected_hours'], 50)
+        self.assertEqual(summary['members'][1]['projected_hours'], 20)
+        self.assertEqual(summary['members'][1]['projection_as_of'], '2026-08-05')
         self.assertEqual(summary['burn'][4]['actual'], 15)
         self.assertIsNone(summary['burn'][5]['actual'])
+        self.assertEqual(summary['member_burn']['1'][0]['actual'], 5)
+        self.assertIsNone(summary['member_burn']['1'][1]['actual'])
+        self.assertEqual(summary['member_burn']['2'][4]['actual'], 10)
+        self.assertEqual(summary['member_burn']['2'][4]['ideal'], 15)
         self.assertEqual(sum(week['hours'] for week in summary['weekly']), 15)
+        self.assertEqual(
+            sum(week['hours'] for week in summary['member_weekly']['1']),
+            5,
+        )
+        self.assertEqual(
+            sum(week['hours'] for week in summary['member_weekly']['2']),
+            10,
+        )
 
     def test_over_budget_status_wins_after_period_ends(self):
         summary = team_budgets.summarise_team_budget(
@@ -179,6 +213,7 @@ class TeamBudgetSummaryTests(unittest.TestCase):
             today=date(2026, 9, 1),
         )
         self.assertEqual(summary['status'], 'over')
+        self.assertTrue(summary['is_closed'])
 
 
 if __name__ == '__main__':

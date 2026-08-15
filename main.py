@@ -3032,9 +3032,49 @@ def _team_budget_json(team_budget, detail=False, today=None):
         entry_records,
         today=today,
     )
+    if detail:
+        member_entry_counts = dict(db.session.query(
+            TeamBudgetEntry.member_id,
+            func.count(TeamBudgetEntry.id),
+        ).filter(
+            TeamBudgetEntry.team_budget_id == team_budget.id
+        ).group_by(TeamBudgetEntry.member_id).all())
+        policy = _rounding_policy()
+        seconds_by_member_day = {}
+        raw_seconds_by_member = {}
+        for entry in entry_records:
+            member_id = entry['member_id']
+            key = (member_id, entry['date'])
+            seconds_by_member_day[key] = (
+                seconds_by_member_day.get(key, 0) + int(entry['seconds'])
+            )
+            raw_seconds_by_member[member_id] = (
+                raw_seconds_by_member.get(member_id, 0) + int(entry['seconds'])
+            )
+        rounded_hours_by_member = {}
+        for (member_id, _work_date), seconds in seconds_by_member_day.items():
+            rounded_hours_by_member[member_id] = (
+                rounded_hours_by_member.get(member_id, 0)
+                + round_seconds_to_hours(seconds, policy)
+            )
+        for member in summary['members']:
+            member_id = member['id']
+            budget_seconds = round(float(member['budgeted_hours']) * 3600)
+            used_seconds = raw_seconds_by_member.get(member_id, 0)
+            display_used = rounded_hours_by_member.get(member_id, 0.0)
+            member['budget_seconds'] = budget_seconds
+            member['used_seconds'] = used_seconds
+            member['remaining_seconds'] = budget_seconds - used_seconds
+            member['entry_count'] = member_entry_counts.get(member_id, 0)
+            member['display_used_hours'] = round(display_used, 6)
+            member['display_remaining_hours'] = round(
+                float(member['budgeted_hours']) - display_used, 6
+            )
     if not detail:
         summary.pop('burn', None)
+        summary.pop('member_burn', None)
         summary.pop('weekly', None)
+        summary.pop('member_weekly', None)
 
     return {
         'id': team_budget.id,
@@ -3372,7 +3412,7 @@ def api_preview_new_team_budget_import():
     except (ValueError, team_budget_reporting.XlsxImportError) as exc:
         return jsonify({'error': str(exc)}), 400
 
-    dates = [row['date'] for row in parsed['rows']]
+    dates = [row['date'] for row in parsed['rows'] if row['date'] <= date.today()]
     preview_start = min(dates) if dates else date.today()
     preview_end = max(dates) if dates else preview_start
     preview = team_budget_reporting.import_preview(
@@ -3416,15 +3456,16 @@ def api_create_team_budget_from_import():
             ),
             'validation_errors': parsed['errors'][:50],
         }), 400
-    if not parsed['rows']:
-        return jsonify({'error': 'The workbook does not contain any importable rows.'}), 400
+    historical_rows = [row for row in parsed['rows'] if row['date'] <= date.today()]
+    if not historical_rows:
+        return jsonify({'error': 'The workbook does not contain any historical rows to import.'}), 400
 
     member_fields = {
         member['source_user_id'].casefold(): member for member in members
     }
     missing_source_ids = sorted({
         row['source_user_id']
-        for row in parsed['rows']
+        for row in historical_rows
         if row['source_user_id'].casefold() not in member_fields
     }, key=str.casefold)
     if missing_source_ids:
@@ -3435,7 +3476,7 @@ def api_create_team_budget_from_import():
             )
         }), 400
 
-    workbook_dates = [row['date'] for row in parsed['rows']]
+    workbook_dates = [row['date'] for row in historical_rows]
     fields['start_date'] = min(fields['start_date'], min(workbook_dates))
     fields['end_date'] = max(fields['end_date'], max(workbook_dates))
     team_budget = TeamBudget(
@@ -3443,8 +3484,8 @@ def api_create_team_budget_from_import():
         imported_at=datetime.now(),
         import_filename=filename,
         import_sha256=sha256,
-        import_row_count=len(parsed['rows']),
-        import_skipped_count=0,
+        import_row_count=len(historical_rows),
+        import_skipped_count=len(parsed['rows']) - len(historical_rows),
     )
     source_map = {}
     for values in members:
@@ -3466,7 +3507,7 @@ def api_create_team_budget_from_import():
                 source_user_id=row['source_user_id'],
                 source_row=row['row'],
             )
-            for row in parsed['rows']
+            for row in historical_rows
         ])
         db.session.commit()
     except Exception:
@@ -3586,8 +3627,8 @@ def api_confirm_team_budget_import(team_budget_id):
             ),
             'validation_errors': preview['validation_errors'],
         }), 400
-    if not parsed['rows']:
-        return jsonify({'error': 'The workbook does not contain any importable rows.'}), 400
+    if not preview['row_count']:
+        return jsonify({'error': 'The workbook does not contain any historical rows to import.'}), 400
 
     plans, error = _validate_import_member_mappings(
         team_budget, preview['unknown_user_ids'], mappings
@@ -3599,8 +3640,8 @@ def api_confirm_team_budget_import(team_budget_id):
     if range_action not in {'adjust', 'skip'}:
         return jsonify({'error': 'Choose to adjust the period or skip outside dates.'}), 400
 
-    kept_rows = list(parsed['rows'])
-    skipped_count = 0
+    kept_rows = [row for row in parsed['rows'] if row['date'] <= date.today()]
+    skipped_count = preview['future_row_count']
     if preview['out_of_range_row_count']:
         if range_action == 'adjust':
             dates = [row['date'] for row in kept_rows]
@@ -3612,7 +3653,7 @@ def api_confirm_team_budget_import(team_budget_id):
                 row for row in kept_rows
                 if team_budget.start_date <= row['date'] <= team_budget.end_date
             ]
-            skipped_count = original_count - len(kept_rows)
+            skipped_count += original_count - len(kept_rows)
     if not kept_rows:
         db.session.rollback()
         return jsonify({'error': 'No rows remain inside the team budget period.'}), 400
@@ -3683,19 +3724,12 @@ def api_team_budget_entries(team_budget_id):
     page = max(1, request.args.get('page', 1, type=int))
     per_page = min(200, max(10, request.args.get('per_page', 50, type=int)))
     member_id = request.args.get('member_id', type=int)
-    search = (request.args.get('q') or '').strip()
 
     query = TeamBudgetEntry.query.join(TeamBudgetMember).filter(
         TeamBudgetEntry.team_budget_id == team_budget.id
     )
     if member_id is not None:
         query = query.filter(TeamBudgetEntry.member_id == member_id)
-    if search:
-        pattern = f'%{search}%'
-        query = query.filter(or_(
-            TeamBudgetEntry.source_user_id.ilike(pattern),
-            TeamBudgetMember.display_name.ilike(pattern),
-        ))
     pagination = query.order_by(
         TeamBudgetEntry.work_date.desc(), TeamBudgetEntry.source_row.desc()
     ).paginate(page=page, per_page=per_page, error_out=False)
@@ -3710,7 +3744,6 @@ def api_team_budget_entries(team_budget_id):
                 'member_id': entry.member_id,
                 'member_name': entry.member.name,
                 'source_user_id': entry.source_user_id,
-                'source_row': entry.source_row,
                 'seconds': entry.time_seconds,
                 'hours': round(entry.time_seconds / 3600, 4),
             }

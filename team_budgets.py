@@ -360,9 +360,11 @@ def parse_xlsx(data, *, time_format='decimal_hours', column_mapping=None, sheet_
     }
 
 
-def import_preview(parsed, start_date, end_date, known_source_ids):
+def import_preview(parsed, start_date, end_date, known_source_ids, today=None):
     """Classify normalized rows without mutating the database."""
-    rows = parsed['rows']
+    today = today or date.today()
+    future = Counter(row['date'] for row in parsed['rows'] if row['date'] > today)
+    rows = [row for row in parsed['rows'] if row['date'] <= today]
     known = {value.casefold() for value in known_source_ids}
     unique_users = {}
     for row in rows:
@@ -382,6 +384,11 @@ def import_preview(parsed, start_date, end_date, known_source_ids):
         'unknown_user_ids': unknown,
         'date_min': min(dates).isoformat() if dates else None,
         'date_max': max(dates).isoformat() if dates else None,
+        'future_row_count': sum(future.values()),
+        'future_dates': [
+            {'date': day.isoformat(), 'row_count': future[day]}
+            for day in sorted(future)
+        ],
         'out_of_range_row_count': sum(outside.values()),
         'out_of_range_dates': [
             {'date': day.isoformat(), 'row_count': outside[day]}
@@ -399,80 +406,135 @@ def summarise_team_budget(start_date, end_date, members, entries, today=None):
     used_seconds = sum(int(entry['seconds']) for entry in entry_rows)
     used = used_seconds / 3600
     total_days = (end_date - start_date).days + 1
-    entry_dates = [entry['date'] for entry in entry_rows]
-    as_of = min(max(entry_dates), end_date) if entry_dates else None
-    elapsed_days = (
-        max(1, (as_of - start_date).days + 1)
-        if as_of is not None and as_of >= start_date else 0
-    )
-    projected = used * total_days / elapsed_days if elapsed_days else 0.0
-    percent_elapsed = elapsed_days / total_days * 100 if total_days else 100.0
-    projection_mature = elapsed_days >= 5 and percent_elapsed >= 20
-
-    if today < start_date:
-        status = 'upcoming'
-    elif used > budgeted:
-        status = 'over'
-    elif today > end_date:
-        status = 'closed'
-    elif projection_mature and projected > budgeted:
-        status = 'at_risk'
-    else:
-        status = 'on_track'
-
     per_member_used = defaultdict(float)
+    per_member_day = defaultdict(lambda: defaultdict(float))
     per_day = defaultdict(float)
     for entry in entry_rows:
         per_member_used[entry['member_id']] += int(entry['seconds'])
+        per_member_day[entry['member_id']][entry['date']] += int(entry['seconds'])
         per_day[entry['date']] += int(entry['seconds'])
+
+    def scope_projection(committed_hours, consumed_hours, last_entry_date):
+        as_of_date = (
+            min(last_entry_date, end_date) if last_entry_date is not None else None
+        )
+        elapsed = (
+            max(1, (as_of_date - start_date).days + 1)
+            if as_of_date is not None and as_of_date >= start_date else 0
+        )
+        projected_hours = (
+            consumed_hours * total_days / elapsed if elapsed else 0.0
+        )
+        elapsed_percent = elapsed / total_days * 100 if total_days else 100.0
+        mature = elapsed >= 5 and elapsed_percent >= 20
+
+        if today < start_date:
+            scope_status = 'upcoming'
+        elif consumed_hours > committed_hours:
+            scope_status = 'over'
+        elif today > end_date:
+            scope_status = 'closed'
+        elif mature and projected_hours > committed_hours:
+            scope_status = 'at_risk'
+        else:
+            scope_status = 'on_track'
+
+        return {
+            'projected_hours': round(projected_hours, 2),
+            'projection_as_of': as_of_date.isoformat() if as_of_date else None,
+            'projection_mature': mature,
+            'elapsed_days': elapsed,
+            'percent_elapsed': round(elapsed_percent, 1),
+            'status': scope_status,
+        }
+
+    entry_dates = [entry['date'] for entry in entry_rows]
+    as_of = min(max(entry_dates), end_date) if entry_dates else None
+    team_projection = scope_projection(
+        budgeted,
+        used,
+        as_of,
+    )
 
     member_summaries = []
     for member in member_rows:
         member_budget = float(member['budgeted_hours'])
         member_used = per_member_used[member['id']] / 3600
+        member_dates = list(per_member_day[member['id']])
         member_summaries.append({
             **member,
             'budgeted_hours': round(member_budget, 2),
             'used_hours': round(member_used, 2),
             'remaining_hours': round(member_budget - member_used, 2),
             'percent_used': round(member_used / member_budget * 100, 1),
+            **scope_projection(
+                member_budget,
+                member_used,
+                max(member_dates) if member_dates else None,
+            ),
         })
 
-    burn = []
-    cumulative = 0.0
-    day = start_date
-    while day <= end_date:
-        cumulative += per_day[day] / 3600
-        burn.append({
-            'date': day.isoformat(),
-            'actual': round(cumulative, 4) if as_of is not None and day <= as_of else None,
-            'ideal': round(budgeted * ((day - start_date).days + 1) / total_days, 4),
-            'hours': round(per_day[day] / 3600, 4),
-        })
-        day += timedelta(days=1)
+    def burn_series(daily_seconds, committed_hours, last_entry_date):
+        series = []
+        cumulative = 0.0
+        day = start_date
+        while day <= end_date:
+            cumulative += daily_seconds[day] / 3600
+            series.append({
+                'date': day.isoformat(),
+                'actual': (
+                    round(cumulative, 4)
+                    if last_entry_date is not None and day <= last_entry_date else None
+                ),
+                'ideal': round(
+                    committed_hours * ((day - start_date).days + 1) / total_days, 4
+                ),
+                'hours': round(daily_seconds[day] / 3600, 4),
+            })
+            day += timedelta(days=1)
+        return series
+
+    burn = burn_series(per_day, budgeted, as_of)
+    member_burn = {}
+    for member in member_rows:
+        member_days = per_member_day[member['id']]
+        member_dates = list(member_days)
+        member_as_of = min(max(member_dates), end_date) if member_dates else None
+        member_burn[str(member['id'])] = burn_series(
+            member_days, float(member['budgeted_hours']), member_as_of
+        )
 
     weekly = defaultdict(float)
     for work_date, hours in per_day.items():
         week_start = work_date - timedelta(days=work_date.weekday())
         weekly[week_start] += hours / 3600
 
+    member_weekly = {}
+    for member in member_rows:
+        weeks = defaultdict(float)
+        for work_date, seconds in per_member_day[member['id']].items():
+            week_start = work_date - timedelta(days=work_date.weekday())
+            weeks[week_start] += seconds / 3600
+        member_weekly[str(member['id'])] = [
+            {'week_start': week.isoformat(), 'hours': round(hours, 2)}
+            for week, hours in sorted(weeks.items())
+        ]
+
     return {
         'budgeted_hours': round(budgeted, 2),
         'used_hours': round(used, 2),
         'remaining_hours': round(budgeted - used, 2),
         'percent_used': round(used / budgeted * 100, 1) if budgeted else 0.0,
-        'projected_hours': round(projected, 2),
-        'projection_as_of': as_of.isoformat() if as_of else None,
-        'projection_mature': projection_mature,
-        'elapsed_days': elapsed_days,
+        **team_projection,
         'total_days': total_days,
-        'percent_elapsed': round(percent_elapsed, 1),
-        'status': status,
         'is_active': start_date <= today <= end_date,
+        'is_closed': today > end_date,
         'members': member_summaries,
         'burn': burn,
+        'member_burn': member_burn,
         'weekly': [
             {'week_start': week.isoformat(), 'hours': round(hours, 2)}
             for week, hours in sorted(weekly.items())
         ],
+        'member_weekly': member_weekly,
     }

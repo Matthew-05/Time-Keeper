@@ -271,6 +271,11 @@ Budgets already over are counted separately, under Over budget."
     </section>
 
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div id="team-status-filter" class="tk-segmented" role="radiogroup" aria-label="Filter team budgets by status">
+        <button type="button" class="tk-segment active" role="radio" aria-checked="true" data-team-filter="active">Active</button>
+        <button type="button" class="tk-segment" role="radio" aria-checked="false" data-team-filter="closed">Closed</button>
+        <button type="button" class="tk-segment" role="radio" aria-checked="false" data-team-filter="all">All</button>
+      </div>
       <label class="tk-budget-client-filter flex items-center gap-2">
         <span class="tk-label mb-0">Client</span>
         <select id="team-client-filter" class="tk-select">
@@ -592,8 +597,11 @@ Budgets already over are counted separately, under Over budget."
       <div class="tk-modal-body space-y-4">
         <div class="grid gap-4 sm:grid-cols-2">
           <div class="tk-required-field" data-required-auto>
-            <label class="tk-label tk-field-heading" for="team-import-file"><span>Workbook</span><span class="tk-required-cue">Required</span></label>
-            <input type="file" id="team-import-file" class="tk-input" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
+            <div class="tk-label tk-field-heading"><span>Workbook</span><span class="tk-required-cue">Required</span></div>
+            <input type="file" id="team-import-file" class="sr-only" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
+            <div class="tk-team-import-file-picker">
+              <button type="button" id="team-import-file-button" class="tk-btn tk-btn-secondary tk-team-import-file-button">Choose file</button>
+            </div>
           </div>
           <div>
             <label class="tk-label" for="team-import-time-format">Time values mean</label>

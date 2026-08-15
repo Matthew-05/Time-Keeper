@@ -13,9 +13,15 @@ globalThis.window = {
     matchMedia: () => ({ matches: false }),
 }
 
-const { importChoiceErrors, TEAM_STATUS_LABEL } = await import(
+const {
+    importChoiceErrors,
+    teamBudgetDetailScope,
+    teamBudgetMatchesFilter,
+    TEAM_STATUS_LABEL,
+} = await import(
     '../static/js/team_budgets.js'
 )
+const { detailDateRange } = await import('../static/js/budget_render.js')
 
 const preview = {
     row_count: 12,
@@ -62,4 +68,16 @@ assert.deepEqual(
 )
 
 assert.equal(TEAM_STATUS_LABEL.at_risk, 'At risk')
+assert.equal(teamBudgetMatchesFilter({ is_closed: false }, 'active'), true)
+assert.equal(teamBudgetMatchesFilter({ is_closed: true, status: 'over' }, 'closed'), true)
+assert.equal(teamBudgetMatchesFilter({ is_closed: true }, 'active'), false)
+assert.equal(teamBudgetMatchesFilter({ is_closed: false }, 'all'), true)
+const detail = { members: [{ id: 7, name: 'Ada' }, { id: 12, name: 'Grace' }] }
+assert.equal(teamBudgetDetailScope(detail, ''), null)
+assert.equal(teamBudgetDetailScope(detail, '12').name, 'Grace')
+assert.equal(teamBudgetDetailScope(detail, '404'), null)
+assert.equal(
+    detailDateRange({ start_date: '2026-08-07', end_date: '2027-01-12' }),
+    'Aug 7, 2026 – Jan 12, 2027',
+)
 console.log('team budget import choices require complete mappings and range handling')

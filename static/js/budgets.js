@@ -5,6 +5,7 @@ import {
     budgetDuration,
     budgetDurationHtml,
     dateRange,
+    detailDateRange,
     exactDurationSeconds,
     headline,
     hours,
@@ -716,7 +717,7 @@ class Budgets extends TimeKeeper {
         this.detail = detail
         this.detailTitle.textContent = detail.name
         this.detailRange.textContent =
-            `${detail.client_name ?? 'Unknown client'} · ${dateRange(detail)}`
+            `${detail.client_name ?? 'Unknown client'} · ${detailDateRange(detail)}`
 
         // Closes the summary rather than stacking the form on top of it —
         // two overlapping backdrops plus a wide detail view behind a narrow

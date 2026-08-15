@@ -8,7 +8,15 @@ import {
     lockBodyScroll,
     unlockBodyScroll,
 } from './base.js'
-import { dateRange, hours, percent, shortDate, withHours } from './budget_render.js'
+import {
+    dateRange,
+    detailDateRange,
+    exactDurationSeconds,
+    hours,
+    percent,
+    shortDate,
+    withHours,
+} from './budget_render.js'
 import { flatpickrCalendarOptions } from './week_start.js'
 
 
@@ -42,6 +50,18 @@ export function importChoiceErrors(preview, mappings, rangeAction) {
 }
 
 
+export function teamBudgetMatchesFilter(budget, filter) {
+    if (filter === 'all') return true
+    return filter === 'closed' ? Boolean(budget.is_closed) : !budget.is_closed
+}
+
+
+export function teamBudgetDetailScope(detail, memberId) {
+    if (!memberId) return null
+    return detail?.members?.find((member) => String(member.id) === String(memberId)) || null
+}
+
+
 class TeamBudgets extends TimeKeeper {
     constructor() {
         super()
@@ -54,6 +74,7 @@ class TeamBudgets extends TimeKeeper {
 
         this.list = document.getElementById('team-budget-list')
         this.overview = document.getElementById('team-budgets-overview')
+        this.statusFilter = document.getElementById('team-status-filter')
         this.clientFilter = document.getElementById('team-client-filter')
 
         this.formModal = document.getElementById('team-budget-form-modal')
@@ -84,6 +105,7 @@ class TeamBudgets extends TimeKeeper {
         this.importSubtitle = document.getElementById('team-import-subtitle')
         this.importForm = document.getElementById('team-import-form')
         this.importFile = document.getElementById('team-import-file')
+        this.importFileButton = document.getElementById('team-import-file-button')
         this.importTimeFormat = document.getElementById('team-import-time-format')
         this.importColumns = document.getElementById('team-import-columns')
         this.importSheet = document.getElementById('team-import-sheet')
@@ -102,11 +124,12 @@ class TeamBudgets extends TimeKeeper {
         this.confirmImportButton = document.getElementById('team-import-confirm')
 
         this.budgets = []
+        this.filter = 'active'
         this.range = { start: '', end: '' }
         this.editing = null
         this.detail = null
         this.detailId = null
-        this.returnDetailId = null
+        this.importReturnDetailId = null
         this.preview = null
         this.columnMapping = null
         this.importBudgetId = null
@@ -115,6 +138,9 @@ class TeamBudgets extends TimeKeeper {
         this.returnToTeamForm = false
         this.startingImport = null
         this.chart = null
+        this.detailMemberId = ''
+        this.detailMemberPicker = null
+        this.detailFilterObserver = null
         this.entryPage = 1
         this.loadToken = 0
     }
@@ -185,6 +211,17 @@ class TeamBudgets extends TimeKeeper {
             })
         })
         this.clientFilter.addEventListener('change', () => this.render())
+        this.statusFilter.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-team-filter]')
+            if (!button) return
+            this.filter = button.dataset.teamFilter
+            this.statusFilter.querySelectorAll('[data-team-filter]').forEach((item) => {
+                const selected = item === button
+                item.classList.toggle('active', selected)
+                item.setAttribute('aria-checked', String(selected))
+            })
+            this.render()
+        })
     }
 
     selectView(view, updateUrl = true) {
@@ -229,7 +266,11 @@ class TeamBudgets extends TimeKeeper {
 
     visible() {
         const clientId = this.clientFilter.value
-        return this.budgets.filter((budget) => !clientId || String(budget.client_id) === clientId)
+        return this.budgets.filter((budget) => {
+            const clientMatches = !clientId || String(budget.client_id) === clientId
+            const statusMatches = teamBudgetMatchesFilter(budget, this.filter)
+            return clientMatches && statusMatches
+        })
     }
 
     render() {
@@ -248,7 +289,7 @@ class TeamBudgets extends TimeKeeper {
         const visible = this.visible()
         if (!visible.length) {
             this.list.innerHTML = this.budgets.length
-                ? '<div class="tk-card tk-empty py-10">No team budgets match this client.</div>'
+                ? '<div class="tk-card tk-empty py-10">No team budgets match these filters.</div>'
                 : '<div class="tk-card tk-empty py-10">No team budgets yet. Create one, add its members, then import the engagement workbook.</div>'
             return
         }
@@ -326,7 +367,6 @@ class TeamBudgets extends TimeKeeper {
 
     openForm(budget = null) {
         this.editing = budget
-        this.returnDetailId = budget?.id || null
         this.startXlsxPanel.classList.toggle('hidden', Boolean(budget))
         if (!budget) {
             this.startingImport = null
@@ -425,23 +465,27 @@ class TeamBudgets extends TimeKeeper {
         this.detailImport.addEventListener('click', () => {
             if (this.detail) this.openImport(this.detail)
         })
-        this.detailBody.addEventListener('input', (event) => {
-            if (event.target.id === 'team-entry-search') {
-                clearTimeout(this.entrySearchTimer)
-                this.entrySearchTimer = setTimeout(() => this.loadEntries(1), 250)
-            }
-        })
         this.detailBody.addEventListener('change', (event) => {
-            if (event.target.id === 'team-entry-member-filter') this.loadEntries(1)
+            if (event.target.id === 'team-detail-member-filter') this.applyDetailMemberFilter()
         })
         this.detailBody.addEventListener('click', (event) => {
+            const clearFilter = event.target.closest('#team-detail-member-clear')
+            if (clearFilter) {
+                this.detailMemberPicker?.removeActiveItems()
+                const filter = document.getElementById('team-detail-member-filter')
+                if (filter) filter.value = ''
+                this.applyDetailMemberFilter()
+                return
+            }
             const pageButton = event.target.closest('[data-team-entry-page]')
             if (pageButton) this.loadEntries(Number(pageButton.dataset.teamEntryPage))
         })
     }
 
     async openDetail(id) {
+        this.destroyDetailFilter()
         this.detailId = id
+        this.detailMemberId = ''
         this.detailTitle.textContent = 'Team budget'
         this.detailRange.textContent = ''
         this.detailBody.innerHTML = '<div class="tk-empty py-10">Loading…</div>'
@@ -459,39 +503,135 @@ class TeamBudgets extends TimeKeeper {
 
     renderDetail(detail) {
         this.detailTitle.textContent = detail.name
-        this.detailRange.textContent = `${detail.client_name} · ${dateRange(detail)}`
-        const usedWidth = Math.min(100, Math.max(0, detail.percent_used || 0))
-        const importLine = detail.imported_at
-            ? `${this.escapeHtml(detail.import_filename)} · ${detail.import_row_count} rows · imported ${new Date(detail.imported_at).toLocaleString()}${detail.import_skipped_count ? ` · ${detail.import_skipped_count} skipped` : ''}`
-            : 'No workbook imported yet.'
+        this.detailRange.textContent = `${detail.client_name} · ${detailDateRange(detail)}`
         this.detailBody.innerHTML = `
-          <section class="tk-status-scope" data-status="${detail.status}">
+          <div id="team-detail-filter-sentinel" class="tk-team-detail-filter-sentinel" aria-hidden="true"></div>
+          <section id="team-detail-filter" class="tk-card tk-team-detail-filter" aria-label="Team budget employee view">
+            <div class="tk-team-detail-filter-inner">
+              <div class="min-w-0">
+                <div class="tk-label mb-0">Employee view</div>
+                <p class="mt-1 text-xs text-faint">Filters every report section in this budget.</p>
+              </div>
+              <div class="tk-summary-client-filter">
+                <label for="team-detail-member-filter" class="sr-only">Filter team budget by employee</label>
+                <div class="tk-summary-client-control">
+                  <select id="team-detail-member-filter" class="tk-select">
+                    <option value="">Entire team</option>
+                    ${detail.members.map((member) => `<option value="${member.id}">${this.escapeHtml(member.name)}</option>`).join('')}
+                  </select>
+                  <button id="team-detail-member-clear" type="button" class="tk-summary-client-clear" hidden>Clear</button>
+                </div>
+              </div>
+            </div>
+          </section>
+          <div id="team-budget-detail-content"></div>`
+        const filter = document.getElementById('team-detail-member-filter')
+        this.detailMemberPicker = createChoices(filter, {
+            searchPlaceholderValue: 'Start typing employee name...',
+            searchResultLimit: 10,
+            shouldSort: false,
+            itemSelectText: '',
+            placeholder: true,
+            placeholderValue: 'Entire team',
+        })
+        this.initializeDetailStickyFilter()
+        this.renderDetailContent(detail)
+    }
+
+    initializeDetailStickyFilter() {
+        const filter = document.getElementById('team-detail-filter')
+        const sentinel = document.getElementById('team-detail-filter-sentinel')
+        if (!filter || !sentinel || !('IntersectionObserver' in window)) return
+        const modal = filter.closest('.tk-modal')
+        this.detailFilterObserver = new IntersectionObserver(([entry]) => {
+            const docked = !entry.isIntersecting
+            filter.classList.toggle('is-stuck', docked)
+            modal?.classList.toggle('has-team-detail-filter-docked', docked)
+        }, { root: this.detailBody, threshold: 0 })
+        this.detailFilterObserver.observe(sentinel)
+    }
+
+    destroyDetailFilter() {
+        this.detailFilterObserver?.disconnect()
+        this.detailFilterObserver = null
+        this.detailModal?.querySelector('.tk-modal')?.classList.remove('has-team-detail-filter-docked')
+        this.detailMemberPicker?.destroy()
+        this.detailMemberPicker = null
+    }
+
+    applyDetailMemberFilter() {
+        if (!this.detail) return
+        const filter = document.getElementById('team-detail-member-filter')
+        const memberId = filter?.value || ''
+        const clear = document.getElementById('team-detail-member-clear')
+        if (clear) clear.hidden = !memberId
+        if (memberId === this.detailMemberId) return
+        this.detailMemberId = memberId
+        this.renderDetailContent(this.detail)
+        this.loadEntries(1)
+    }
+
+    renderDetailContent(detail) {
+        const content = document.getElementById('team-budget-detail-content')
+        if (!content) return
+        const member = teamBudgetDetailScope(detail, this.detailMemberId)
+        const scope = member || detail
+        const usedWidth = Math.min(100, Math.max(0, scope.percent_used || 0))
+        const importLine = detail.imported_at
+            ? `${detail.import_row_count} rows · imported ${new Date(detail.imported_at).toLocaleString()}${detail.import_skipped_count ? ` · ${detail.import_skipped_count} skipped` : ''}`
+            : 'No workbook imported yet.'
+        const used = member
+            ? this.memberTime(member.display_used_hours, member.used_seconds)
+            : withHours(hours(detail.used_hours))
+        const budgeted = member
+            ? this.memberTime(member.budgeted_hours, member.budget_seconds)
+            : `${hours(detail.budgeted_hours)} team hours`
+        const remaining = member
+            ? this.memberTime(member.display_remaining_hours, member.remaining_seconds)
+            : `${hours(detail.remaining_hours)} hrs.`
+        const members = member ? [member] : detail.members
+        const weeks = member
+            ? detail.member_weekly?.[String(member.id)] || []
+            : detail.weekly
+        content.innerHTML = `
+          <section class="tk-status-scope" data-status="${scope.status}">
             <div class="flex flex-wrap items-start justify-between gap-3">
-              <div><div class="text-3xl font-semibold text-text">${withHours(hours(detail.used_hours))}</div><div class="mt-1 text-xs text-muted">of ${hours(detail.budgeted_hours)} team hours budgeted</div></div>
-              <span class="tk-badge" style="color:var(--status-text);background:var(--status-soft)">${TEAM_STATUS_LABEL[detail.status]}</span>
+              <div><div class="text-3xl font-semibold text-text">${used}</div><div class="mt-1 text-xs text-muted">of ${budgeted} budgeted${member ? ` for ${this.escapeHtml(member.name)}` : ''}</div></div>
+              <span class="tk-badge" style="color:var(--status-text);background:var(--status-soft)">${TEAM_STATUS_LABEL[scope.status]}</span>
             </div>
             <div class="mt-4 tk-meter tk-meter-lg"><div class="tk-meter-fill" style="width:${usedWidth}%"></div></div>
-            <div class="mt-2 flex justify-between text-xs text-muted"><span>${hours(detail.remaining_hours)} hrs. remaining</span><span>${percent(detail.percent_used)}</span></div>
+            <div class="mt-2 flex justify-between text-xs text-muted"><span>${remaining} remaining</span><span>${percent(scope.percent_used)}</span></div>
           </section>
           <div class="mt-5 grid gap-px overflow-hidden rounded-xl bg-border sm:grid-cols-3">
-            <div class="bg-surface-2 p-3"><div class="tk-stat-label">Historical projection</div><div class="mt-1 text-lg font-semibold text-text">${hours(detail.projected_hours)} hrs.</div><div class="mt-1 text-xs text-faint">${detail.projection_as_of ? `through ${shortDate(detail.projection_as_of)}` : 'awaiting imported time'}</div></div>
-            <div class="bg-surface-2 p-3"><div class="tk-stat-label">Members</div><div class="mt-1 text-lg font-semibold text-text">${detail.members.length}</div></div>
-            <div class="bg-surface-2 p-3"><div class="tk-stat-label">Imported rows</div><div class="mt-1 text-lg font-semibold text-text">${detail.entry_count}</div></div>
+            <div class="bg-surface-2 p-3"><div class="tk-stat-label">Historical projection</div><div class="mt-1 text-lg font-semibold text-text">${hours(scope.projected_hours)} hrs.</div><div class="mt-1 text-xs text-faint">${scope.projection_as_of ? `through ${shortDate(scope.projection_as_of)}` : 'awaiting imported time'}</div></div>
+            <div class="bg-surface-2 p-3"><div class="tk-stat-label">Members</div><div class="mt-1 text-lg font-semibold text-text">${members.length}</div></div>
+            <div class="bg-surface-2 p-3"><div class="tk-stat-label">Imported rows</div><div class="mt-1 text-lg font-semibold text-text">${member ? member.entry_count : detail.entry_count}</div></div>
           </div>
           <div class="mt-5"><div class="tk-stat-label mb-2">Latest import</div><p class="text-sm text-muted">${importLine}</p></div>
           ${detail.notes ? `<div class="mt-5"><div class="tk-stat-label mb-2">Notes</div><p class="whitespace-pre-wrap text-sm text-muted">${this.escapeHtml(detail.notes)}</p></div>` : ''}
-          <div class="mt-6"><h3 class="tk-card-title mb-3">Team members</h3>${this.memberTable(detail.members)}</div>
-          <div class="mt-6"><h3 class="tk-card-title mb-3">Daily burn</h3><div class="h-64"><canvas id="team-budget-burn-chart"></canvas></div></div>
-          <div class="mt-6"><h3 class="tk-card-title mb-3">Time by week</h3>${this.weekTable(detail.weekly)}</div>
+          <div class="mt-6">
+            <h3 class="tk-card-title mb-3">Daily burn</h3>
+            <div class="h-64"><canvas id="team-budget-burn-chart"></canvas></div>
+          </div>
+          <div class="mt-6"><h3 class="tk-card-title mb-3">Team members</h3>${this.memberTable(members)}</div>
+          <div class="mt-6"><h3 class="tk-card-title mb-3">Time by week</h3>${this.weekTable(weeks)}</div>
           <div class="mt-6 border-t border-border pt-5">
-            <div class="flex flex-wrap items-end justify-between gap-3"><h3 class="tk-card-title">Imported entries</h3><div class="flex flex-wrap gap-2"><input id="team-entry-search" class="tk-input tk-input-sm" placeholder="Search person or ID…" /><select id="team-entry-member-filter" class="tk-select tk-select-sm"><option value="">All members</option>${detail.members.map((member) => `<option value="${member.id}">${this.escapeHtml(member.name)}</option>`).join('')}</select></div></div>
+            <h3 class="tk-card-title">Imported entries</h3>
             <div id="team-entry-results" class="mt-3"><div class="tk-empty py-6">Loading entries…</div></div>
           </div>`
         this.drawChart(detail)
     }
 
     memberTable(members) {
-        return `<div class="overflow-x-auto rounded-lg border border-border"><table class="tk-table"><thead><tr><th>Member</th><th>Imported ID</th><th class="text-right">Budget</th><th class="text-right">Used</th><th class="text-right">Remaining</th></tr></thead><tbody>${members.map((member) => `<tr><td>${this.escapeHtml(member.name)}</td><td class="text-muted">${this.escapeHtml(member.source_user_id)}${member.aliases.length ? `<div class="text-xs text-faint">Also: ${member.aliases.map((value) => this.escapeHtml(value)).join(', ')}</div>` : ''}</td><td class="tabular text-right">${hours(member.budgeted_hours)}</td><td class="tabular text-right">${hours(member.used_hours)}</td><td class="tabular text-right">${hours(member.remaining_hours)}</td></tr>`).join('')}</tbody></table></div>`
+        return `<div class="overflow-x-auto rounded-lg border border-border"><table class="tk-table"><thead><tr><th>Member</th><th>Imported ID</th><th class="text-right">Budget</th><th class="text-right">Used</th><th class="text-right">Remaining</th></tr></thead><tbody>${members.map((member) => `<tr><td>${this.escapeHtml(member.name)}</td><td class="text-muted">${this.escapeHtml(member.source_user_id)}${member.aliases.length ? `<div class="text-xs text-faint">Also: ${member.aliases.map((value) => this.escapeHtml(value)).join(', ')}</div>` : ''}</td><td class="tabular text-right">${this.memberTime(member.budgeted_hours, member.budget_seconds)}</td><td class="tabular text-right">${this.memberTime(member.display_used_hours, member.used_seconds)}</td><td class="tabular text-right">${this.memberTime(member.display_remaining_hours, member.remaining_seconds)}</td></tr>`).join('')}</tbody></table></div>`
+    }
+
+    memberTime(decimalHours, exactSeconds) {
+        if (this.roundingEnabled) {
+            return `${this.formatDecimalHours(decimalHours)}<span class="font-normal text-faint"> hrs.</span>`
+        }
+        const sign = Number(exactSeconds) < 0 ? '−' : ''
+        return `${sign}${exactDurationSeconds(Math.abs(Number(exactSeconds) || 0))}`
     }
 
     weekTable(weeks) {
@@ -503,18 +643,16 @@ class TeamBudgets extends TimeKeeper {
         const results = document.getElementById('team-entry-results')
         if (!results || !this.detailId) return
         const params = new URLSearchParams({ page, per_page: 50 })
-        const search = document.getElementById('team-entry-search')?.value.trim()
-        const memberId = document.getElementById('team-entry-member-filter')?.value
-        if (search) params.set('q', search)
+        const memberId = this.detailMemberId
         if (memberId) params.set('member_id', memberId)
         results.innerHTML = '<div class="tk-empty py-6">Loading entries…</div>'
         try {
             const payload = await this.fetchFromAPI(`/api/team-budgets/${this.detailId}/entries?${params}`)
             if (!payload.entries.length) {
-                results.innerHTML = '<div class="tk-empty py-6">No imported entries match.</div>'
+                results.innerHTML = '<div class="tk-empty py-6">No imported entries for this view.</div>'
                 return
             }
-            results.innerHTML = `<div class="overflow-x-auto rounded-lg border border-border"><table class="tk-table"><thead><tr><th>Date</th><th>Member</th><th>Imported ID</th><th class="text-right">Time</th><th class="text-right">Source row</th></tr></thead><tbody>${payload.entries.map((entry) => `<tr><td>${shortDate(entry.date)}</td><td>${this.escapeHtml(entry.member_name)}</td><td class="text-muted">${this.escapeHtml(entry.source_user_id)}</td><td class="tabular text-right">${hours(entry.hours)} hrs.</td><td class="tabular text-right">${entry.source_row}</td></tr>`).join('')}</tbody></table></div><div class="mt-3 flex items-center justify-between text-xs text-muted"><span>${payload.total} matching row${payload.total === 1 ? '' : 's'}</span><div class="flex gap-2"><button type="button" class="tk-btn tk-btn-secondary tk-btn-sm" data-team-entry-page="${payload.page - 1}" ${payload.page <= 1 ? 'disabled' : ''}>Previous</button><button type="button" class="tk-btn tk-btn-secondary tk-btn-sm" data-team-entry-page="${payload.page + 1}" ${payload.page >= payload.pages ? 'disabled' : ''}>Next</button></div></div>`
+            results.innerHTML = `<div class="overflow-x-auto rounded-lg border border-border"><table class="tk-table"><thead><tr><th>Date</th><th>Member</th><th>Imported ID</th><th class="text-right">Time</th></tr></thead><tbody>${payload.entries.map((entry) => `<tr><td>${shortDate(entry.date)}</td><td>${this.escapeHtml(entry.member_name)}</td><td class="text-muted">${this.escapeHtml(entry.source_user_id)}</td><td class="tabular text-right">${hours(entry.hours)} hrs.</td></tr>`).join('')}</tbody></table></div><div class="mt-3 flex items-center justify-between text-xs text-muted"><span>${payload.total} row${payload.total === 1 ? '' : 's'}</span><div class="flex gap-2"><button type="button" class="tk-btn tk-btn-secondary tk-btn-sm" data-team-entry-page="${payload.page - 1}" ${payload.page <= 1 ? 'disabled' : ''}>Previous</button><button type="button" class="tk-btn tk-btn-secondary tk-btn-sm" data-team-entry-page="${payload.page + 1}" ${payload.page >= payload.pages ? 'disabled' : ''}>Next</button></div></div>`
         } catch (error) {
             results.innerHTML = '<div class="tk-empty py-6">Could not load entries.</div>'
         }
@@ -524,15 +662,18 @@ class TeamBudgets extends TimeKeeper {
         if (this.chart) this.chart.destroy()
         const canvas = document.getElementById('team-budget-burn-chart')
         if (!canvas) return
+        const memberId = this.detailMemberId
+        const member = teamBudgetDetailScope(detail, memberId)
+        const burn = member ? detail.member_burn?.[memberId] || [] : detail.burn
         const css = getComputedStyle(document.documentElement)
         const token = (name) => css.getPropertyValue(name).trim()
         this.chart = new Chart(canvas.getContext('2d'), {
             type: 'line',
             data: {
-                labels: detail.burn.map((point) => shortDate(point.date)),
+                labels: burn.map((point) => shortDate(point.date)),
                 datasets: [
-                    { label: 'Imported', data: detail.burn.map((point) => point.actual), borderColor: token('--accent'), backgroundColor: token('--accent-soft'), fill: true, pointRadius: 0, spanGaps: false, tension: 0.15 },
-                    { label: 'On-budget pace', data: detail.burn.map((point) => point.ideal), borderColor: token('--faint'), borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0 },
+                    { label: member ? `${member.name} imported` : 'Team imported', data: burn.map((point) => point.actual), borderColor: token('--accent'), backgroundColor: token('--accent-soft'), fill: true, pointRadius: 0, spanGaps: false, tension: 0.15 },
+                    { label: member ? `${member.name} budget pace` : 'Team budget pace', data: burn.map((point) => point.ideal), borderColor: token('--faint'), borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0 },
                 ],
             },
             options: {
@@ -549,6 +690,7 @@ class TeamBudgets extends TimeKeeper {
     }
 
     bindImport() {
+        this.importFileButton.addEventListener('click', () => this.importFile.click())
         this.previewButton.addEventListener('click', () => this.previewImport())
         this.importForm.addEventListener('submit', (event) => {
             event.preventDefault()
@@ -559,7 +701,9 @@ class TeamBudgets extends TimeKeeper {
             this.importColumns.classList.add('hidden')
             this.previewImport().catch(console.error)
         })
-        this.importFile.addEventListener('change', () => this.resetImportPreview(true))
+        this.importFile.addEventListener('change', () => {
+            this.resetImportPreview(true)
+        })
         this.importTimeFormat.addEventListener('change', () => this.resetImportPreview(false))
         this.importUserRows.addEventListener('change', (event) => {
             if (event.target.matches('[data-import-user-action]')) this.toggleNewMemberFields(event.target.closest('[data-import-user-row]'))
@@ -571,6 +715,7 @@ class TeamBudgets extends TimeKeeper {
     openImport(detail) {
         this.importMode = 'existing'
         this.returnToTeamForm = false
+        this.importReturnDetailId = detail.id
         this.importBudgetId = detail.id
         this.importDetail = detail
         this.hideModal(this.detailModal)
@@ -584,6 +729,7 @@ class TeamBudgets extends TimeKeeper {
     openStartingImport() {
         this.importMode = 'starting'
         this.returnToTeamForm = true
+        this.importReturnDetailId = null
         this.importBudgetId = null
         this.importDetail = { members: [] }
         this.formModal.classList.add('hidden')
@@ -592,7 +738,7 @@ class TeamBudgets extends TimeKeeper {
         this.importSubtitle.textContent = 'Preview the workbook, identify its members, and enter each person’s budgeted hours.'
         this.confirmImportButton.textContent = 'Use as starting point'
         this.importModal.classList.remove('hidden')
-        this.importFile.focus()
+        this.importFileButton.focus()
     }
 
     resetImportDialog() {
@@ -689,7 +835,7 @@ class TeamBudgets extends TimeKeeper {
 
     renderPreview(preview) {
         this.importPreviewPanel.classList.remove('hidden')
-        this.importSummary.innerHTML = `<strong>${preview.row_count}</strong> importable row${preview.row_count === 1 ? '' : 's'} from <strong>${this.escapeHtml(preview.filename)}</strong>${preview.date_min ? ` · ${shortDate(preview.date_min)} – ${shortDate(preview.date_max)}` : ''}${preview.replaces_rows ? ` · replaces ${preview.replaces_rows} existing row${preview.replaces_rows === 1 ? '' : 's'}` : ''}`
+        this.importSummary.innerHTML = `<strong>${preview.row_count}</strong> importable row${preview.row_count === 1 ? '' : 's'}${preview.date_min ? ` · ${shortDate(preview.date_min)} – ${shortDate(preview.date_max)}` : ''}${preview.future_row_count ? ` · <strong>${preview.future_row_count}</strong> future row${preview.future_row_count === 1 ? '' : 's'} skipped` : ''}${preview.replaces_rows ? ` · replaces ${preview.replaces_rows} existing row${preview.replaces_rows === 1 ? '' : 's'}` : ''}`
         this.importErrors.classList.toggle('hidden', !preview.validation_error_count)
         this.importErrors.textContent = preview.validation_error_count
             ? `${preview.validation_error_count} invalid row(s). ${preview.validation_errors.slice(0, 5).map((item) => `Row ${item.row}: ${item.error}`).join(' · ')}`
@@ -790,6 +936,7 @@ class TeamBudgets extends TimeKeeper {
                 { quiet: true, timeout: 60000 },
             )
             const id = this.importBudgetId
+            this.importReturnDetailId = null
             this.hideModal(this.importModal)
             this.showToast(`Imported ${result.imported_rows} row${result.imported_rows === 1 ? '' : 's'}${result.skipped_rows ? `; skipped ${result.skipped_rows}` : ''}.`, 'success')
             await this.load()
@@ -832,7 +979,7 @@ class TeamBudgets extends TimeKeeper {
         this.startFileSummary.classList.toggle('hidden', !selected)
         this.startXlsxButton.textContent = selected ? 'Replace XLSX' : 'Choose XLSX'
         this.startFileSummary.textContent = selected
-            ? `${selected.preview.filename} · ${selected.preview.row_count} row${selected.preview.row_count === 1 ? '' : 's'} · ${selected.preview.source_user_ids.length} team member${selected.preview.source_user_ids.length === 1 ? '' : 's'} · ${shortDate(selected.preview.date_min)} – ${shortDate(selected.preview.date_max)}`
+            ? `${selected.preview.row_count} row${selected.preview.row_count === 1 ? '' : 's'} · ${selected.preview.source_user_ids.length} team member${selected.preview.source_user_ids.length === 1 ? '' : 's'} · ${shortDate(selected.preview.date_min)} – ${shortDate(selected.preview.date_max)}`
             : ''
     }
 
@@ -857,6 +1004,9 @@ class TeamBudgets extends TimeKeeper {
     hideModal(modal) {
         if (!modal || modal.classList.contains('hidden')) return
         const returnToForm = modal === this.importModal && this.returnToTeamForm
+        const returnToDetailId = modal === this.importModal
+            ? this.importReturnDetailId
+            : null
         modal.classList.add('hidden')
         unlockBodyScroll()
         if (modal === this.formModal) {
@@ -865,8 +1015,10 @@ class TeamBudgets extends TimeKeeper {
             disarmConfirm(this.deleteButton)
         }
         if (modal === this.detailModal) {
+            this.destroyDetailFilter()
             this.detailId = null
             this.detail = null
+            this.detailMemberId = ''
             if (this.chart) this.chart.destroy()
             this.chart = null
         }
@@ -876,7 +1028,9 @@ class TeamBudgets extends TimeKeeper {
             this.importDetail = null
             this.importMode = 'existing'
             this.returnToTeamForm = false
+            this.importReturnDetailId = null
             if (returnToForm) this.showModal(this.formModal)
+            else if (returnToDetailId) this.openDetail(returnToDetailId).catch(console.error)
         }
     }
 
