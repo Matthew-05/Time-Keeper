@@ -348,6 +348,48 @@
     @apply mt-1 text-sm text-muted;
   }
 
+  /* Today's state belongs beside the date: it tells the user whether the
+     screen is setting up a day, recording it, or showing a closed one. */
+  .tk-day-status {
+    @apply inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold;
+    background-color: var(--surface);
+    border-color: var(--border-strong);
+    color: var(--muted);
+  }
+
+  .tk-day-status-dot {
+    background-color: var(--faint);
+    border-radius: 999px;
+    height: 0.4375rem;
+    width: 0.4375rem;
+  }
+
+  .tk-day-status[data-state='dayNotStarted'] {
+    background-color: var(--surface-2);
+  }
+
+  .tk-day-status[data-state='dayStarted'],
+  .tk-day-status[data-state='taskInProgress'] {
+    background-color: var(--success-soft);
+    border-color: color-mix(in srgb, var(--success) 35%, var(--border));
+    color: var(--success);
+  }
+
+  .tk-day-status[data-state='dayStarted'] .tk-day-status-dot,
+  .tk-day-status[data-state='taskInProgress'] .tk-day-status-dot {
+    background-color: var(--success);
+  }
+
+  .tk-day-status[data-state='dayEnded'] {
+    background-color: var(--warn-soft);
+    border-color: color-mix(in srgb, var(--warn) 35%, var(--border));
+    color: var(--warn);
+  }
+
+  .tk-day-status[data-state='dayEnded'] .tk-day-status-dot {
+    background-color: var(--warn);
+  }
+
   /* ---- Surfaces ---- */
 
   .tk-card {
@@ -442,6 +484,89 @@
      out of. The controls sit directly on `--surface` like every other card. */
   .tk-time-control-row {
     @apply flex flex-wrap items-end gap-2.5;
+  }
+
+  /* Before the day is open, the time field represents the workday boundary,
+     not a task. This callout makes that distinction before the user reaches
+     the otherwise-shared time controls. */
+  .tk-start-day-intro {
+    align-items: start;
+    background-color: var(--accent-soft);
+    border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+    border-radius: 10px;
+    display: grid;
+    gap: 0.875rem;
+    grid-template-columns: auto minmax(0, 1fr);
+    margin-bottom: 1.25rem;
+    padding: 1rem;
+  }
+
+  .tk-start-day-icon {
+    align-items: center;
+    background-color: var(--surface);
+    border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+    border-radius: 9px;
+    color: var(--accent-text);
+    display: flex;
+    height: 2.75rem;
+    justify-content: center;
+    width: 2.75rem;
+  }
+
+  .tk-start-day-icon svg {
+    height: 1.5rem;
+    width: 1.5rem;
+  }
+
+  .tk-start-day-eyebrow {
+    color: var(--accent-text);
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    line-height: 1.25;
+    text-transform: uppercase;
+  }
+
+  .tk-start-day-title {
+    color: var(--text);
+    font-size: 1rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    line-height: 1.35;
+    margin-top: 0.2rem;
+  }
+
+  .tk-start-day-copy {
+    color: var(--muted);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    margin-top: 0.25rem;
+    max-width: 42rem;
+  }
+
+  .tk-time-card-start-day .tk-time-field {
+    max-width: 15rem;
+  }
+
+  @media (max-width: 520px) {
+    .tk-start-day-intro {
+      grid-template-columns: 1fr;
+    }
+
+    .tk-time-card-start-day .tk-time-field {
+      flex-basis: 100%;
+      max-width: none;
+    }
+
+    .tk-time-card-start-day #time-actions {
+      margin-left: 0;
+      width: 100%;
+    }
+
+    .tk-time-card-start-day #time-actions .tk-action-control,
+    .tk-time-card-start-day #start-day-button {
+      width: 100%;
+    }
   }
 
   .tk-time-field {

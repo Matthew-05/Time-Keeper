@@ -18,11 +18,15 @@
     `works-container`, `timepicker-container` and `ended-day-actions` are all
     shown and hidden from there.
   #}
-  <div class="tk-page tk-page-narrow">
+  <div id="today-page" class="tk-page tk-page-narrow">
     <div class="tk-page-header">
       <div>
         <h1 class="tk-title">Today</h1>
         <p class="tk-subtitle" id="today-date"></p>
+      </div>
+      <div id="day-status" class="tk-day-status hidden" role="status" aria-live="polite">
+        <span class="tk-day-status-dot" aria-hidden="true"></span>
+        <span id="day-status-label"></span>
       </div>
     </div>
 
@@ -82,6 +86,23 @@
         </div>
 
         <div class="p-5">
+          <div id="start-day-intro" class="tk-start-day-intro hidden">
+            <div class="tk-start-day-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 18h16" />
+                <path d="M6.5 15.5a5.5 5.5 0 0111 0" />
+                <path d="M12 3v3M4.9 6.9L7 9M19.1 6.9L17 9" />
+              </svg>
+            </div>
+            <div>
+              <p class="tk-start-day-eyebrow">Before your first task</p>
+              <h3 class="tk-start-day-title">When did your workday begin?</h3>
+              <p class="tk-start-day-copy">
+                This records the start of your overall workday. You’ll choose a client and start your first task next.
+              </p>
+            </div>
+          </div>
+
           <div class="tk-time-control-row">
             <div id="task-start-time" class="tk-time-context hidden">
               <div>
@@ -152,7 +173,7 @@
                     <rect x="3" y="5" width="18" height="16" rx="2" />
                     <path d="M16 3v4M8 3v4M3 11h18" />
                   </svg>
-                  Start day
+                  Start workday
                 </button>
                 <span id="start-day-button-tooltip" class="tk-action-tooltip" role="tooltip"></span>
               </span>

@@ -94,6 +94,9 @@ export class TimeKeeperIndex extends TimeKeeper {
 
 
     initializeElements() {
+        this.todayPage = document.getElementById('today-page');
+        this.dayStatus = document.getElementById('day-status');
+        this.dayStatusLabel = document.getElementById('day-status-label');
         this.clientInput = document.getElementById('autocomplete-input');
         this.worksContainer = document.getElementById('works-container');
         this.clientDayTotal = document.getElementById('client-day-total');
@@ -103,6 +106,8 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.endDayButton = document.getElementById('end-day-button');
         this.reopenDayButton = document.getElementById('reopen-day-button');
         this.timeContainer = document.getElementById('timepicker-container');
+        this.timeHeading = document.getElementById('time-heading');
+        this.startDayIntro = document.getElementById('start-day-intro');
         this.timeActions = document.getElementById('time-actions');
         this.timeFieldLabel = document.getElementById('time-field-label');
         this.endedDayActions = document.getElementById('ended-day-actions');
@@ -1024,9 +1029,37 @@ export class TimeKeeperIndex extends TimeKeeper {
 
     updateButtonVisibility(state) {
         this.uiState = state;
+        this.syncDayStateContext();
         this.reopenDayButton.style.display = state === 'dayEnded' ? 'inline-flex' : 'none';
         this.endedDayActions.classList.toggle('hidden', state !== 'dayEnded');
         this.syncContextualActions();
+    }
+
+    /**
+     * Give the page-level state a plain-language label, and reserve the richer
+     * explanation for the one state where "Time" would otherwise be ambiguous:
+     * before the workday has been opened.
+     */
+    syncDayStateContext() {
+        const statusByState = {
+            dayNotStarted: 'Not started',
+            dayStarted: 'Workday in progress',
+            taskInProgress: 'Task in progress',
+            dayEnded: 'Workday ended',
+        };
+        const isStartingDay = this.uiState === 'dayNotStarted';
+
+        if (this.todayPage) this.todayPage.dataset.dayState = this.uiState;
+        if (this.dayStatus) {
+            this.dayStatus.dataset.state = this.uiState;
+            this.dayStatus.classList.remove('hidden');
+        }
+        if (this.dayStatusLabel) {
+            this.dayStatusLabel.textContent = statusByState[this.uiState] || '';
+        }
+        this.startDayIntro?.classList.toggle('hidden', !isStartingDay);
+        this.timeContainer?.classList.toggle('tk-time-card-start-day', isStartingDay);
+        if (this.timeHeading) this.timeHeading.textContent = isStartingDay ? 'Workday start' : 'Time';
     }
 
     /**
@@ -1098,8 +1131,8 @@ export class TimeKeeperIndex extends TimeKeeper {
 
         switch (this.uiState) {
             case 'dayNotStarted':
-                fieldLabel = 'Start time';
-                show(this.startDayButton, disabledTimeReason('start time', 'start the day'));
+                fieldLabel = 'Workday start time';
+                show(this.startDayButton, disabledTimeReason('start time', 'start the workday'));
                 break;
             case 'dayStarted': {
                 fieldLabel = 'Start time';
