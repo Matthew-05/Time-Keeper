@@ -182,8 +182,9 @@
     </div>
   </div>
 
-  <!-- One manual override per client for the selected date. Adjustment,
-       adjusted time, and rounded hours are synchronized authoring paths. -->
+  <!-- One manual override per client for the selected date. The editor exposes
+       one authoring value at a time; exact/rounded are alternate views of the
+       same stored adjustment, not six separate questions. -->
   <div id="adjust-time-modal" class="tk-modal-backdrop hidden">
     <div
       id="adjust-time-panel"
@@ -206,80 +207,77 @@
       </div>
 
       <div class="tk-modal-body space-y-4">
-        <div class="tk-adjust-time-client-field">
-          <label class="mb-1 block text-xs font-medium text-muted" for="adjust-time-client">Client</label>
-          <select id="adjust-time-client"></select>
+        <div id="adjust-time-client-field" class="tk-adjust-time-client-field tk-required-field is-incomplete">
+          <label class="tk-field-heading mb-1 text-xs font-medium text-muted" for="adjust-time-client">
+            <span>Client</span>
+            <span class="tk-required-cue">Required</span>
+          </label>
+          <select id="adjust-time-client" required aria-required="true"></select>
         </div>
 
-        <div class="tk-adjustment-math">
-          <div class="tk-adjustment-math-row">
-            <span class="tk-adjustment-math-operator" aria-hidden="true"></span>
-            <span class="tk-adjustment-math-label">Logged time</span>
-            <div class="tk-adjustment-time-fields" aria-label="Raw logged time">
-              <span class="tk-adjustment-static-field">
-                <span id="adjust-time-base-hours">—</span>
-                <span class="tk-adjustment-unit">hr</span>
-              </span>
-              <span class="tk-adjustment-static-field">
-                <span id="adjust-time-base-minutes">—</span>
-                <span class="tk-adjustment-unit">min</span>
-              </span>
+        <div id="adjust-time-change-field" class="tk-adjustment-editor tk-adjustment-change-field tk-required-field is-incomplete">
+          <div class="tk-adjustment-logged">
+            <span>Logged time</span>
+            <strong id="adjust-time-base-display" class="tabular">—</strong>
+          </div>
+
+          <div class="tk-adjustment-author">
+            <div class="tk-adjustment-author-heading">
+              <div id="adjust-time-value-label" class="tk-field-heading">
+                <span id="adjust-time-value-label-text">Rounded time</span>
+                <span class="tk-required-cue">Change needed</span>
+              </div>
+              <button id="adjust-time-mode-toggle" class="tk-adjustment-mode-toggle" type="button" title="Edit exact time" aria-label="Edit exact time">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M4 7h11l-2.5-2.5M15 7l-2.5 2.5" />
+                  <path d="M20 17H9l2.5-2.5M9 17l2.5 2.5" />
+                </svg>
+                <span id="adjust-time-mode-toggle-label">Edit exact</span>
+              </button>
+            </div>
+            <input-duration
+              id="adjust-time-value"
+              class="tk-adjustment-duration tabular"
+              value="00:00:00.000"
+              role="group"
+              aria-required="true"
+              aria-describedby="adjust-time-help"
+            ></input-duration>
+            <p class="tk-adjustment-math-help" id="adjust-time-help"></p>
+          </div>
+
+          <div id="adjust-time-preview" class="tk-adjustment-preview hidden">
+            <div id="adjust-time-preview-time-row">
+              <span id="adjust-time-preview-time-label">Exact time</span>
+              <strong id="adjust-time-preview-time" class="tabular">—</strong>
+            </div>
+            <div>
+              <span>Adjustment</span>
+              <strong id="adjust-time-preview-delta" class="tabular">—</strong>
             </div>
           </div>
 
-          <div class="tk-adjustment-math-row">
-            <button id="adjust-time-operator" class="tk-adjustment-math-operator tk-adjustment-sign" type="button" aria-label="Use a positive adjustment" aria-pressed="false" title="Adding time; click to subtract">+</button>
-            <span class="tk-adjustment-math-label">Adjustment</span>
-            <div class="tk-adjustment-time-fields">
-              <div class="relative w-28">
-                <input id="adjust-time-delta-hours" class="tk-input tabular pr-10" type="number" min="0" step="1" aria-label="Adjustment hours" />
-                <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-faint">hr</span>
-              </div>
-              <div class="relative w-28">
-                <input id="adjust-time-delta-minutes" class="tk-input tabular pr-10" type="number" min="0" max="59" step="1" aria-label="Adjustment minutes" />
-                <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-faint">min</span>
-              </div>
+          {# Calculation state retained as hidden fields so the API and tested
+             whole-minute storage path stay unchanged. #}
+          <div class="hidden" aria-hidden="true">
+            <span id="adjust-time-base-hours">—</span>
+            <span id="adjust-time-base-minutes">—</span>
+            <button id="adjust-time-operator" type="button">+</button>
+            <input id="adjust-time-delta-hours" type="number" />
+            <input id="adjust-time-delta-minutes" type="number" />
+            <input id="adjust-time-total-hours" type="number" />
+            <input id="adjust-time-total-minutes" type="number" />
+            <div id="adjust-time-rounded">
+              <input id="adjust-time-rounded-hours" type="number" />
+              <span id="adjust-time-difference">—</span>
             </div>
           </div>
-
-          <div class="tk-adjustment-math-rule" aria-hidden="true"></div>
-
-          <div class="tk-adjustment-math-row tk-adjustment-math-sum">
-            <span class="tk-adjustment-math-operator" aria-hidden="true">=</span>
-            <span class="tk-adjustment-math-label">Adjusted time</span>
-            <div class="tk-adjustment-result-line">
-              <div class="tk-adjustment-time-fields">
-                <div class="relative w-28">
-                  <input id="adjust-time-total-hours" class="tk-input tabular pr-10" type="number" min="0" step="1" aria-label="Adjusted hours" />
-                  <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-faint">hr</span>
-                </div>
-                <div class="relative w-28">
-                  <input id="adjust-time-total-minutes" class="tk-input tabular pr-10" type="number" min="0" max="59.99" step="any" aria-label="Adjusted minutes" />
-                  <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-faint">min</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div id="adjust-time-rounded" class="tk-adjustment-math-row tk-adjustment-rounded-row hidden">
-            <span class="tk-adjustment-math-operator" aria-hidden="true">→</span>
-            <span class="tk-adjustment-math-label">Rounded time</span>
-            <div class="tk-adjustment-result-line">
-              <div class="relative w-28">
-                <input id="adjust-time-rounded-hours" class="tk-input tabular pr-10" type="number" inputmode="decimal" min="0" step="any" aria-label="Rounded adjusted hours" />
-                <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-faint">hr</span>
-              </div>
-              <span id="adjust-time-difference" class="tk-adjustment-difference">—</span>
-            </div>
-          </div>
-
-          <p class="tk-adjustment-math-help" id="adjust-time-help"></p>
         </div>
 
         <p id="adjust-time-error" class="hidden text-sm text-danger" role="alert"></p>
 
         <div>
-          <span class="mb-1 block text-xs font-medium text-muted">Adjustments on this date</span>
+          <span class="mb-1 block text-xs font-medium text-muted">Existing adjustments</span>
           <div class="tk-adjustment-list rounded-lg border border-border">
             <table class="tk-table tk-table-hover">
               <thead>
@@ -362,9 +360,12 @@
           scoped styles release the modal's clipping boundary while Choices is
           open so the menu can also paint cleanly over the footer.
         #}
-        <div class="tk-add-task-client-field">
-          <label class="mb-1 block text-xs font-medium text-muted" for="add-task-client">Client</label>
-          <select id="add-task-client"></select>
+        <div id="add-task-client-field" class="tk-add-task-client-field tk-required-field is-incomplete">
+          <label class="tk-field-heading mb-1 text-xs font-medium text-muted" for="add-task-client">
+            <span>Client</span>
+            <span class="tk-required-cue">Required</span>
+          </label>
+          <select id="add-task-client" required aria-required="true"></select>
         </div>
 
         {#
@@ -376,7 +377,16 @@
           words. The two pickers behind "Edit" are the escape hatch for an exact
           minute or a time outside the drawn day.
         #}
-        <div id="add-task-timeline-wrap">
+        <div
+          id="add-task-timeline-wrap"
+          class="tk-required-field is-incomplete"
+          role="group"
+          aria-labelledby="add-task-when-label"
+        >
+          <div class="tk-field-heading mb-1 text-xs font-medium text-muted" id="add-task-when-label">
+            <span>When</span>
+            <span class="tk-required-cue">Required</span>
+          </div>
           <div
             id="add-task-timeline"
             class="tk-timeline tk-add-task-timeline"
@@ -400,11 +410,11 @@
           <div id="add-task-times" class="tk-add-task-times hidden">
             <div>
               <label class="mb-1 block text-xs font-medium text-muted" for="add-task-start">Start</label>
-              <input type="text" id="add-task-start" class="tk-input tk-time tabular w-28 text-center" placeholder="Time" />
+              <input type="text" id="add-task-start" class="tk-input tk-time tabular w-28 text-center" placeholder="Time" required aria-required="true" />
             </div>
             <div>
               <label class="mb-1 block text-xs font-medium text-muted" for="add-task-end">End</label>
-              <input type="text" id="add-task-end" class="tk-input tk-time tabular w-28 text-center" placeholder="Time" />
+              <input type="text" id="add-task-end" class="tk-input tk-time tabular w-28 text-center" placeholder="Time" required aria-required="true" />
             </div>
           </div>
         </div>
@@ -441,5 +451,6 @@
 
 {% block page_scripts %}
   <script src="{{ url_for('static', filename='vendor/vis-timeline/vis-timeline-graph2d.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='vendor/input-duration/input-duration.js') }}" type="module"></script>
   <script src="{{ url_for('static', filename='js/task_browser.js') }}" type="module"></script>
 {% endblock %}

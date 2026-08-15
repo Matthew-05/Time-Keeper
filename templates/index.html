@@ -41,9 +41,12 @@
     #}
     <div class="grid grid-cols-1 gap-4">
       {# overflow-visible so the Choices dropdown can escape the card. #}
-      <section id="client-field" class="tk-card overflow-visible" aria-labelledby="client-heading">
+      <section id="client-field" class="tk-card tk-required-field is-incomplete overflow-visible" aria-labelledby="client-heading">
         <div class="tk-card-header">
-          <h2 class="tk-card-title" id="client-heading">Client</h2>
+          <h2 class="tk-card-title tk-field-heading" id="client-heading">
+            <span>Client</span>
+            <span class="tk-required-cue">Required</span>
+          </h2>
           <!-- Completed time plus the current task's not-yet-logged time for the
                running task's client today. Hidden when nothing is running, and
                sits beside the client it is about. -->
@@ -52,7 +55,7 @@
 
         <div class="p-5">
           <label class="sr-only" for="autocomplete-input">Client</label>
-          <select id="autocomplete-input"></select>
+          <select id="autocomplete-input" required aria-required="true"></select>
         </div>
       </section>
 
@@ -80,9 +83,12 @@
       <!-- Time, and the action that consumes it. The action row stays in the
            card body with the time it acts on; it's disabled with a tooltip
            rather than hidden when its prerequisites aren't met. -->
-      <section id="timepicker-container" class="tk-card" aria-labelledby="time-heading">
+      <section id="timepicker-container" class="tk-card tk-required-field is-incomplete" aria-labelledby="time-heading">
         <div class="tk-card-header">
-          <h2 class="tk-card-title" id="time-heading">Time</h2>
+          <h2 class="tk-card-title tk-field-heading">
+            <span id="time-heading">Time</span>
+            <span class="tk-required-cue">Required</span>
+          </h2>
         </div>
 
         <div class="p-5">
@@ -128,6 +134,8 @@
                 type="text"
                 id="timepicker"
                 class="tk-input tk-time w-full py-2 text-center text-2xl font-semibold tracking-[-0.01em]"
+                required
+                aria-required="true"
               />
             </div>
 

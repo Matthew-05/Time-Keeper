@@ -272,8 +272,8 @@ Budgets already over are counted separately, under Over budget."
 
     <form id="budget-form" class="flex min-h-0 flex-1 flex-col">
       <div class="tk-modal-body space-y-4">
-        <div>
-          <label class="tk-label" for="budget-name">Name</label>
+        <div class="tk-required-field" data-required-auto>
+          <label class="tk-label tk-field-heading" for="budget-name"><span>Name</span><span class="tk-required-cue">Required</span></label>
           <input
             type="text"
             id="budget-name"
@@ -285,8 +285,8 @@ Budgets already over are counted separately, under Over budget."
           />
         </div>
 
-        <div class="tk-budget-client-field">
-          <label class="tk-label" for="budget-client">Client</label>
+        <div class="tk-budget-client-field tk-required-field" data-required-auto>
+          <label class="tk-label tk-field-heading" for="budget-client"><span>Client</span><span class="tk-required-cue">Required</span></label>
           <select id="budget-client" class="tk-select" required>
             <option value="">Choose a client…</option>
             {% for client in clients %}
@@ -295,8 +295,8 @@ Budgets already over are counted separately, under Over budget."
           </select>
         </div>
 
-        <div>
-          <label class="tk-label" for="budget-range">Dates</label>
+        <div class="tk-required-field" data-required-auto>
+          <label class="tk-label tk-field-heading" for="budget-range"><span>Dates</span><span class="tk-required-cue">Required</span></label>
           <input
             type="text"
             id="budget-range"
@@ -308,8 +308,8 @@ Budgets already over are counted separately, under Over budget."
           />
         </div>
 
-        <div>
-          <label class="tk-label" for="budget-hours">Budgeted hours</label>
+        <div class="tk-required-field" data-required-auto>
+          <label class="tk-label tk-field-heading" for="budget-hours"><span>Budgeted hours</span><span class="tk-required-cue">Required</span></label>
           <input
             type="number"
             id="budget-hours"
@@ -325,10 +325,10 @@ Budgets already over are counted separately, under Over budget."
           <p class="mt-1.5 text-xs text-muted" id="budget-capacity-hint"></p>
         </div>
 
-        <div>
-          <label class="tk-label" for="budget-risk-threshold"
-            >Pace warning threshold (%)</label
-          >
+        <div class="tk-required-field" data-required-auto>
+          <label class="tk-label tk-field-heading" for="budget-risk-threshold">
+            <span>Pace warning threshold (%)</span><span class="tk-required-cue">Required</span>
+          </label>
           <input
             type="number"
             id="budget-risk-threshold"

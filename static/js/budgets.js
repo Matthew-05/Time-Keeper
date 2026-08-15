@@ -1,4 +1,4 @@
-import { TimeKeeper, ready, confirmAction, disarmConfirm, dismissOnBackdropClick, lockBodyScroll, unlockBodyScroll } from './base.js'
+import { TimeKeeper, ready, createChoices, confirmAction, disarmConfirm, dismissOnBackdropClick, lockBodyScroll, unlockBodyScroll } from './base.js'
 import {
     MATURITY_RULE,
     STATUS_LABEL,
@@ -153,12 +153,12 @@ class Budgets extends TimeKeeper {
             itemSelectText: '',
         }
 
-        this.clientFilterPicker = new Choices(this.clientFilter, {
+        this.clientFilterPicker = createChoices(this.clientFilter, {
             ...pickerOptions,
             placeholder: true,
             placeholderValue: 'All clients',
         })
-        this.budgetClientPicker = new Choices(this.fields.client, {
+        this.budgetClientPicker = createChoices(this.fields.client, {
             ...pickerOptions,
             placeholder: true,
             placeholderValue: 'Choose a client…',

@@ -7,6 +7,8 @@ import {
     setHtml,
     unlockBodyScroll,
     ready,
+    setRequiredState,
+    createChoices,
 } from './base.js';
 import { fetchWorks, WorksList } from './works.js';
 import { BudgetWidget } from './budget_widget.js';
@@ -98,6 +100,7 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.dayStatus = document.getElementById('day-status');
         this.dayStatusLabel = document.getElementById('day-status-label');
         this.clientInput = document.getElementById('autocomplete-input');
+        this.clientField = document.getElementById('client-field');
         this.worksContainer = document.getElementById('works-container');
         this.clientDayTotal = document.getElementById('client-day-total');
         this.completeButton = document.getElementById('complete-button');
@@ -765,7 +768,7 @@ export class TimeKeeperIndex extends TimeKeeper {
             }
         };
 
-        this.autocomplete = new Choices(this.clientInput, {
+        this.autocomplete = createChoices(this.clientInput, {
             searchPlaceholderValue: 'Start typing client name...',
             placeholder: true,
             placeholderValue: 'Choose a client...',
@@ -1158,6 +1161,19 @@ export class TimeKeeperIndex extends TimeKeeper {
         this.timeFieldLabel.textContent = fieldLabel;
         this.timeActions.classList.toggle('hidden', visibleCount === 0);
         this.timeActions.style.display = visibleCount ? 'flex' : 'none';
+
+        // Put the prerequisite beside the control, where it can be seen before
+        // the disabled action is reached. A syntactically present but invalid
+        // time (future / before the allowed boundary) remains incomplete.
+        setRequiredState(
+            this.clientField,
+            this.uiState === 'dayStarted' && !hasClient,
+        );
+        const timeRequired = this.uiState !== 'dayEnded';
+        const timeIncomplete = timeRequired && Boolean(
+            disabledTimeReason(fieldLabel.toLowerCase(), 'continue'),
+        );
+        setRequiredState(this.timeContainer, timeIncomplete);
     }
 
 

@@ -321,6 +321,18 @@ console.log('\nManual adjustments require a non-zero delta and use hours/minutes
     manager.error = stubElement();
     manager.clientId = () => 1;
 
+    check('duration parser accepts the picker value and legacy forms', [
+        manager.parseDurationInput('08:30:00.000'),
+        manager.parseDurationInput('8h 30m'),
+        manager.parseDurationInput('8:30'),
+        manager.parseDurationInput('8.5'),
+        manager.parseDurationInput('510m'),
+    ], [510, 510, 510, 510, 510]);
+    check('single duration field rejects ambiguous text',
+        Number.isNaN(manager.parseDurationInput('eight-ish')), true);
+    check('single duration field formats a compact friendly value',
+        manager.formatDurationInput(510), '8h 30m');
+
     manager.setAdjustedMinutes(135);
     check('135 minutes splits into hour/minute inputs',
         [manager.totalHours.value, manager.totalMinutes.value], ['2', '15']);
@@ -392,6 +404,30 @@ console.log('\nManual adjustments require a non-zero delta and use hours/minutes
         [manager.totalHours.value, manager.totalMinutes.value], ['3', '15']);
     check('editing rounded hours recalculates adjustment hours/minutes',
         [manager.deltaHours.value, manager.deltaMinutesField.value], ['1', '15']);
+
+    manager.valueInput = {
+        value: '03:10:00.000',
+        dataset: {},
+        shadowRoot: null,
+        setAttribute() {},
+        focus() {},
+    };
+    manager.editMode = 'rounded';
+    manager.syncFromAuthorValue(true);
+    check('rounded authoring snaps the segmented duration control', [
+        manager.valueInput.value,
+        manager.totalHours.value,
+        manager.totalMinutes.value,
+    ], ['03:15:00.000', '3', '15']);
+
+    manager.editMode = 'exact';
+    manager.valueInput.value = '02:45:00.000';
+    manager.syncFromAuthorValue(true);
+    check('exact authoring directly updates the unrounded total', [
+        manager.valueInput.value,
+        manager.totalHours.value,
+        manager.totalMinutes.value,
+    ], ['02:45:00.000', '2', '45']);
 
     const deleteClasses = new Set(['hidden']);
     manager.deleteButton = {

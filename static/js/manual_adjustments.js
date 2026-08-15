@@ -5,6 +5,8 @@ import {
     lockBodyScroll,
     setHtml,
     setText,
+    setRequiredState,
+    createChoices,
     unlockBodyScroll,
 } from './base.js';
 
@@ -19,8 +21,20 @@ export class ManualAdjustmentManager {
         this.panel = document.getElementById('adjust-time-panel');
         this.subtitle = document.getElementById('adjust-time-subtitle');
         this.client = document.getElementById('adjust-time-client');
+        this.clientField = document.getElementById('adjust-time-client-field');
+        this.changeField = document.getElementById('adjust-time-change-field');
         this.baseHours = document.getElementById('adjust-time-base-hours');
         this.baseMinuteField = document.getElementById('adjust-time-base-minutes');
+        this.baseDisplay = document.getElementById('adjust-time-base-display');
+        this.valueInput = document.getElementById('adjust-time-value');
+        this.valueLabelText = document.getElementById('adjust-time-value-label-text');
+        this.modeToggle = document.getElementById('adjust-time-mode-toggle');
+        this.modeToggleLabel = document.getElementById('adjust-time-mode-toggle-label');
+        this.preview = document.getElementById('adjust-time-preview');
+        this.previewTimeRow = document.getElementById('adjust-time-preview-time-row');
+        this.previewTimeLabel = document.getElementById('adjust-time-preview-time-label');
+        this.previewTime = document.getElementById('adjust-time-preview-time');
+        this.previewDelta = document.getElementById('adjust-time-preview-delta');
         this.deltaOperator = document.getElementById('adjust-time-operator');
         this.deltaHours = document.getElementById('adjust-time-delta-hours');
         this.deltaMinutesField = document.getElementById('adjust-time-delta-minutes');
@@ -39,6 +53,12 @@ export class ManualAdjustmentManager {
         this.baseMinutes = null;
         this.requestToken = 0;
 
+        this.configureDurationInput();
+        globalThis.customElements?.whenDefined?.('input-duration').then(() => {
+            this.configureDurationInput();
+            this.updateEditorView();
+        });
+
         this.restrictNumberInput(this.deltaHours, { integer: true });
         this.restrictNumberInput(this.deltaMinutesField, { integer: true, max: 59 });
         this.restrictNumberInput(this.totalHours, { integer: true });
@@ -52,13 +72,7 @@ export class ManualAdjustmentManager {
         document.getElementById('adjust-time-cancel')
             .addEventListener('click', () => this.close());
         this.client.addEventListener('change', () => this.selectClient());
-        this.deltaOperator.addEventListener('click', () => this.toggleDeltaSign());
-        this.deltaHours.addEventListener('input', () => this.syncFromDelta());
-        this.deltaMinutesField.addEventListener('input', () => this.syncFromDelta());
-        this.totalHours.addEventListener('input', () => this.syncFromTotal());
-        this.totalMinutes.addEventListener('input', () => this.syncFromTotal());
-        this.roundedHours?.addEventListener('input', () => this.syncFromRounded());
-        this.roundedHours?.addEventListener('change', () => this.syncFromRounded(true));
+        this.modeToggle?.addEventListener('click', () => this.toggleEditMode());
         this.deleteButton?.addEventListener('click', () => {
             const adjustment = this.current;
             if (!adjustment) return;
@@ -144,7 +158,7 @@ export class ManualAdjustmentManager {
             this.client,
             this.owner.getClientOptions(null, { placeholder: 'Choose a client…' })
         );
-        this.clientPicker = new Choices(this.client, {
+        this.clientPicker = createChoices(this.client, {
             searchPlaceholderValue: 'Start typing client name...',
             placeholder: true,
             placeholderValue: 'Choose a client…',
@@ -165,17 +179,15 @@ export class ManualAdjustmentManager {
         this.totalHours.value = '';
         this.totalMinutes.value = '';
         this.roundedHours.value = '';
+        this.setDurationInputMinutes(0);
+        this.editMode = this.owner.roundingEnabled ? 'rounded' : 'exact';
         this.setDeltaSign(1);
         setText(this.difference, '—');
         this.setRoundingTone(0);
-        this.rounded?.classList.toggle('hidden', !this.owner.roundingEnabled);
-        setText(
-            this.help,
-            this.owner.roundingEnabled
-                ? 'Edit the adjustment, adjusted time, or rounded hours; the other values recalculate automatically.'
-                : 'With rounding off, adjusted time is used directly.'
-        );
+        this.rounded?.classList.add('hidden');
+        this.updateEditorView();
         this.save.disabled = true;
+        this.syncRequiredStates();
         this.clearError();
     }
 
@@ -236,8 +248,7 @@ export class ManualAdjustmentManager {
     edit(adjustment) {
         this.clientPicker?.setChoiceByValue(String(adjustment.client_id));
         this.populate(adjustment);
-        this.deltaHours.focus();
-        this.deltaHours.select();
+        this.focusDurationInput();
     }
 
     syncFromDelta() {
@@ -290,13 +301,230 @@ export class ManualAdjustmentManager {
         this.renderResult({ preserveRoundedInput: true });
     }
 
+    /**
+     * Author the adjustment through the modal's segmented duration control.
+     * Rounded mode finds an exact minute total which produces the requested
+     * rounded result; exact mode writes the unrounded total directly.
+     */
+    syncFromAuthorValue(commit = false) {
+        if (!this.valueInput) return;
+        const target = this.parseDurationInput(this.valueInput.value);
+        const roundedMode = this.editMode === 'rounded' && this.owner.roundingEnabled;
+
+        if (this.baseMinutes == null || !Number.isFinite(target)) {
+            this.clearDeltaTime();
+            this.clearAdjustedTime();
+            this.renderResult({
+                preserveRoundedInput: roundedMode,
+                preserveAuthorInput: true,
+            });
+            if (commit) {
+                this.showError('Enter valid hours and minutes.');
+            }
+            return;
+        }
+
+        if (roundedMode) {
+            const interval = this.roundingIntervalMinutes();
+            const roundedTarget = Math.floor(target / interval + 0.5) * interval;
+            const adjustment = this.adjustmentForRoundedMinutes(roundedTarget);
+            if (adjustment == null) {
+                this.clearDeltaTime();
+                this.clearAdjustedTime();
+                this.renderResult({ preserveRoundedInput: true, preserveAuthorInput: true });
+                if (commit) this.showError('That rounded duration cannot be produced by the current policy.');
+                return;
+            }
+            this.setRoundedMinutes(roundedTarget);
+            this.setDeltaMinutes(adjustment);
+            this.setAdjustedMinutes(this.baseMinutes + adjustment);
+            if (commit) this.setDurationInputMinutes(roundedTarget);
+        } else {
+            this.setAdjustedMinutes(target);
+            this.setDeltaMinutes(target - this.baseMinutes);
+            if (commit) this.setDurationInputMinutes(target);
+        }
+
+        this.renderResult({
+            preserveRoundedInput: roundedMode,
+            preserveAuthorInput: true,
+        });
+    }
+
+    toggleEditMode() {
+        if (!this.owner.roundingEnabled) return;
+        this.editMode = this.editMode === 'rounded' ? 'exact' : 'rounded';
+        this.updateEditorView();
+        this.focusDurationInput();
+    }
+
+    /** Parse library values plus the legacy friendly duration forms. */
+    parseDurationInput(value) {
+        const text = String(value ?? '').trim().toLowerCase().replace(',', '.');
+        if (!text) return Number.NaN;
+
+        const clock = text.match(/^(\d+):([0-5]?\d)(?::[0-5]?\d(?:\.\d{1,3})?)?$/);
+        if (clock) return Number(clock[1]) * 60 + Number(clock[2]);
+
+        if (/^\d+(?:\.\d+)?$/.test(text)) {
+            return Math.round(Number(text) * 60);
+        }
+
+        const words = text.match(
+            /^(?:(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours))?\s*(?:(\d+(?:\.\d+)?)\s*(?:m|min|mins|minute|minutes))?$/
+        );
+        if (!words || (words[1] == null && words[2] == null)) return Number.NaN;
+        const minutes = Number(words[1] || 0) * 60 + Number(words[2] || 0);
+        return Number.isFinite(minutes) && minutes >= 0
+            ? Math.round(minutes)
+            : Number.NaN;
+    }
+
+    formatDurationInput(totalMinutes) {
+        const safe = Math.max(0, Math.round(Number(totalMinutes) || 0));
+        const hours = Math.floor(safe / 60);
+        const minutes = safe % 60;
+        if (hours && minutes) return `${hours}h ${minutes}m`;
+        if (hours) return `${hours}h`;
+        return `${minutes}m`;
+    }
+
+    /** Theme and trim the library's open shadow root to the two units we use. */
+    configureDurationInput() {
+        const root = this.valueInput?.shadowRoot;
+        if (!root || this.valueInput.dataset.timeKeeperReady === 'true') return;
+        this.valueInput.dataset.timeKeeperReady = 'true';
+        this.valueInput.tabIndex = -1;
+
+        const hours = root.querySelector('input.sH');
+        const minutes = root.querySelector('input.sM');
+        const seconds = root.querySelector('input.sS');
+        const milliseconds = root.querySelector('input.sMS');
+        const hourUnit = root.querySelector('.bds-h');
+        const minuteUnit = root.querySelector('.bds-m');
+        const hiddenSeparator = root.querySelector('.bds-s');
+        const icon = root.querySelector('#svgContainer');
+
+        hourUnit.textContent = 'hrs';
+        minuteUnit.textContent = 'mins';
+        hours.setAttribute('aria-label', 'Hours');
+        minutes.setAttribute('aria-label', 'Minutes');
+        seconds.hidden = true;
+        milliseconds.hidden = true;
+        hiddenSeparator.hidden = true;
+        icon.hidden = true;
+
+        const sync = () => this.syncFromAuthorValue();
+        const commit = () => this.syncFromAuthorValue(true);
+        hours.addEventListener('input', sync);
+        minutes.addEventListener('input', sync);
+        hours.addEventListener('change', commit);
+        minutes.addEventListener('change', commit);
+
+        // The package advances from minutes into its seconds field. Seconds are
+        // intentionally hidden here, so keep right-arrow and two-digit entry in
+        // the visible minutes segment.
+        minutes.addEventListener('keydown', (event) => {
+            if (event.key === 'ArrowRight') event.stopPropagation();
+        });
+        minutes.addEventListener('keyup', (event) => {
+            if (/^\d$/.test(event.key)) event.stopImmediatePropagation();
+        }, true);
+
+        const style = document.createElement('style');
+        style.textContent = `
+            div.timeCase {
+                align-items: center;
+                background: var(--duration-background);
+                border: 1px solid var(--duration-border);
+                border-radius: 8px;
+                box-sizing: border-box;
+                display: flex;
+                gap: 0.42rem;
+                max-width: none;
+                min-height: 3rem;
+                padding: 0.55rem 0.75rem;
+                transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+                width: 100%;
+            }
+            div.timeCase:focus-within {
+                border: 1px solid var(--duration-border);
+                box-shadow: 0 0 0 3px var(--ring);
+                padding: 0.55rem 0.75rem;
+            }
+            div.timeCase input.ts_digit {
+                appearance: textfield;
+                background: transparent;
+                border: 0;
+                border-radius: 4px;
+                caret-color: auto;
+                color: var(--duration-text);
+                font: inherit;
+                font-size: 1.125rem;
+                font-variant-numeric: tabular-nums;
+                font-weight: 650;
+                line-height: 1.35;
+                padding: 0.12rem 0.2rem;
+                text-align: right;
+                width: 2.8ch;
+            }
+            div.timeCase input.ts_digit:hover,
+            div.timeCase input.ts_digit:focus {
+                background: var(--accent-soft);
+            }
+            div.timeCase input.ts_digit:focus {
+                box-shadow: inset 0 0 0 1px var(--accent);
+                outline: none;
+            }
+            .bds-h, .bds-m {
+                color: var(--duration-separator);
+                font-size: 0.75rem;
+                font-weight: 600;
+                margin-right: 0.4rem;
+            }
+        `;
+        root.append(style);
+    }
+
+    durationControlParts() {
+        const root = this.valueInput?.shadowRoot;
+        return {
+            hours: root?.querySelector('input.sH') || null,
+            minutes: root?.querySelector('input.sM') || null,
+        };
+    }
+
+    setDurationInputMinutes(totalMinutes) {
+        if (!this.valueInput) return;
+        const safe = Math.max(0, Math.round(Number(totalMinutes) || 0));
+        const hourValue = String(Math.floor(safe / 60)).padStart(2, '0');
+        const minuteValue = String(safe % 60).padStart(2, '0');
+        const parts = this.durationControlParts();
+        if (parts.hours && parts.minutes) {
+            parts.hours.value = hourValue;
+            parts.minutes.value = minuteValue;
+        } else {
+            this.valueInput.value = `${hourValue}:${minuteValue}:00.000`;
+        }
+    }
+
+    focusDurationInput() {
+        const hours = this.durationControlParts().hours;
+        if (hours) {
+            hours.focus();
+            hours.select();
+        } else {
+            this.valueInput?.focus?.();
+        }
+    }
+
     toggleDeltaSign() {
         this.setDeltaSign(this.deltaSign * -1);
         if (Number.isFinite(this.deltaMinutes())) this.syncFromDelta();
         else this.renderResult();
     }
 
-    renderResult({ preserveRoundedInput = false } = {}) {
+    renderResult({ preserveRoundedInput = false, preserveAuthorInput = false } = {}) {
         this.clearError();
         const clientId = this.clientId();
         const delta = this.deltaMinutes();
@@ -307,6 +535,7 @@ export class ManualAdjustmentManager {
             && adjusted >= 0
             && wholeDelta;
 
+        this.syncRequiredStates(clientId, delta);
         this.save.disabled = !calculable || delta === 0;
         if (!calculable) {
             this.rounded?.classList.toggle('hidden', !this.owner.roundingEnabled);
@@ -342,6 +571,7 @@ export class ManualAdjustmentManager {
                     this.showError('Minutes must be between 0 and 59.');
                 }
             }
+            this.updateEditorView({ preserveAuthorInput });
             return;
         }
 
@@ -356,6 +586,71 @@ export class ManualAdjustmentManager {
             this.setRoundingTone(0);
             this.rounded?.classList.add('hidden');
         }
+        this.updateEditorView({ preserveAuthorInput });
+    }
+
+    /** Render context and calculated consequences around the one input. */
+    updateEditorView({ preserveAuthorInput = false } = {}) {
+        if (!this.valueInput) return;
+        const roundedMode = this.editMode === 'rounded' && this.owner.roundingEnabled;
+        const adjusted = this.adjustedMinutes();
+        const delta = this.deltaMinutes();
+        const calculable = this.clientId() != null
+            && Number.isFinite(adjusted)
+            && adjusted >= 0
+            && Number.isInteger(delta);
+        const billable = calculable && this.owner.roundingEnabled
+            ? this.owner.totalTimeSpentToFractionalHours(adjusted) * 60
+            : adjusted;
+
+        setText(this.valueLabelText, roundedMode ? 'Rounded time' : 'Exact time');
+        this.valueInput.setAttribute(
+            'aria-label',
+            roundedMode ? 'Rounded adjusted duration' : 'Exact adjusted duration',
+        );
+        if (!preserveAuthorInput) {
+            const target = roundedMode ? billable : adjusted;
+            this.setDurationInputMinutes(Number.isFinite(target) ? target : 0);
+        }
+
+        this.modeToggle?.classList.toggle('hidden', !this.owner.roundingEnabled);
+        const toggleLabel = roundedMode ? 'Edit exact' : 'Use rounded';
+        const toggleTitle = roundedMode ? 'Edit exact time' : 'Edit rounded time';
+        setText(this.modeToggleLabel, toggleLabel);
+        this.modeToggle?.setAttribute('aria-label', toggleTitle);
+        this.modeToggle?.setAttribute('title', toggleTitle);
+
+        setText(
+            this.help,
+            roundedMode
+                ? `Uses the ${this.roundingIntervalMinutes()}-minute rounding policy. Type a value or use the arrow keys.`
+                : 'Directly edits unrounded time. Type a value or use the arrow keys.',
+        );
+
+        this.preview?.classList.toggle('hidden', !calculable);
+        const showOtherTime = calculable && this.owner.roundingEnabled;
+        this.previewTimeRow?.classList.toggle('hidden', !showOtherTime);
+        setText(this.previewTimeLabel, roundedMode ? 'Exact time' : 'Rounded time');
+        setText(
+            this.previewTime,
+            showOtherTime
+                ? this.formatDurationInput(roundedMode ? adjusted : billable)
+                : '—',
+        );
+        setText(this.previewDelta, calculable ? this.formatSignedDuration(delta) : '—');
+        this.previewDelta?.classList.remove('text-success', 'text-danger', 'text-faint');
+        this.previewDelta?.classList.add(
+            !calculable || delta === 0 ? 'text-faint' : delta > 0 ? 'text-success' : 'text-danger',
+        );
+    }
+
+    /** Show the two actual prerequisites without marking six linked inputs. */
+    syncRequiredStates(clientId = this.clientId(), delta = this.deltaMinutes()) {
+        setRequiredState(this.clientField, clientId == null);
+        setRequiredState(
+            this.changeField,
+            clientId == null || !Number.isFinite(delta) || delta === 0,
+        );
     }
 
     async submit() {
@@ -657,11 +952,13 @@ export class ManualAdjustmentManager {
         const minutes = safe - hours * 60;
         setText(this.baseHours, String(hours));
         setText(this.baseMinuteField, this.numberValue(minutes));
+        setText(this.baseDisplay, this.formatDurationInput(safe));
     }
 
     clearBaseTime() {
         setText(this.baseHours, '—');
         setText(this.baseMinuteField, '—');
+        setText(this.baseDisplay, '—');
     }
 
     showError(message) {

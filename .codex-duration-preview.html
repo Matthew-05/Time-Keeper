@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="/static/css/app.css" />
+    <title>Duration control preview</title>
+    <style>
+      body { padding: 3rem; }
+      main { margin: 0 auto; max-width: 44rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <button id="theme-toggle" class="tk-btn tk-btn-secondary mb-4" type="button">Toggle theme</button>
+      <div id="adjust-time-change-field" class="tk-adjustment-editor tk-adjustment-change-field tk-required-field is-incomplete">
+        <div class="tk-adjustment-logged">
+          <span>Logged time</span>
+          <strong class="tabular">7h 45m</strong>
+        </div>
+        <div class="tk-adjustment-author">
+          <div class="tk-adjustment-author-heading">
+            <div class="tk-field-heading" id="adjust-time-value-label">
+              <span>Rounded time</span>
+              <span class="tk-required-cue">Change needed</span>
+            </div>
+            <button class="tk-adjustment-mode-toggle" type="button">
+              <span>Edit exact</span>
+            </button>
+          </div>
+          <input-duration
+            id="adjust-time-value"
+            class="tk-adjustment-duration tabular"
+            value="08:30:00.000"
+            role="group"
+            aria-label="Rounded adjusted duration"
+            aria-required="true"
+            aria-describedby="adjust-time-help"
+          ></input-duration>
+          <p class="tk-adjustment-math-help" id="adjust-time-help">Uses the 15-minute rounding policy. Type a value or use the arrow keys.</p>
+        </div>
+        <div class="tk-adjustment-preview">
+          <div><span>Exact time</span><strong class="tabular">8h 24m</strong></div>
+          <div><span>Adjustment</span><strong class="tabular text-success">+39m</strong></div>
+        </div>
+      </div>
+    </main>
+    <script src="/static/vendor/input-duration/input-duration.js" type="module"></script>
+    <script type="module">
+      import { ManualAdjustmentManager } from '/static/js/manual_adjustments.js'
+      await customElements.whenDefined('input-duration')
+      const manager = Object.create(ManualAdjustmentManager.prototype)
+      manager.valueInput = document.getElementById('adjust-time-value')
+      manager.configureDurationInput()
+      document.getElementById('theme-toggle').addEventListener('click', () => {
+        document.documentElement.classList.toggle('dark')
+      })
+    </script>
+  </body>
+</html>

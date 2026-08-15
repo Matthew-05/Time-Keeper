@@ -1,4 +1,4 @@
-import { TimeKeeper, createPoller, reconcileChildren, setText, setHtml, ready, clientColor, clientForeground, confirmAction, dismissOnBackdropClick, lockBodyScroll, unlockBodyScroll, showInsight, hideInsight } from './base.js';
+import { TimeKeeper, createPoller, reconcileChildren, setText, setHtml, ready, setRequiredState, createChoices, clientColor, clientForeground, confirmAction, dismissOnBackdropClick, lockBodyScroll, unlockBodyScroll, showInsight, hideInsight } from './base.js';
 import { insight, heading, note, row } from './insight.js';
 import { WorksList, fetchWorks, joinWorks } from './works.js';
 import {
@@ -541,6 +541,7 @@ export class TaskBrowser extends TimeKeeper {
         this.addTaskPanel = document.getElementById('add-task-panel');
         this.addTaskSubtitle = document.getElementById('add-task-subtitle');
         this.addTaskClient = document.getElementById('add-task-client');
+        this.addTaskClientField = document.getElementById('add-task-client-field');
         this.addTaskStart = document.getElementById('add-task-start');
         this.addTaskEnd = document.getElementById('add-task-end');
         this.addTaskWarning = document.getElementById('add-task-warning');
@@ -709,7 +710,7 @@ export class TaskBrowser extends TimeKeeper {
         this.addTaskClientPicker?.destroy();
         setHtml(this.addTaskClient, this.getClientOptions(null, { placeholder: 'Choose a client…' }));
 
-        this.addTaskClientPicker = new Choices(this.addTaskClient, {
+        this.addTaskClientPicker = createChoices(this.addTaskClient, {
             searchPlaceholderValue: 'Start typing client name...',
             placeholder: true,
             placeholderValue: 'Choose a client…',
@@ -760,9 +761,13 @@ export class TaskBrowser extends TimeKeeper {
     /** Enable Add task only after its client and time period have been chosen. */
     updateAddTaskSaveState() {
         if (!this.addTaskSave) return;
+        const missingClient = this.addTaskClientId() == null;
+        const missingTimePeriod = !this.hasAddTaskTimePeriod();
         this.addTaskSave.disabled = this.addTaskSubmitting
-            || this.addTaskClientId() == null
-            || !this.hasAddTaskTimePeriod();
+            || missingClient
+            || missingTimePeriod;
+        setRequiredState(this.addTaskClientField, missingClient);
+        setRequiredState(this.addTaskTimelineWrap, missingTimePeriod);
     }
 
     toggleAddTaskTimes() {

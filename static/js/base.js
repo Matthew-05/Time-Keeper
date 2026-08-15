@@ -20,6 +20,43 @@ export function ready(fn) {
 }
 
 /**
+ * Keep the quiet required-field treatment in sync with workflow state.
+ *
+ * Native forms can use `data-required-auto` and CSS validity. Stateful screens
+ * (Today, Add task, Manual adjustment) have prerequisites that HTML cannot
+ * express, so they call this when their own validity calculation changes.
+ */
+export function setRequiredState(container, incomplete) {
+    if (!container) return;
+    container.classList.toggle('is-incomplete', Boolean(incomplete));
+    container.classList.toggle('is-complete', !incomplete);
+}
+
+/**
+ * Construct a Choices picker with the app's keyboard guard.
+ *
+ * Choices 11 opens a closed select on almost every keydown. After selecting an
+ * item it deliberately returns focus to its outer container, so pressing Ctrl,
+ * Alt, Meta, or a shortcut chord immediately reopens the dropdown. The vendor
+ * handler is a prototype method, so a small subclass can decline those keys
+ * before the vendor behavior runs. Ordinary text and navigation keys are left
+ * untouched, and the event itself still propagates for app-level shortcuts.
+ */
+export function createChoices(element, config) {
+    class TimeKeeperChoices extends Choices {
+        _onKeyDown(event) {
+            const isCommandKey = event.ctrlKey
+                || event.metaKey
+                || ['Control', 'Meta', 'Alt'].includes(event.key);
+            if (!this.dropdown.isActive && isCommandKey) return;
+            super._onKeyDown(event);
+        }
+    }
+
+    return new TimeKeeperChoices(element, config);
+}
+
+/**
  * Page templates render their modal markup inside <main>, whose fixed-position
  * stacking context sits below the title bar and navigation. Mounting backdrops
  * directly under <body> lets their z-index cover the complete app chrome, just

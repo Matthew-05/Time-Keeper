@@ -33,6 +33,7 @@ import {
     formatDecimalHours,
     formatDurationMinutes,
     ready,
+    createChoices,
     setHtml,
     setText,
 } from './base.js'
@@ -291,7 +292,7 @@ export class SummaryDashboard extends TimeKeeper {
     }
 
     initializeClientFilter() {
-        this.clientFilterPicker = new Choices(this.clientFilter, {
+        this.clientFilterPicker = createChoices(this.clientFilter, {
             searchPlaceholderValue: 'Start typing client name...',
             searchResultLimit: 10,
             shouldSort: false,
