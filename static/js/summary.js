@@ -191,14 +191,10 @@ export class SummaryDashboard extends TimeKeeper {
         this.initializeDateRangePicker()
         this.initializeStickyView()
         this.bindEvents()
-        /* This week so far — Monday (or Sunday, if that's the preference) up to
-           yesterday. On the first day of the week that range is empty, so the
-           page opens on last week rather than on nothing; `last-week` is always
-           complete and always selectable. Utilisation still measures against
-           *elapsed* capacity server-side, so a Tuesday doesn't read as a crisis
-           either way. */
-        const selection = this.presetSelection('this-week')
-            ?? this.presetSelection('last-week')
+        // Start with the same 30 complete days represented by the Last 30 days
+        // chip. Ending yesterday keeps a running task from changing the view
+        // while it is being read.
+        const selection = this.presetSelection('last-30')
         this.calendar.start(selection)
         this.selectRange(selection)
     }

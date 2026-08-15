@@ -26,6 +26,31 @@ globalThis.window = { addEventListener() {}, matchMedia: () => ({ matches: false
 
 const { SummaryDashboard } = await import('../static/js/summary.js')
 
+const initializingDashboard = Object.create(SummaryDashboard.prototype)
+let requestedDefaultPreset = null
+let startedSelection = null
+let selectedInitialRange = null
+const defaultSelection = {
+    start: '2026-07-15',
+    end: '2026-08-13',
+    weekdays: null,
+}
+initializingDashboard.initializeClientFilter = () => {}
+initializingDashboard.initializeDateRangePicker = () => {}
+initializingDashboard.initializeStickyView = () => {}
+initializingDashboard.bindEvents = () => {}
+initializingDashboard.presetSelection = (name) => {
+    requestedDefaultPreset = name
+    return defaultSelection
+}
+initializingDashboard.calendar = { start: (selection) => { startedSelection = selection } }
+initializingDashboard.selectRange = (selection) => { selectedInitialRange = selection }
+initializingDashboard.init()
+
+assert.equal(requestedDefaultPreset, 'last-30')
+assert.equal(startedSelection, defaultSelection)
+assert.equal(selectedInitialRange, defaultSelection)
+
 const dashboard = Object.create(SummaryDashboard.prototype)
 dashboard.clientFilter = { value: '' }
 dashboard.clientFilterClear = { hidden: true }
