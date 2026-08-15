@@ -99,6 +99,8 @@ class TeamBudgets extends TimeKeeper {
         this.detailBody = document.getElementById('team-budget-detail-body')
         this.detailEdit = document.getElementById('team-budget-edit')
         this.detailImport = document.getElementById('team-budget-import')
+        this.detailClose = document.getElementById('team-budget-close')
+        this.detailReopen = document.getElementById('team-budget-reopen')
 
         this.importModal = document.getElementById('team-import-modal')
         this.importTitle = document.getElementById('team-import-title')
@@ -465,6 +467,12 @@ class TeamBudgets extends TimeKeeper {
         this.detailImport.addEventListener('click', () => {
             if (this.detail) this.openImport(this.detail)
         })
+        this.detailClose.addEventListener('click', () => {
+            this.closeTeamBudget().catch(console.error)
+        })
+        this.detailReopen.addEventListener('click', () => {
+            this.reopenTeamBudget().catch(console.error)
+        })
         this.detailBody.addEventListener('change', (event) => {
             if (event.target.id === 'team-detail-member-filter') this.applyDetailMemberFilter()
         })
@@ -502,6 +510,10 @@ class TeamBudgets extends TimeKeeper {
     }
 
     renderDetail(detail) {
+        const canClose = detail.is_active && !detail.closed_at
+        this.detailClose.classList.toggle('hidden', !canClose)
+        this.detailReopen.classList.toggle('hidden', !detail.closed_at)
+        this.resetTeamCloseButton()
         this.detailTitle.textContent = detail.name
         this.detailRange.textContent = `${detail.client_name} · ${detailDateRange(detail)}`
         this.detailBody.innerHTML = `
@@ -536,6 +548,58 @@ class TeamBudgets extends TimeKeeper {
         })
         this.initializeDetailStickyFilter()
         this.renderDetailContent(detail)
+    }
+
+    resetTeamCloseButton() {
+        disarmConfirm(this.detailClose)
+        this.detailClose.disabled = false
+    }
+
+    async closeTeamBudget() {
+        const detail = this.detail
+        if (!detail?.is_active || detail.closed_at) return
+        return confirmAction(
+            this.detailClose,
+            () => this.performCloseTeamBudget(detail),
+            { label: 'Confirm close?' },
+        )
+    }
+
+    async performCloseTeamBudget(detail) {
+        this.detailClose.disabled = true
+        try {
+            await this.fetchFromAPI(
+                `/api/team-budgets/${detail.id}/close`,
+                { method: 'POST' },
+                { quiet: true },
+            )
+            this.showToast('Team budget closed. Its imported history is unchanged.', 'success')
+            await this.load()
+            if (this.detailId === detail.id) await this.openDetail(detail.id)
+        } catch (error) {
+            this.showToast(error.message, 'error')
+            this.resetTeamCloseButton()
+        }
+    }
+
+    async reopenTeamBudget() {
+        const detail = this.detail
+        if (!detail?.closed_at) return
+        this.detailReopen.disabled = true
+        try {
+            await this.fetchFromAPI(
+                `/api/team-budgets/${detail.id}/reopen`,
+                { method: 'POST' },
+                { quiet: true },
+            )
+            this.showToast('Team budget reopened.', 'success')
+            await this.load()
+            if (this.detailId === detail.id) await this.openDetail(detail.id)
+        } catch (error) {
+            this.showToast(error.message, 'error')
+        } finally {
+            this.detailReopen.disabled = false
+        }
     }
 
     initializeDetailStickyFilter() {
@@ -1016,6 +1080,7 @@ class TeamBudgets extends TimeKeeper {
         }
         if (modal === this.detailModal) {
             this.destroyDetailFilter()
+            this.resetTeamCloseButton()
             this.detailId = null
             this.detail = null
             this.detailMemberId = ''

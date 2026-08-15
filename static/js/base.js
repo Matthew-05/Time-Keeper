@@ -238,6 +238,11 @@ function bindSegmentedIndicators() {
             subtree: true,
         });
         window.addEventListener('resize', () => place(true));
+        // Some segmented controls live in a budget workspace panel that is
+        // hidden during first paint. Their initial width is therefore zero;
+        // remeasure after the workspace becomes visible so the blue indicator
+        // lands under the already-active segment instead of disappearing.
+        document.addEventListener('budgetViewChanged', () => place(true));
     });
 }
 

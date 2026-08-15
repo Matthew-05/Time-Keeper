@@ -205,6 +205,7 @@ class TeamBudget(db.Model):
     end_date = db.Column(db.Date, nullable=False)
     notes = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    closed_at = db.Column(db.DateTime, nullable=True)
     imported_at = db.Column(db.DateTime, nullable=True)
     import_filename = db.Column(db.String(255), nullable=True)
     import_sha256 = db.Column(db.String(64), nullable=True)

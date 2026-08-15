@@ -1,6 +1,6 @@
 import io
 import unittest
-from datetime import date
+from datetime import date, datetime
 from html import escape
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -214,6 +214,19 @@ class TeamBudgetSummaryTests(unittest.TestCase):
         )
         self.assertEqual(summary['status'], 'over')
         self.assertTrue(summary['is_closed'])
+
+    def test_manual_close_moves_team_and_members_out_of_active_state(self):
+        summary = team_budgets.summarise_team_budget(
+            date(2026, 8, 1), date(2026, 8, 31),
+            [{'id': 1, 'name': 'Ada', 'budgeted_hours': 40}],
+            [{'member_id': 1, 'date': date(2026, 8, 10), 'seconds': 8 * 3600}],
+            today=date(2026, 8, 15),
+            closed_at=datetime(2026, 8, 15, 12, 0),
+        )
+        self.assertFalse(summary['is_active'])
+        self.assertTrue(summary['is_closed'])
+        self.assertEqual(summary['status'], 'closed')
+        self.assertEqual(summary['members'][0]['status'], 'closed')
 
 
 if __name__ == '__main__':

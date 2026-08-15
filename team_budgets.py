@@ -397,7 +397,9 @@ def import_preview(parsed, start_date, end_date, known_source_ids, today=None):
     }
 
 
-def summarise_team_budget(start_date, end_date, members, entries, today=None):
+def summarise_team_budget(
+    start_date, end_date, members, entries, today=None, closed_at=None
+):
     """Summarize an engagement from imported rows using calendar-day burn."""
     today = today or date.today()
     member_rows = list(members)
@@ -432,7 +434,7 @@ def summarise_team_budget(start_date, end_date, members, entries, today=None):
             scope_status = 'upcoming'
         elif consumed_hours > committed_hours:
             scope_status = 'over'
-        elif today > end_date:
+        elif closed_at is not None or today > end_date:
             scope_status = 'closed'
         elif mature and projected_hours > committed_hours:
             scope_status = 'at_risk'
@@ -527,8 +529,8 @@ def summarise_team_budget(start_date, end_date, members, entries, today=None):
         'percent_used': round(used / budgeted * 100, 1) if budgeted else 0.0,
         **team_projection,
         'total_days': total_days,
-        'is_active': start_date <= today <= end_date,
-        'is_closed': today > end_date,
+        'is_active': closed_at is None and start_date <= today <= end_date,
+        'is_closed': closed_at is not None or today > end_date,
         'members': member_summaries,
         'burn': burn,
         'member_burn': member_burn,

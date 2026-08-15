@@ -782,6 +782,23 @@ def _ensure_budget_closed_at_column():
     print('Added budget.closed_at')
 
 
+def _ensure_team_budget_closed_at_column():
+    """Add manual close/reopen support to existing team-budget databases."""
+    eng = db.engine
+    if eng.dialect.name != 'sqlite':
+        return
+    table = TeamBudget.__table__.name
+    insp = inspect(eng)
+    if table not in insp.get_table_names():
+        return
+    if any(c['name'] == 'closed_at' for c in insp.get_columns(table)):
+        return
+
+    with eng.begin() as conn:
+        conn.execute(text(f'ALTER TABLE {table} ADD COLUMN closed_at DATETIME'))
+    print('Added team_budget.closed_at')
+
+
 def _ensure_budget_risk_threshold_column():
     """Backfill the per-budget at-risk threshold on existing SQLite databases."""
     eng = db.engine
@@ -906,6 +923,7 @@ with app.app_context():
     _ensure_task_budget_id_column()
     _ensure_task_budget_excluded_column()
     _ensure_budget_closed_at_column()
+    _ensure_team_budget_closed_at_column()
     _ensure_budget_risk_threshold_column()
     _ensure_client_color_column()
     if _work_table_is_new:
@@ -3031,6 +3049,7 @@ def _team_budget_json(team_budget, detail=False, today=None):
         member_records,
         entry_records,
         today=today,
+        closed_at=team_budget.closed_at,
     )
     if detail:
         member_entry_counts = dict(db.session.query(
@@ -3085,6 +3104,9 @@ def _team_budget_json(team_budget, detail=False, today=None):
         'start_date': team_budget.start_date.isoformat(),
         'end_date': team_budget.end_date.isoformat(),
         'notes': team_budget.notes,
+        'closed_at': (
+            team_budget.closed_at.isoformat() if team_budget.closed_at else None
+        ),
         'started': today >= team_budget.start_date,
         'entry_count': entry_count,
         'imported_at': (
@@ -3341,6 +3363,40 @@ def api_delete_team_budget(team_budget_id):
     db.session.delete(team_budget)
     db.session.commit()
     return jsonify({'success': True})
+
+
+@app.route('/api/team-budgets/<int:team_budget_id>/close', methods=['POST'])
+def api_close_team_budget(team_budget_id):
+    """Manually close a live team engagement without changing its date range."""
+    team_budget = _team_budget_or_404(team_budget_id)
+    if team_budget is None:
+        return jsonify({'error': 'Team budget not found'}), 404
+    if team_budget.closed_at is not None:
+        return jsonify({'error': 'This team budget is already closed.'}), 409
+
+    today = date.today()
+    if today < team_budget.start_date:
+        return jsonify({'error': 'An upcoming team budget cannot be closed.'}), 400
+    if today > team_budget.end_date:
+        return jsonify({'error': 'This team budget has already ended.'}), 409
+
+    team_budget.closed_at = datetime.now()
+    db.session.commit()
+    return jsonify(_team_budget_json(team_budget))
+
+
+@app.route('/api/team-budgets/<int:team_budget_id>/reopen', methods=['POST'])
+def api_reopen_team_budget(team_budget_id):
+    """Undo a manual close and return the engagement to its dated state."""
+    team_budget = _team_budget_or_404(team_budget_id)
+    if team_budget is None:
+        return jsonify({'error': 'Team budget not found'}), 404
+    if team_budget.closed_at is None:
+        return jsonify({'error': 'This team budget is not manually closed.'}), 409
+
+    team_budget.closed_at = None
+    db.session.commit()
+    return jsonify(_team_budget_json(team_budget))
 
 
 def _read_team_workbook_upload():

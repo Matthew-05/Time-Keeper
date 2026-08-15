@@ -1,5 +1,5 @@
 import unittest
-from datetime import date
+from datetime import date, datetime
 
 from flask import Flask
 
@@ -58,6 +58,10 @@ class TeamBudgetModelTests(unittest.TestCase):
         ))
         db.session.commit()
         self.assertEqual(TeamBudgetEntry.query.count(), 1)
+
+        budget.closed_at = datetime(2026, 8, 15, 12, 0)
+        db.session.commit()
+        self.assertIsNotNone(db.session.get(TeamBudget, budget.id).closed_at)
 
         db.session.delete(budget)
         db.session.commit()
