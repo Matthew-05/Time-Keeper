@@ -1,7 +1,7 @@
 import {
     confirmAction,
     disarmConfirm,
-    dismissOnBackdropClick,
+    makeModalBackdropStatic,
     lockBodyScroll,
     setHtml,
     setText,
@@ -103,7 +103,7 @@ export class ManualAdjustmentManager {
             }
             this.edit(row);
         });
-        dismissOnBackdropClick(this.modal, () => this.close());
+        makeModalBackdropStatic(this.modal);
         document.addEventListener('keydown', (event) => {
             if (event.key === 'Escape' && this.isOpen()) this.close();
         });

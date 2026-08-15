@@ -1,7 +1,7 @@
 import {
     TimeKeeper,
     createPoller,
-    dismissOnBackdropClick,
+    makeModalBackdropStatic,
     isInsightOpen,
     lockBodyScroll,
     setHtml,
@@ -329,10 +329,7 @@ export class TimeKeeperIndex extends TimeKeeper {
             this.closeCompleteWithoutWorksModal({ restoreFocus: false });
             this.completeTask({ skipWorksWarning: true });
         });
-        dismissOnBackdropClick(
-            this.completeWithoutWorksModal,
-            () => this.closeCompleteWithoutWorksModal(),
-        );
+        makeModalBackdropStatic(this.completeWithoutWorksModal);
         this.reopenDayButton.addEventListener('click', () => this.handleReopenDay());
         this.currentTimeButton.addEventListener('click', () => this.setCurrentTime());
         this.clearTimeButton.addEventListener('click', () => this.clearTime());

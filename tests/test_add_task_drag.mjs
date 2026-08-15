@@ -49,32 +49,36 @@ globalThis.vis = {
     Timeline: class {},
 };
 
-const { dismissOnBackdropClick } = await import('../static/js/base.js');
+const { makeModalBackdropStatic } = await import('../static/js/base.js');
 const { TaskBrowser } = await import('../static/js/task_browser.js');
 const { ManualAdjustmentManager } = await import('../static/js/manual_adjustments.js');
 
 let failures = 0;
 
-console.log('modal dismissal requires a full backdrop click');
+console.log('modal backdrops never dismiss their dialogs');
 {
     const listeners = {};
     const backdrop = {
         addEventListener: (type, callback) => { listeners[type] = callback; },
     };
     const panel = {};
-    let dismissals = 0;
-    dismissOnBackdropClick(backdrop, () => { dismissals++; });
+    let prevented = 0;
+    let stopped = 0;
+    makeModalBackdropStatic(backdrop);
 
-    listeners.click({ target: backdrop });
-    check('mouse-up/click alone does not dismiss', dismissals, 0);
+    listeners.click({
+        target: panel,
+        preventDefault: () => { prevented++; },
+        stopPropagation: () => { stopped++; },
+    });
+    check('clicks inside the panel are untouched', [prevented, stopped], [0, 0]);
 
-    listeners.pointerdown({ target: panel });
-    listeners.click({ target: backdrop });
-    check('pressing in the dialog then releasing outside does not dismiss', dismissals, 0);
-
-    listeners.pointerdown({ target: backdrop });
-    listeners.click({ target: backdrop });
-    check('pressing and releasing on the backdrop dismisses', dismissals, 1);
+    listeners.click({
+        target: backdrop,
+        preventDefault: () => { prevented++; },
+        stopPropagation: () => { stopped++; },
+    });
+    check('clicking the backdrop is consumed without dismissing', [prevented, stopped], [1, 1]);
 }
 
 /* Recorded: 09:00–10:30 and 14:00–15:00, inside a 09:00–17:00 day. */

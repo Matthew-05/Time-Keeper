@@ -9,7 +9,7 @@
 
 import {
     TimeKeeper,
-    dismissOnBackdropClick,
+    makeModalBackdropStatic,
     lockBodyScroll,
     ready,
     unlockBodyScroll,
@@ -158,9 +158,7 @@ export class StartupUpdatePrompt {
         this.closeButton.addEventListener('click', () => this.dismiss(true))
         this.laterButton.addEventListener('click', () => this.dismiss(true))
         this.actionButton.addEventListener('click', () => this.performAction())
-        dismissOnBackdropClick(this.element, () => {
-            if (this.status?.state !== 'installing') this.dismiss(true)
-        })
+        makeModalBackdropStatic(this.element)
         document.addEventListener('keydown', this.handleKeydown)
         this.actionButton.focus()
     }

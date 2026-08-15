@@ -1,4 +1,4 @@
-import { TimeKeeper, createPoller, reconcileChildren, setText, setHtml, ready, setRequiredState, createChoices, clientColor, clientForeground, confirmAction, dismissOnBackdropClick, lockBodyScroll, unlockBodyScroll, showInsight, hideInsight } from './base.js';
+import { TimeKeeper, createPoller, reconcileChildren, setText, setHtml, ready, setRequiredState, createChoices, clientColor, clientForeground, confirmAction, makeModalBackdropStatic, lockBodyScroll, unlockBodyScroll, showInsight, hideInsight } from './base.js';
 import { insight, heading, note, row } from './insight.js';
 import { WorksList, fetchWorks, joinWorks } from './works.js';
 import {
@@ -474,7 +474,7 @@ export class TaskBrowser extends TimeKeeper {
         document.getElementById('works-modal-copy')
             .addEventListener('click', () => this.copyWorks(this.worksModalClient));
 
-        dismissOnBackdropClick(this.worksModal, () => this.closeWorksModal());
+        makeModalBackdropStatic(this.worksModal);
 
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && !this.worksModal.classList.contains('hidden')) {
@@ -636,7 +636,7 @@ export class TaskBrowser extends TimeKeeper {
             this.addTaskWorksDirty = true;
         });
 
-        dismissOnBackdropClick(this.addTaskModal, () => this.closeAddTaskModal());
+        makeModalBackdropStatic(this.addTaskModal);
 
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && !this.addTaskModal.classList.contains('hidden')) {
