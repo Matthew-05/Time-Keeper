@@ -4447,6 +4447,9 @@ class WebviewAPI:
         # Python.NET event delegates must be kept alive for as long as the form.
         self._native_move_handler = None
         self._webview_ready_handler = None
+        # Same deal for the ctypes callback subclassing the form's window
+        # procedure: the OS keeps only the raw function pointer.
+        self._native_subclass_proc = None
 
     def _configure_native_window(self):
         """Give the frameless WinForms window normal Windows chrome behavior.
@@ -4465,6 +4468,9 @@ class WebviewAPI:
             import System.Windows.Forms as WinForms
 
             native = webview.windows[0].native
+            # Before the styles go on, so the frame the sizing style reserves
+            # is suppressed in the same breath as it is added.
+            self._suppress_non_client_frame(native)
             self._enable_native_snap(native)
 
             def enable_non_client_regions(sender, args):
@@ -4488,6 +4494,66 @@ class WebviewAPI:
             # The app remains usable with pywebview's basic frameless behavior
             # if a future backend no longer exposes these WebView2 APIs.
             logger.warning(f'Could not configure native Windows chrome: {exc}')
+
+    def _suppress_non_client_frame(self, native):
+        """Stop the sizing frame from reserving visible pixels around the window.
+
+        ``_enable_native_snap`` restores ``WS_THICKFRAME`` so Windows will
+        commit an Aero Snap, but a window with a sizing frame also reserves a
+        strip of non-client pixels on every edge. WinForms paints no frame of
+        its own for a borderless form, so that strip shows the form background
+        — a bar above the HTML title bar that is most obvious in dark mode.
+
+        The frame is removed the way any custom-chrome window does it: by
+        answering ``WM_NCCALCSIZE`` with "the whole window is client area".
+        The style bits are left alone, so Windows still treats the window as
+        resizable and snappable; only the drawn frame goes away. WinForms'
+        ``WndProc`` cannot be overridden from Python.NET (its ``ref Message``
+        parameter is unsupported), hence subclassing through ``comctl32``.
+        """
+        import ctypes
+        from ctypes import wintypes
+
+        wm_nccalcsize = 0x0083
+
+        comctl32 = ctypes.WinDLL('comctl32', use_last_error=True)
+
+        subclass_proc = ctypes.WINFUNCTYPE(
+            wintypes.LPARAM,
+            wintypes.HWND,
+            ctypes.c_uint,
+            wintypes.WPARAM,
+            wintypes.LPARAM,
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+        )
+        comctl32.SetWindowSubclass.argtypes = (
+            wintypes.HWND,
+            subclass_proc,
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+        )
+        comctl32.SetWindowSubclass.restype = wintypes.BOOL
+        comctl32.DefSubclassProc.argtypes = (
+            wintypes.HWND,
+            ctypes.c_uint,
+            wintypes.WPARAM,
+            wintypes.LPARAM,
+        )
+        comctl32.DefSubclassProc.restype = wintypes.LPARAM
+
+        def handle_message(hwnd, message, wparam, lparam, _subclass_id, _ref_data):
+            # wparam TRUE means "recalculate the client area"; returning zero
+            # without filling in NCCALCSIZE_PARAMS makes client == window.
+            if message == wm_nccalcsize and wparam:
+                return 0
+            return comctl32.DefSubclassProc(hwnd, message, wparam, lparam)
+
+        self._native_subclass_proc = subclass_proc(handle_message)
+        hwnd = wintypes.HWND(native.Handle.ToInt64())
+        ctypes.set_last_error(0)
+        if not comctl32.SetWindowSubclass(hwnd, self._native_subclass_proc, 1, 0):
+            raise ctypes.WinError(ctypes.get_last_error())
 
     @staticmethod
     def _enable_native_snap(native):
@@ -4604,24 +4670,18 @@ class WebviewAPI:
         WinForms treats ``MaximizedBounds.X/Y`` as offsets from the current
         monitor, rather than virtual-desktop coordinates. Supplying
         ``WorkingArea`` directly therefore applies a negative monitor position
-        twice and can move the window entirely off-screen. The snap-enabling
-        sizing frame must also sit just outside that work area; otherwise its
-        non-client pixels become a visible border around the maximized client.
+        twice and can move the window entirely off-screen. There is no sizing
+        frame to account for: the client area covers the whole window (see
+        ``_suppress_non_client_frame``), so the work area is the whole answer.
         """
         screen = winforms.Screen.FromHandle(native.Handle)
         work_area = screen.WorkingArea
         screen_bounds = screen.Bounds
-        window_bounds = native.Bounds
-        client_bounds = native.RectangleToScreen(native.ClientRectangle)
-        frame_left = max(0, client_bounds.Left - window_bounds.Left)
-        frame_top = max(0, client_bounds.Top - window_bounds.Top)
-        frame_right = max(0, window_bounds.Right - client_bounds.Right)
-        frame_bottom = max(0, window_bounds.Bottom - client_bounds.Bottom)
         native.MaximizedBounds = drawing.Rectangle(
-            work_area.X - screen_bounds.X - frame_left,
-            work_area.Y - screen_bounds.Y - frame_top,
-            work_area.Width + frame_left + frame_right,
-            work_area.Height + frame_top + frame_bottom,
+            work_area.X - screen_bounds.X,
+            work_area.Y - screen_bounds.Y,
+            work_area.Width,
+            work_area.Height,
         )
 
     def resize_window(self, width, height, direction):
