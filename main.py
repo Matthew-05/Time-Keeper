@@ -25,7 +25,31 @@ _toast_uri = next(
 if _toast_uri:
     import ipc
 
-    sys.exit(0 if ipc.forward_uri(_toast_uri) else 1)
+    if ipc.forward_uri(_toast_uri):
+        sys.exit(0)
+
+    # The copy that raised the toast is gone. "Open Time Keeper" is the one
+    # action that still means something from a toast left in the Action Center;
+    # the other two are about a reminder that no longer exists. Fall through and
+    # start normally — the single-instance check below defers to a copy that
+    # appeared in the meantime, or opens the window this click was asking for.
+    import notifications
+
+    if notifications.parse_action(_toast_uri) != 'open':
+        sys.exit(1)
+
+# A second launch defers to the one already open: raise its window and get out
+# of the way. This lives up here with the toast handling, before telemetry,
+# the database and the updater check, so a deferred launch has no side effects
+# of its own. The mutex is what closes the double-click race where both copies
+# see no published port and both start; the focus request is what makes the
+# second launch feel like it did something.
+if __name__ == '__main__':
+    import ipc
+
+    if not ipc.claim_single_instance():
+        ipc.focus_running_instance()
+        sys.exit(0)
 
 from env_config import load_env_file
 from usage_logger import UsageLogger
@@ -4380,7 +4404,9 @@ def focus_window():
     """Bring the app window to the front — the "Open Time Keeper" toast button.
 
     Restoring is the important half: the usual reason someone clicks this is
-    that the window is minimised behind whatever they were actually doing. The
+    that the window is minimised behind whatever they were actually doing. Only
+    a minimised window is restored, because pywebview's ``restore`` sets the
+    form to ``Normal`` outright and would also shrink a maximized window. The
     on_top flick is a nudge past Windows' foreground-lock, which otherwise
     flashes the taskbar button instead of raising the window; it's set back
     immediately so the app doesn't become permanently sticky.
@@ -4390,7 +4416,7 @@ def focus_window():
 
     window = webview.windows[0]
     try:
-        window.restore()
+        _restore_minimized(window)
         window.show()
         try:
             window.on_top = True
@@ -4402,6 +4428,44 @@ def focus_window():
     except Exception as exc:
         logger.warning(f'Could not focus the window: {exc}')
         return False
+
+
+def _restore_minimized(window):
+    """Un-minimise without also un-maximising.
+
+    pywebview's ``restore`` sets the form's state to ``Normal`` outright, so
+    using it unconditionally would shrink a maximized window that was merely
+    behind another one.
+    """
+    if sys.platform != 'win32':
+        window.restore()
+        return
+
+    try:
+        import System.Windows.Forms as WinForms
+        from System import Action
+
+        native = window.native
+
+        def restore():
+            if native.WindowState == WinForms.FormWindowState.Minimized:
+                native.WindowState = WinForms.FormWindowState.Normal
+
+        native.Invoke(Action(restore))
+    except Exception:
+        # The handle isn't up yet, which also means nothing is maximized.
+        window.restore()
+
+
+@app.route('/api/window/focus', methods=['POST'])
+def api_window_focus():
+    """Raise the app window — the second-launch handoff.
+
+    A second copy of the program asks the running one to come forward and then
+    exits. The response body matters less than the status: any 200 tells the
+    caller that this process owns the app, so it should stay out of the way.
+    """
+    return jsonify({'focused': focus_window()})
 
 
 def start_reminders():
