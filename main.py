@@ -4403,58 +4403,69 @@ def create_window():
 def focus_window():
     """Bring the app window to the front — the "Open Time Keeper" toast button.
 
-    Restoring is the important half: the usual reason someone clicks this is
-    that the window is minimised behind whatever they were actually doing. Only
-    a minimised window is restored, because pywebview's ``restore`` sets the
-    form to ``Normal`` outright and would also shrink a maximized window. The
-    on_top flick is a nudge past Windows' foreground-lock, which otherwise
-    flashes the taskbar button instead of raising the window; it's set back
-    immediately so the app doesn't become permanently sticky.
+    Deliberately all Win32 through ctypes. The obvious version — pywebview's
+    ``restore``/``show``, or a ``Control.Invoke`` — deadlocks when it runs on a
+    request thread: those marshal a Python delegate onto the UI thread, and the
+    UI thread needs the GIL this thread is holding while it waits. ctypes
+    releases the GIL around each call, so the UI thread can run while this one
+    waits for it.
+
+    Only a minimised window is restored; a maximized one must keep its size.
+    The topmost flick is a nudge past Windows' foreground lock, which otherwise
+    just flashes the taskbar button; it's undone immediately so the app doesn't
+    become permanently sticky.
     """
     if not webview.windows:
         return False
 
     window = webview.windows[0]
-    try:
-        _restore_minimized(window)
-        window.show()
+    if sys.platform != 'win32':
         try:
-            window.on_top = True
-            window.on_top = False
-        except Exception:
-            # Not supported on every pywebview backend; the restore still ran.
-            pass
+            window.restore()
+            window.show()
+            return True
+        except Exception as exc:
+            logger.warning(f'Could not focus the window: {exc}')
+            return False
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.WinDLL('user32', use_last_error=True)
+        user32.IsIconic.argtypes = (wintypes.HWND,)
+        user32.IsIconic.restype = wintypes.BOOL
+        user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
+        user32.ShowWindow.restype = wintypes.BOOL
+        user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
+        user32.SetForegroundWindow.restype = wintypes.BOOL
+        user32.SetWindowPos.argtypes = (
+            wintypes.HWND,
+            wintypes.HWND,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            wintypes.UINT,
+        )
+        user32.SetWindowPos.restype = wintypes.BOOL
+
+        hwnd = wintypes.HWND(window.native.Handle.ToInt64())
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        else:
+            user32.ShowWindow(hwnd, 5)  # SW_SHOW
+
+        user32.SetForegroundWindow(hwnd)
+
+        # Raise past every other window, then drop the sticky flag again.
+        swp_flags = 0x0002 | 0x0001  # SWP_NOMOVE | SWP_NOSIZE
+        user32.SetWindowPos(hwnd, wintypes.HWND(-1), 0, 0, 0, 0, swp_flags)  # TOPMOST
+        user32.SetWindowPos(hwnd, wintypes.HWND(-2), 0, 0, 0, 0, swp_flags)  # NOTOPMOST
         return True
     except Exception as exc:
         logger.warning(f'Could not focus the window: {exc}')
         return False
-
-
-def _restore_minimized(window):
-    """Un-minimise without also un-maximising.
-
-    pywebview's ``restore`` sets the form's state to ``Normal`` outright, so
-    using it unconditionally would shrink a maximized window that was merely
-    behind another one.
-    """
-    if sys.platform != 'win32':
-        window.restore()
-        return
-
-    try:
-        import System.Windows.Forms as WinForms
-        from System import Action
-
-        native = window.native
-
-        def restore():
-            if native.WindowState == WinForms.FormWindowState.Minimized:
-                native.WindowState = WinForms.FormWindowState.Normal
-
-        native.Invoke(Action(restore))
-    except Exception:
-        # The handle isn't up yet, which also means nothing is maximized.
-        window.restore()
 
 
 @app.route('/api/window/focus', methods=['POST'])

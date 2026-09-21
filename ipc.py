@@ -102,12 +102,38 @@ def read_port():
     return port if 1 <= port <= 65535 else None
 
 
+def _allow_foreground_change():
+    """Let the instance we're about to reach take the foreground.
+
+    Windows only lets the foreground process move focus, which a background
+    instance isn't. This process *was* just launched by the user — a double
+    click, or a toast button — so it can hand that right over. The grant lasts
+    as long as this process lives, which is why the POST below stays
+    synchronous: the other copy has to be allowed while it calls
+    ``SetForegroundWindow``.
+    """
+    if sys.platform != 'win32':
+        return
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.WinDLL('user32', use_last_error=True)
+        user32.AllowSetForegroundWindow.argtypes = (wintypes.DWORD,)
+        user32.AllowSetForegroundWindow.restype = wintypes.BOOL
+        user32.AllowSetForegroundWindow(0xFFFFFFFF)  # ASFW_ANY
+    except Exception as exc:
+        logger.debug(f'Could not hand over the foreground right: {exc}')
+
+
 def _post(path, payload=None):
     """POST to the running instance. None if there isn't a usable one."""
     port = read_port()
     if port is None:
         return None
 
+    _allow_foreground_change()
     try:
         return httpx.post(
             f'http://127.0.0.1:{port}{path}',
