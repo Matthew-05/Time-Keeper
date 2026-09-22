@@ -103,6 +103,10 @@ def send(title, message, actions=(), silent=False):
     `actions` is a sequence of ``(label, uri)`` pairs. Windows shows at most
     five buttons and truncates long labels, so keep them short.
 
+    Clicking the toast body — not just a button — opens the app, which is what
+    a reminder about the running task should do. It takes the same protocol
+    path as the Open button, so it works whether or not the app is still up.
+
     Never raises — the caller is usually a background thread whose death would
     silently stop all future reminders.
     """
@@ -117,6 +121,7 @@ def send(title, message, actions=(), silent=False):
             msg=message,
             icon=_icon_path or '',
             duration='short',
+            launch=f'{PROTOCOL}://open',
         )
         for label, uri in actions:
             toast.add_actions(label=label, launch=uri)
