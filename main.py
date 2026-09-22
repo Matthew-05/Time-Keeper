@@ -22,6 +22,9 @@ DEVTOOLS = DEV_MODE or os.environ.get('TIMEKEEPER_DEVTOOLS') == '1'
 _toast_uri = next(
     (arg for arg in sys.argv[1:] if arg.lower().startswith('timekeeper:')), None
 )
+# True when this launch is the window a toast's Open button asked for, so the
+# window comes forward once it exists instead of opening behind everything.
+_opened_from_toast = False
 if _toast_uri:
     import ipc
 
@@ -37,6 +40,7 @@ if _toast_uri:
 
     if notifications.parse_action(_toast_uri) != 'open':
         sys.exit(1)
+    _opened_from_toast = True
 
 # A second launch defers to the one already open: raise its window and get out
 # of the way. This lives up here with the toast handling, before telemetry,
@@ -4397,7 +4401,78 @@ def create_window():
     window.events.before_show += window_api._configure_native_window
     window.events.maximized += window_api._handle_maximized
     window.events.restored += window_api._handle_restored
+    window.events.loaded += _nudge_first_paint
+    if _opened_from_toast:
+        window.events.shown += focus_window
     return window
+
+
+_first_paint_nudged = False
+
+
+def _nudge_first_paint():
+    """Schedule one repaint nudge after the first page load.
+
+    This runs on the UI thread from the ``loaded`` event, so it defers to a
+    timer: the nudge resizes the window, and resizing from inside WebView2's
+    own navigation event is asking for reentrancy.
+    """
+    global _first_paint_nudged
+    if _first_paint_nudged:
+        return
+    _first_paint_nudged = True
+    threading.Timer(0.25, _nudge_window_repaint).start()
+
+
+def _nudge_window_repaint():
+    """Force WebView2 to re-composite by resizing the window by one pixel.
+
+    WebView2 can come up blank when a window is shown while it isn't the
+    foreground: the page is loaded and the window exists, but the surface never
+    paints, and only a resize brings it back — which is exactly why minimising
+    and maximising fixes it by hand. One pixel, undone in the same breath, is
+    invisible and enough.
+    """
+    if sys.platform != 'win32' or not webview.windows:
+        return
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.WinDLL('user32', use_last_error=True)
+        user32.IsZoomed.argtypes = (wintypes.HWND,)
+        user32.IsZoomed.restype = wintypes.BOOL
+        user32.GetWindowRect.argtypes = (
+            wintypes.HWND,
+            ctypes.POINTER(wintypes.RECT),
+        )
+        user32.SetWindowPos.argtypes = (
+            wintypes.HWND,
+            wintypes.HWND,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            wintypes.UINT,
+        )
+        user32.SetWindowPos.restype = wintypes.BOOL
+
+        hwnd = wintypes.HWND(webview.windows[0].native.Handle.ToInt64())
+        # Resizing a maximized window would un-maximise it.
+        if user32.IsZoomed(hwnd):
+            return
+
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return
+        width = rect.right - rect.left
+        height = rect.bottom - rect.top
+        flags = 0x0002 | 0x0004 | 0x0010  # SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+        user32.SetWindowPos(hwnd, None, 0, 0, width, height + 1, flags)
+        user32.SetWindowPos(hwnd, None, 0, 0, width, height, flags)
+    except Exception as exc:
+        logger.warning(f'Could not nudge the window repaint: {exc}')
 
 
 def focus_window():
@@ -4462,6 +4537,10 @@ def focus_window():
         swp_flags = 0x0002 | 0x0001  # SWP_NOMOVE | SWP_NOSIZE
         user32.SetWindowPos(hwnd, wintypes.HWND(-1), 0, 0, 0, 0, swp_flags)  # TOPMOST
         user32.SetWindowPos(hwnd, wintypes.HWND(-2), 0, 0, 0, 0, swp_flags)  # NOTOPMOST
+
+        # Raising a window that was never composited can leave it blank, so
+        # hand it the same one-pixel repaint the first page load gets.
+        _nudge_window_repaint()
         return True
     except Exception as exc:
         logger.warning(f'Could not focus the window: {exc}')
